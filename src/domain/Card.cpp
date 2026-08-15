@@ -118,4 +118,3 @@ std::string_view ToString(CardType type) noexcept {
 }
 
 } // namespace desto::domain
-

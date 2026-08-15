@@ -40,4 +40,3 @@ int main() {
     assert(ToString(CardType::Reference) == "reference");
     return 0;
 }
-

@@ -8,4 +8,3 @@ target_link_libraries(desto_domain_tests
 )
 
 add_test(NAME desto_domain_tests COMMAND desto_domain_tests)
-

@@ -9,4 +9,3 @@ target_include_directories(desto_domain
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
-

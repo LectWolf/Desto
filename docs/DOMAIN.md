@@ -71,4 +71,3 @@ Card
 ## Naming
 
 内部代码统一使用 `Card`，避免继续使用 `Box`、`Drawer` 或 `Container` 混称。用户可见名称、类型图标和描述属于 Presentation 与本地化层，不反向决定领域类型名。
-
