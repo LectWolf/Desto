@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(DESTO_BUILD_TESTS "Build Desto tests" ON)
 option(DESTO_BUILD_BENCHMARKS "Build headless performance benchmarks" ON)
+option(DESTO_BUILD_PROTOTYPES "Build native UI prototypes" ON)
 
 add_subdirectory(src)
 
@@ -18,4 +19,8 @@ endif()
 
 if(DESTO_BUILD_BENCHMARKS)
     add_subdirectory(benchmarks)
+endif()
+
+if(DESTO_BUILD_PROTOTYPES AND WIN32)
+    add_subdirectory(prototypes)
 endif()

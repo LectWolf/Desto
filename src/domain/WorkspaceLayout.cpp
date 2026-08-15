@@ -29,9 +29,11 @@ void ValidateDisplays(std::span<const DisplaySnapshot> displays) {
     std::size_t primaryCount = 0;
     ids.reserve(displays.size());
     for (const auto& display : displays) {
-        if (display.id.empty() || !std::isfinite(display.workAreaWidth)
-            || !std::isfinite(display.workAreaHeight)
-            || display.workAreaWidth <= 0 || display.workAreaHeight <= 0) {
+        if (display.id.empty() || !std::isfinite(display.workAreaLeft)
+            || !std::isfinite(display.workAreaTop) || !std::isfinite(display.workAreaWidth)
+            || !std::isfinite(display.workAreaHeight) || !std::isfinite(display.effectiveDpi)
+            || display.workAreaWidth <= 0 || display.workAreaHeight <= 0
+            || display.effectiveDpi <= 0) {
             throw std::invalid_argument("Display snapshot must have an id and positive finite work area.");
         }
         ids.push_back(display.id);

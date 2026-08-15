@@ -21,8 +21,9 @@ bool SameDisplays(
     for (std::size_t index = 0; index < left.size(); ++index) {
         const auto& a = left[index];
         const auto& b = right[index];
-        if (a.id != b.id || a.workAreaWidth != b.workAreaWidth
-            || a.workAreaHeight != b.workAreaHeight || a.primary != b.primary) {
+        if (a.id != b.id || a.workAreaLeft != b.workAreaLeft || a.workAreaTop != b.workAreaTop
+            || a.workAreaWidth != b.workAreaWidth || a.workAreaHeight != b.workAreaHeight
+            || a.effectiveDpi != b.effectiveDpi || a.primary != b.primary) {
             return false;
         }
     }

@@ -66,7 +66,7 @@
 
 ## UI And Desktop Host
 
-### 14. Native UI prototype
+### 14. Native UI prototype [x]
 
 用 Win32/DirectComposition 或同等原生路线做最小可见原型，消费真实 Projection，验证透明窗口、同步显隐、多 DPI 和桌面层级。退出条件是原型可重复展示多个 Card，且有性能数据。
 

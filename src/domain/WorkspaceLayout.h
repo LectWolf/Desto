@@ -51,8 +51,11 @@ struct CardPlacement {
 
 struct DisplaySnapshot {
     DisplayId id;
+    double workAreaLeft = 0;
+    double workAreaTop = 0;
     double workAreaWidth = 0;
     double workAreaHeight = 0;
+    double effectiveDpi = 96;
     bool primary = false;
 };
 

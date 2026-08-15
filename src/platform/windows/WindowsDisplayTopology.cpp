@@ -173,8 +173,11 @@ std::vector<domain::DisplaySnapshot> WindowsDisplayTopology::snapshot() const {
         const auto heightPixels = monitor.workArea.bottom - monitor.workArea.top;
         result.push_back({
             .id = WideToUtf8(target->devicePath),
+            .workAreaLeft = static_cast<double>(monitor.workArea.left) * 96.0 / xDpi,
+            .workAreaTop = static_cast<double>(monitor.workArea.top) * 96.0 / yDpi,
             .workAreaWidth = static_cast<double>(widthPixels) * 96.0 / xDpi,
             .workAreaHeight = static_cast<double>(heightPixels) * 96.0 / yDpi,
+            .effectiveDpi = static_cast<double>(xDpi),
             .primary = monitor.primary,
         });
     }
