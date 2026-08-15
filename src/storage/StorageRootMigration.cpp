@@ -121,10 +121,10 @@ StorageRootMigrationResult StorageRootMigrationService::migrate(
     }
 
     try {
-        configStore.save({
-            .schemaVersion = schemaVersion,
-            .storageRoot = migrationPlan.targetRoot,
-        });
+        auto config = configStore.load();
+        config.schemaVersion = schemaVersion;
+        config.storageRoot = migrationPlan.targetRoot;
+        configStore.save(config);
         return result;
     } catch (const std::exception& exception) {
         result.succeeded = false;

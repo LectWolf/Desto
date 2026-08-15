@@ -55,6 +55,21 @@ struct TodoItem {
     bool completed = false;
 };
 
+// Persistence-neutral value representation used at the storage seam.
+struct CardSnapshot {
+    CardId id;
+    CardType type = CardType::Todo;
+    bool visible = true;
+    bool expanded = true;
+    CardChromePreferences chrome;
+    CardAppearancePreferences appearance;
+    std::filesystem::path applicationStoragePath;
+    std::filesystem::path mappingSourceRoot;
+    std::vector<FileReference> mappingReferences;
+    bool mappingAllowsSourceMutation = true;
+    std::vector<TodoItem> todoItems;
+};
+
 class Card {
 public:
     virtual ~Card() = default;

@@ -1,7 +1,9 @@
 #pragma once
 
 #include <filesystem>
+#include <vector>
 
+#include "Card.h"
 #include "WorkspaceLayout.h"
 
 namespace desto::storage {
@@ -11,6 +13,7 @@ struct ApplicationConfig {
 
     int schemaVersion = CurrentSchemaVersion;
     std::filesystem::path storageRoot;
+    std::vector<domain::CardSnapshot> cards;
     domain::WorkspaceLayout workspace;
 };
 

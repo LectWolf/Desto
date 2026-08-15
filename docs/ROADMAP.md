@@ -48,7 +48,7 @@
 
 建立应用状态、命令、状态变更结果和事件分发；把 UI、文件系统和平台副作用放到外围 Adapter。退出条件是无 UI 测试可以驱动 Card/Workspace 的完整状态变更。
 
-### 10. Complete Card/Workspace persistence
+### 10. Complete Card/Workspace persistence [x]
 
 把 Card 内容、实例偏好、Placement、默认值和实例覆盖写入同一可恢复快照。退出条件是创建、修改、删除、重启恢复均不丢失身份和用户明确设置。
 

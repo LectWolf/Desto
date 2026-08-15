@@ -2,9 +2,11 @@
 
 #include <chrono>
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <format>
 #include <stdexcept>
+#include <unordered_set>
 
 #include <nlohmann/json.hpp>
 
@@ -24,6 +26,19 @@ std::string ToUtf8(const std::filesystem::path& path) {
 
 std::filesystem::path FromUtf8(const std::string& value) {
     return std::filesystem::u8path(value);
+}
+
+domain::CardType ParseCardType(const std::string& value) {
+    if (value == "application") {
+        return domain::CardType::Application;
+    }
+    if (value == "mapping") {
+        return domain::CardType::Mapping;
+    }
+    if (value == "todo") {
+        return domain::CardType::Todo;
+    }
+    throw std::runtime_error("Configuration card type is invalid.");
 }
 
 Json ReadDocument(const std::filesystem::path& path) {
@@ -131,6 +146,111 @@ ApplicationConfig JsonConfigStore::load() const {
     if (!result.storageRoot.empty() && !result.storageRoot.is_absolute()) {
         throw std::runtime_error("Configuration storage root must be absolute.");
     }
+    if (document.contains("cards")) {
+        const auto& cards = document.at("cards");
+        if (!cards.is_array()) {
+            throw std::runtime_error("Configuration cards must be an array.");
+        }
+        std::unordered_set<domain::CardId> cardIds;
+        for (const auto& value : cards) {
+            if (!value.is_object() || !value.contains("id") || !value.at("id").is_string()
+                || !value.contains("type") || !value.at("type").is_string()) {
+                throw std::runtime_error("Configuration card is missing identity fields.");
+            }
+            domain::CardSnapshot card{
+                .id = value.at("id").get<domain::CardId>(),
+                .type = ParseCardType(value.at("type").get<std::string>()),
+                .visible = value.value("visible", true),
+                .expanded = value.value("expanded", true),
+            };
+            if (card.id.empty()) {
+                throw std::runtime_error("Configuration card id must not be empty.");
+            }
+            if (!cardIds.insert(card.id).second) {
+                throw std::runtime_error("Configuration card ids must be unique.");
+            }
+            if (value.contains("chrome")) {
+                const auto& chrome = value.at("chrome");
+                if (!chrome.is_object()) {
+                    throw std::runtime_error("Configuration card chrome is invalid.");
+                }
+                card.chrome.showCollapseControl = chrome.value("showCollapseControl", true);
+                card.chrome.showCloseControl = chrome.value("showCloseControl", true);
+                card.chrome.showTitle = chrome.value("showTitle", true);
+            }
+            if (value.contains("appearance")) {
+                const auto& appearance = value.at("appearance");
+                if (!appearance.is_object()) {
+                    throw std::runtime_error("Configuration card appearance is invalid.");
+                }
+                card.appearance.preset = appearance.value("preset", std::string{"default"});
+                card.appearance.opacity = appearance.value("opacity", 1.0);
+            }
+            switch (card.type) {
+            case domain::CardType::Application: {
+                const auto& application = value.at("application");
+                if (!application.is_object() || !application.contains("storagePath")
+                    || !application.at("storagePath").is_string()) {
+                    throw std::runtime_error("Configuration application card is invalid.");
+                }
+                card.applicationStoragePath = FromUtf8(application.at("storagePath").get<std::string>());
+                break;
+            }
+            case domain::CardType::Mapping: {
+                const auto& mapping = value.at("mapping");
+                if (!mapping.is_object()) {
+                    throw std::runtime_error("Configuration mapping card is invalid.");
+                }
+                card.mappingAllowsSourceMutation = mapping.value("allowsSourceMutation", true);
+                if (mapping.contains("sourceRoot")) {
+                    if (!mapping.at("sourceRoot").is_string()) {
+                        throw std::runtime_error("Configuration mapping sourceRoot is invalid.");
+                    }
+                    card.mappingSourceRoot = FromUtf8(mapping.at("sourceRoot").get<std::string>());
+                }
+                if (mapping.contains("references")) {
+                    if (!mapping.at("references").is_array()) {
+                        throw std::runtime_error("Configuration mapping references are invalid.");
+                    }
+                    for (const auto& reference : mapping.at("references")) {
+                        if (!reference.is_object() || !reference.contains("id")
+                            || !reference.at("id").is_string() || !reference.contains("path")
+                            || !reference.at("path").is_string()) {
+                            throw std::runtime_error("Configuration mapping reference is invalid.");
+                        }
+                        card.mappingReferences.push_back({
+                            .id = reference.at("id").get<std::string>(),
+                            .path = FromUtf8(reference.at("path").get<std::string>()),
+                        });
+                    }
+                }
+                if (!card.mappingSourceRoot.empty() && !card.mappingReferences.empty()) {
+                    throw std::runtime_error("Configuration mapping cannot contain a folder and references.");
+                }
+                break;
+            }
+            case domain::CardType::Todo: {
+                const auto& todo = value.at("todo");
+                if (!todo.is_object() || !todo.contains("items") || !todo.at("items").is_array()) {
+                    throw std::runtime_error("Configuration todo card is invalid.");
+                }
+                for (const auto& item : todo.at("items")) {
+                    if (!item.is_object() || !item.contains("id") || !item.at("id").is_string()
+                        || !item.contains("title") || !item.at("title").is_string()) {
+                        throw std::runtime_error("Configuration todo item is invalid.");
+                    }
+                    card.todoItems.push_back({
+                        .id = item.at("id").get<std::string>(),
+                        .title = item.at("title").get<std::string>(),
+                        .completed = item.value("completed", false),
+                    });
+                }
+                break;
+            }
+            }
+            result.cards.push_back(std::move(card));
+        }
+    }
     if (document.contains("workspace")) {
         const auto& workspace = document.at("workspace");
         if (!workspace.is_object() || !workspace.contains("placements")
@@ -185,6 +305,40 @@ void JsonConfigStore::save(const ApplicationConfig& config) const {
     if (config.storageRoot.empty() || !config.storageRoot.is_absolute()) {
         throw std::invalid_argument("Configuration storage root must be absolute and non-empty.");
     }
+    std::unordered_set<domain::CardId> cardIds;
+    for (const auto& card : config.cards) {
+        if (card.id.empty() || !cardIds.insert(card.id).second) {
+            throw std::invalid_argument("Configuration card ids must be unique and non-empty.");
+        }
+        if (!std::isfinite(card.appearance.opacity)
+            || card.appearance.opacity < 0 || card.appearance.opacity > 1) {
+            throw std::invalid_argument("Configuration card opacity must be between 0 and 1.");
+        }
+        switch (card.type) {
+        case domain::CardType::Application:
+            if (card.applicationStoragePath.empty() || card.applicationStoragePath.is_absolute()) {
+                throw std::invalid_argument("Application card storage path must be relative and non-empty.");
+            }
+            break;
+        case domain::CardType::Mapping:
+            if (!card.mappingSourceRoot.empty() && !card.mappingReferences.empty()) {
+                throw std::invalid_argument("Mapping card cannot contain a folder and references.");
+            }
+            for (const auto& reference : card.mappingReferences) {
+                if (reference.id.empty() || reference.path.empty()) {
+                    throw std::invalid_argument("Mapping reference must have an id and path.");
+                }
+            }
+            break;
+        case domain::CardType::Todo:
+            for (const auto& item : card.todoItems) {
+                if (item.id.empty() || item.title.empty()) {
+                    throw std::invalid_argument("Todo item must have an id and title.");
+                }
+            }
+            break;
+        }
+    }
 
     auto document = ReadDocument(configPath_);
     if (!document.is_object()) {
@@ -192,6 +346,86 @@ void JsonConfigStore::save(const ApplicationConfig& config) const {
     }
     document["schemaVersion"] = config.schemaVersion;
     document["storage"]["root"] = ToUtf8(config.storageRoot);
+
+    auto& cards = document["cards"];
+    if (!cards.is_array()) {
+        cards = Json::array();
+    }
+    Json existingCardsById = Json::object();
+    for (const auto& value : cards) {
+        if (value.is_object() && value.contains("id") && value.at("id").is_string()) {
+            existingCardsById[value.at("id").get<std::string>()] = value;
+        }
+    }
+    cards = Json::array();
+    auto cardSnapshots = config.cards;
+    std::sort(
+        cardSnapshots.begin(),
+        cardSnapshots.end(),
+        [](const domain::CardSnapshot& left, const domain::CardSnapshot& right) {
+            return left.id < right.id;
+        });
+    for (const auto& card : cardSnapshots) {
+        if (card.id.empty()) {
+            throw std::invalid_argument("Configuration card id must not be empty.");
+        }
+        auto value = existingCardsById.contains(card.id)
+            ? existingCardsById.at(card.id)
+            : Json::object();
+        value["id"] = card.id;
+        value["type"] = domain::ToString(card.type);
+        value["visible"] = card.visible;
+        value["expanded"] = card.expanded;
+        value["chrome"] = {
+            {"showCollapseControl", card.chrome.showCollapseControl},
+            {"showCloseControl", card.chrome.showCloseControl},
+            {"showTitle", card.chrome.showTitle},
+        };
+        value["appearance"] = {
+            {"preset", card.appearance.preset},
+            {"opacity", card.appearance.opacity},
+        };
+        switch (card.type) {
+        case domain::CardType::Application:
+            value.erase("mapping");
+            value.erase("todo");
+            value["application"]["storagePath"] = ToUtf8(card.applicationStoragePath);
+            break;
+        case domain::CardType::Mapping: {
+            value.erase("application");
+            value.erase("todo");
+            auto& mapping = value["mapping"];
+            mapping["allowsSourceMutation"] = card.mappingAllowsSourceMutation;
+            if (!card.mappingSourceRoot.empty()) {
+                mapping["sourceRoot"] = ToUtf8(card.mappingSourceRoot);
+                mapping.erase("references");
+            } else {
+                mapping.erase("sourceRoot");
+                mapping["references"] = Json::array();
+                for (const auto& reference : card.mappingReferences) {
+                    mapping["references"].push_back({
+                        {"id", reference.id},
+                        {"path", ToUtf8(reference.path)},
+                    });
+                }
+            }
+            break;
+        }
+        case domain::CardType::Todo:
+            value.erase("application");
+            value.erase("mapping");
+            value["todo"]["items"] = Json::array();
+            for (const auto& item : card.todoItems) {
+                value["todo"]["items"].push_back({
+                    {"id", item.id},
+                    {"title", item.title},
+                    {"completed", item.completed},
+                });
+            }
+            break;
+        }
+        cards.push_back(std::move(value));
+    }
 
     auto& placements = document["workspace"]["placements"];
     if (!placements.is_array()) {

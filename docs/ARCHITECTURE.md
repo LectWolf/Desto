@@ -119,6 +119,8 @@ RequestCardDeletion
 
 提交前 Card、Placement 和 Projection 均保留；错误或过期 token 不能删除状态。应用 Card 的文件退回桌面由外围文件事务完成，运行时只在成功后提交内存状态。
 
+持久化通过 `CardSnapshot` 值对象跨越 Storage seam。快照包含 Card 的通用状态、实例 Chrome/外观偏好和类型专属内容；`WorkspaceLayout` 作为同一配置快照的一部分保存 Placement。运行时恢复先在临时状态中构造并校验全部 Card 与 Placement，成功后一次替换，失败不会污染当前状态。
+
 ## Multi-display Foundation
 
 - 显示器使用可恢复的稳定身份，不以枚举顺序作为持久化主键。

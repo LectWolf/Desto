@@ -131,6 +131,11 @@ public:
     [[nodiscard]] std::uint64_t revision() const noexcept { return revision_; }
     [[nodiscard]] const domain::Card* findCard(const domain::CardId& cardId) const noexcept;
     [[nodiscard]] std::vector<const domain::Card*> cards() const;
+    [[nodiscard]] std::vector<domain::CardSnapshot> cardSnapshots() const;
+    // Replaces persistent state atomically; current display topology is retained.
+    void restore(
+        const std::vector<domain::CardSnapshot>& cards,
+        const domain::WorkspaceLayout& workspace);
     [[nodiscard]] const domain::WorkspaceLayout& workspace() const noexcept { return workspace_; }
     [[nodiscard]] const std::vector<domain::DisplaySnapshot>& displays() const noexcept {
         return displays_;

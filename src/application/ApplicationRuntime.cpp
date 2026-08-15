@@ -49,6 +49,58 @@ bool SameProjections(
     return true;
 }
 
+std::unique_ptr<domain::Card> RestoreCard(const domain::CardSnapshot& snapshot) {
+    if (snapshot.id.empty()) {
+        throw std::invalid_argument("Card snapshot id must not be empty.");
+    }
+
+    std::unique_ptr<domain::Card> card;
+    switch (snapshot.type) {
+    case domain::CardType::Application:
+        card = std::make_unique<domain::ApplicationCard>(
+            snapshot.id,
+            snapshot.applicationStoragePath);
+        break;
+    case domain::CardType::Mapping: {
+        if (!snapshot.mappingSourceRoot.empty() && !snapshot.mappingReferences.empty()) {
+            throw std::invalid_argument("Mapping snapshot cannot contain a folder and references.");
+        }
+        for (const auto& reference : snapshot.mappingReferences) {
+            if (reference.id.empty() || reference.path.empty()) {
+                throw std::invalid_argument("Mapping reference must have an id and path.");
+            }
+        }
+        auto mapping = std::make_unique<domain::MappingCard>(snapshot.id);
+        if (!snapshot.mappingSourceRoot.empty()) {
+            mapping->setFolderSource(snapshot.mappingSourceRoot);
+        } else {
+            mapping->setReferences(snapshot.mappingReferences);
+        }
+        mapping->setAllowsSourceMutation(snapshot.mappingAllowsSourceMutation);
+        card = std::move(mapping);
+        break;
+    }
+    case domain::CardType::Todo:
+        for (const auto& item : snapshot.todoItems) {
+            if (item.id.empty() || item.title.empty()) {
+                throw std::invalid_argument("Todo item must have an id and title.");
+            }
+        }
+        {
+            auto todo = std::make_unique<domain::TodoCard>(snapshot.id);
+            todo->setItems(snapshot.todoItems);
+            card = std::move(todo);
+        }
+        break;
+    }
+
+    card->setVisible(snapshot.visible);
+    card->setExpanded(snapshot.expanded);
+    card->setChrome(snapshot.chrome);
+    card->setAppearance(snapshot.appearance);
+    return card;
+}
+
 } // namespace
 
 CommandResult ApplicationRuntime::execute(const ApplicationCommand& command) {
@@ -80,6 +132,67 @@ std::vector<const domain::Card*> ApplicationRuntime::cards() const {
             return left->id() < right->id();
         });
     return result;
+}
+
+std::vector<domain::CardSnapshot> ApplicationRuntime::cardSnapshots() const {
+    const auto orderedCards = cards();
+    std::vector<domain::CardSnapshot> result;
+    result.reserve(orderedCards.size());
+    for (const auto* card : orderedCards) {
+        domain::CardSnapshot snapshot{
+            .id = card->id(),
+            .type = card->type(),
+            .visible = card->isVisible(),
+            .expanded = card->isExpanded(),
+            .chrome = card->chrome(),
+            .appearance = card->appearance(),
+        };
+        switch (card->type()) {
+        case domain::CardType::Application:
+            snapshot.applicationStoragePath =
+                static_cast<const domain::ApplicationCard*>(card)->relativeStoragePath();
+            break;
+        case domain::CardType::Mapping: {
+            const auto* mapping = static_cast<const domain::MappingCard*>(card);
+            snapshot.mappingSourceRoot = mapping->sourceRoot();
+            snapshot.mappingReferences = mapping->references();
+            snapshot.mappingAllowsSourceMutation = mapping->allowsSourceMutation();
+            break;
+        }
+        case domain::CardType::Todo:
+            snapshot.todoItems = static_cast<const domain::TodoCard*>(card)->items();
+            break;
+        }
+        result.push_back(std::move(snapshot));
+    }
+    return result;
+}
+
+void ApplicationRuntime::restore(
+    const std::vector<domain::CardSnapshot>& cards,
+    const domain::WorkspaceLayout& workspace) {
+    std::unordered_map<domain::CardId, std::unique_ptr<domain::Card>> restoredCards;
+    restoredCards.reserve(cards.size());
+    for (const auto& snapshot : cards) {
+        auto card = RestoreCard(snapshot);
+        const auto [iterator, inserted] = restoredCards.emplace(snapshot.id, std::move(card));
+        if (!inserted) {
+            throw std::invalid_argument("Card snapshot ids must be unique.");
+        }
+    }
+    for (const auto& placement : workspace.placements()) {
+        if (!restoredCards.contains(placement.cardId)) {
+            throw std::invalid_argument("Placement references a missing card.");
+        }
+    }
+
+    auto nextProjections = workspace.project(displays_);
+    cards_ = std::move(restoredCards);
+    workspace_ = workspace;
+    projections_ = std::move(nextProjections);
+    pendingDeletions_.clear();
+    revision_ = 0;
+    nextDeletionToken_ = 1;
 }
 
 std::optional<DeletionRequest> ApplicationRuntime::pendingDeletion(

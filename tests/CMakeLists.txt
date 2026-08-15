@@ -66,6 +66,7 @@ target_include_directories(desto_storage_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DI
 target_link_libraries(desto_storage_tests
     PRIVATE
         desto_storage
+        desto_application
 )
 
 add_test(NAME desto_storage_tests COMMAND desto_storage_tests)
