@@ -1,52 +1,54 @@
 #include "Card.h"
+#include "TestSupport.h"
 
-#include <cassert>
 #include <stdexcept>
 
 using namespace desto::domain;
 
-int main() {
+namespace {
+
+void RunTests() {
     ApplicationCard application("application-1", "cards/application-1");
     MappingCard mapping("mapping-1");
     TodoCard todos("todos-1");
 
-    assert(application.type() == CardType::Application);
-    assert(mapping.type() == CardType::Mapping);
-    assert(todos.type() == CardType::Todo);
-    assert(application.relativeStoragePath() == "cards/application-1");
-    assert(mapping.requiresDeletionConfirmation());
-    assert(application.deletionEffect() == CardDeletionEffect::ReturnManagedItemsToDesktop);
-    assert(mapping.deletionEffect() == CardDeletionEffect::RemoveCardOnly);
-    assert(todos.deletionEffect() == CardDeletionEffect::RemoveCardOnly);
-    assert(application.deletionPreview().requiresConfirmation);
-    assert(mapping.deletionPreview().requiresConfirmation);
-    assert(todos.deletionPreview().requiresConfirmation);
-    assert(mapping.mode() == MappingMode::Empty);
-    assert(mapping.presentsAsFolderMapping());
+    DESTO_CHECK(application.type() == CardType::Application);
+    DESTO_CHECK(mapping.type() == CardType::Mapping);
+    DESTO_CHECK(todos.type() == CardType::Todo);
+    DESTO_CHECK(application.relativeStoragePath() == "cards/application-1");
+    DESTO_CHECK(mapping.requiresDeletionConfirmation());
+    DESTO_CHECK(application.deletionEffect() == CardDeletionEffect::ReturnManagedItemsToDesktop);
+    DESTO_CHECK(mapping.deletionEffect() == CardDeletionEffect::RemoveCardOnly);
+    DESTO_CHECK(todos.deletionEffect() == CardDeletionEffect::RemoveCardOnly);
+    DESTO_CHECK(application.deletionPreview().requiresConfirmation);
+    DESTO_CHECK(mapping.deletionPreview().requiresConfirmation);
+    DESTO_CHECK(todos.deletionPreview().requiresConfirmation);
+    DESTO_CHECK(mapping.mode() == MappingMode::Empty);
+    DESTO_CHECK(mapping.presentsAsFolderMapping());
 
     auto chrome = application.chrome();
     chrome.showCollapseControl = false;
     application.setChrome(chrome);
-    assert(!application.chrome().showCollapseControl);
-    assert(mapping.chrome().showCollapseControl);
+    DESTO_CHECK(!application.chrome().showCollapseControl);
+    DESTO_CHECK(mapping.chrome().showCollapseControl);
 
     application.setAppearance({"compact", 0.8});
-    assert(application.appearance().preset == "compact");
-    assert(application.appearance().opacity == 0.8);
+    DESTO_CHECK(application.appearance().preset == "compact");
+    DESTO_CHECK(application.appearance().opacity == 0.8);
 
     mapping.setFolderSource("C:/Projects");
-    assert(mapping.mode() == MappingMode::Folder);
-    assert(mapping.presentsAsFolderMapping());
-    assert(mapping.allowsSourceMutation());
+    DESTO_CHECK(mapping.mode() == MappingMode::Folder);
+    DESTO_CHECK(mapping.presentsAsFolderMapping());
+    DESTO_CHECK(mapping.allowsSourceMutation());
 
     mapping.setReferences({{"item-1", "C:/Projects/App.exe"}, {"item-2", "C:/Projects/Tool.exe"}});
-    assert(mapping.mode() == MappingMode::References);
-    assert(!mapping.presentsAsFolderMapping());
-    assert(mapping.sourceRoot().empty());
+    DESTO_CHECK(mapping.mode() == MappingMode::References);
+    DESTO_CHECK(!mapping.presentsAsFolderMapping());
+    DESTO_CHECK(mapping.sourceRoot().empty());
 
     mapping.clearSource();
-    assert(mapping.mode() == MappingMode::Empty);
-    assert(mapping.presentsAsFolderMapping());
+    DESTO_CHECK(mapping.mode() == MappingMode::Empty);
+    DESTO_CHECK(mapping.presentsAsFolderMapping());
 
     bool rejected = false;
     try {
@@ -54,7 +56,7 @@ int main() {
     } catch (const std::invalid_argument&) {
         rejected = true;
     }
-    assert(rejected);
+    DESTO_CHECK(rejected);
 
     rejected = false;
     try {
@@ -62,8 +64,13 @@ int main() {
     } catch (const std::invalid_argument&) {
         rejected = true;
     }
-    assert(rejected);
+    DESTO_CHECK(rejected);
 
-    assert(ToString(CardType::Mapping) == "mapping");
-    return 0;
+    DESTO_CHECK(ToString(CardType::Mapping) == "mapping");
+}
+
+} // namespace
+
+int main() {
+    return desto::test::Run(RunTests);
 }

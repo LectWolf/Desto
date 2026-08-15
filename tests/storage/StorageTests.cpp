@@ -2,8 +2,8 @@
 #include "JsonConfigStore.h"
 #include "MappingRegistry.h"
 #include "StorageRootMigration.h"
+#include "TestSupport.h"
 
-#include <cassert>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -23,9 +23,7 @@ std::filesystem::path NewTestRoot() {
     return root;
 }
 
-} // namespace
-
-int main() {
+void RunTests() {
     const auto testRoot = NewTestRoot();
     try {
         const auto storagePath = testRoot / "storage";
@@ -38,7 +36,7 @@ int main() {
         std::ofstream(desktopPath / "Example.lnk") << "existing";
 
         StorageRoot storageRoot(storagePath);
-        assert(storageRoot.resolveCardPath("cards/application-1") == cardPath);
+        DESTO_CHECK(storageRoot.resolveCardPath("cards/application-1") == cardPath);
 
         bool rejected = false;
         try {
@@ -46,14 +44,14 @@ int main() {
         } catch (const std::invalid_argument&) {
             rejected = true;
         }
-        assert(rejected);
+        DESTO_CHECK(rejected);
 
         ApplicationCard application("application-1", "cards/application-1");
         ApplicationCardReturnService returnService(storageRoot);
         const auto plan = returnService.plan(application, desktopPath);
-        assert(plan.preview.requiresConfirmation);
-        assert(plan.moves.size() == 1);
-        assert(plan.moves.front().destination.filename() == "Example (1).lnk");
+        DESTO_CHECK(plan.preview.requiresConfirmation);
+        DESTO_CHECK(plan.moves.size() == 1);
+        DESTO_CHECK(plan.moves.front().destination.filename() == "Example (1).lnk");
 
         rejected = false;
         try {
@@ -61,23 +59,23 @@ int main() {
         } catch (const std::invalid_argument&) {
             rejected = true;
         }
-        assert(rejected);
+        DESTO_CHECK(rejected);
 
         const auto result = returnService.execute(plan, {"application-1"});
-        assert(result.succeeded);
-        assert(std::filesystem::exists(desktopPath / "Example (1).lnk"));
-        assert(!std::filesystem::exists(cardPath / "Example.lnk"));
+        DESTO_CHECK(result.succeeded);
+        DESTO_CHECK(std::filesystem::exists(desktopPath / "Example (1).lnk"));
+        DESTO_CHECK(!std::filesystem::exists(cardPath / "Example.lnk"));
 
         MappingRegistry registry;
-        assert(registry.tryRegister("mapping-1", testRoot / "Projects"));
-        assert(!registry.tryRegister("mapping-2", testRoot / "Projects" / "."));
-        assert(registry.ownerOf(testRoot / "Projects").value() == "mapping-1");
-        assert(registry.tryRegister("mapping-1", testRoot / "OtherProjects"));
-        assert(!registry.ownerOf(testRoot / "Projects").has_value());
-        assert(registry.ownerOf(testRoot / "OtherProjects").value() == "mapping-1");
-        assert(registry.size() == 1);
+        DESTO_CHECK(registry.tryRegister("mapping-1", testRoot / "Projects"));
+        DESTO_CHECK(!registry.tryRegister("mapping-2", testRoot / "Projects" / "."));
+        DESTO_CHECK(registry.ownerOf(testRoot / "Projects").value() == "mapping-1");
+        DESTO_CHECK(registry.tryRegister("mapping-1", testRoot / "OtherProjects"));
+        DESTO_CHECK(!registry.ownerOf(testRoot / "Projects").has_value());
+        DESTO_CHECK(registry.ownerOf(testRoot / "OtherProjects").value() == "mapping-1");
+        DESTO_CHECK(registry.size() == 1);
         registry.unregister("mapping-1");
-        assert(!registry.ownerOf(testRoot / "OtherProjects").has_value());
+        DESTO_CHECK(!registry.ownerOf(testRoot / "OtherProjects").has_value());
 
         const auto migrationSourcePath = testRoot / "migration-source";
         const auto migrationTargetPath = testRoot / "migration-target";
@@ -88,12 +86,12 @@ int main() {
             StorageRoot(migrationSourcePath),
             migrationTargetPath);
         const auto migration = migrationService.execute(migrationPlan);
-        assert(migration.succeeded);
-        assert(!std::filesystem::exists(migrationSourcePath));
-        assert(std::filesystem::exists(migrationTargetPath / "nested" / "data.txt"));
+        DESTO_CHECK(migration.succeeded);
+        DESTO_CHECK(!std::filesystem::exists(migrationSourcePath));
+        DESTO_CHECK(std::filesystem::exists(migrationTargetPath / "nested" / "data.txt"));
         const auto migrationRollback = FileMoveTransaction::rollback(migration.completedMoves);
-        assert(migrationRollback.succeeded);
-        assert(std::filesystem::exists(migrationSourcePath / "nested" / "data.txt"));
+        DESTO_CHECK(migrationRollback.succeeded);
+        DESTO_CHECK(std::filesystem::exists(migrationSourcePath / "nested" / "data.txt"));
 
         const auto configPath = testRoot / "config" / "settings.json";
         std::filesystem::create_directories(configPath.parent_path());
@@ -104,17 +102,17 @@ int main() {
 })";
         JsonConfigStore configStore(configPath);
         const auto loadedConfig = configStore.load();
-        assert(loadedConfig.schemaVersion == 1);
-        assert(loadedConfig.storageRoot == std::filesystem::path("C:\\OldDesto"));
+        DESTO_CHECK(loadedConfig.schemaVersion == 1);
+        DESTO_CHECK(loadedConfig.storageRoot == std::filesystem::path("C:\\OldDesto"));
         configStore.save({.schemaVersion = 1, .storageRoot = testRoot / "new-storage"});
         std::ifstream savedConfig(configPath);
         const std::string savedText{
             std::istreambuf_iterator<char>(savedConfig),
             std::istreambuf_iterator<char>()};
-        assert(savedText.find("futureFeature") != std::string::npos);
-        assert(savedText.find("new-storage") != std::string::npos);
+        DESTO_CHECK(savedText.find("futureFeature") != std::string::npos);
+        DESTO_CHECK(savedText.find("new-storage") != std::string::npos);
         for (const auto& entry : std::filesystem::directory_iterator(configPath.parent_path())) {
-            assert(entry.path().filename().wstring().find(L"settings.json.tmp-") == std::wstring::npos);
+            DESTO_CHECK(entry.path().filename().wstring().find(L"settings.json.tmp-") == std::wstring::npos);
         }
 
         const auto failedMigrationSource = testRoot / "failed-migration-source";
@@ -128,14 +126,19 @@ int main() {
             StorageRoot(failedMigrationSource),
             failedMigrationTarget,
             invalidConfigStore);
-        assert(!failedMigration.succeeded);
-        assert(std::filesystem::exists(failedMigrationSource / "data.txt"));
-        assert(!std::filesystem::exists(failedMigrationTarget / "data.txt"));
+        DESTO_CHECK(!failedMigration.succeeded);
+        DESTO_CHECK(std::filesystem::exists(failedMigrationSource / "data.txt"));
+        DESTO_CHECK(!std::filesystem::exists(failedMigrationTarget / "data.txt"));
     } catch (...) {
         std::filesystem::remove_all(testRoot);
         throw;
     }
 
     std::filesystem::remove_all(testRoot);
-    return 0;
+}
+
+} // namespace
+
+int main() {
+    return desto::test::Run(RunTests);
 }
