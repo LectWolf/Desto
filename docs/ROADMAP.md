@@ -60,7 +60,7 @@
 
 完成单实例、启动顺序、正常退出、托盘退出、异常退出、日志等级和诊断信息。退出条件是退出后无残留进程，失败可以定位且不泄露用户文件内容。
 
-### 13. Headless integration and performance baseline
+### 13. Headless integration and performance baseline [x]
 
 建立无 UI 端到端场景和 Empty/Typical/Heavy/Hidden 基线，记录启动、内存、线程、CPU、显隐提交和拓扑变化成本。退出条件是 Debug/Release 均有可重复数据，后续 UI 比较使用同一基线。
 

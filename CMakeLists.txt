@@ -7,10 +7,15 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(DESTO_BUILD_TESTS "Build Desto tests" ON)
+option(DESTO_BUILD_BENCHMARKS "Build headless performance benchmarks" ON)
 
 add_subdirectory(src)
 
 if(DESTO_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+endif()
+
+if(DESTO_BUILD_BENCHMARKS)
+    add_subdirectory(benchmarks)
 endif()

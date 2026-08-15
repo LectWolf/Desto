@@ -23,4 +23,4 @@ Desto 是一个面向 Windows 的轻量桌面整理工具，目前处于架构�
 
 ## Status
 
-当前处于 `（13/34）Headless integration and performance baseline`。事项 1-12 已完成，正在补齐无 UI 端到端场景和 Empty/Typical/Heavy/Hidden 性能基线；第 14 项开始 UI 原型，第 17 项开始正式产品界面。
+当前处于 `（14/34）Native UI prototype`。事项 1-13 已完成，下一步开始原生可见原型，验证透明窗口、同步显隐、多 DPI 和桌面层级；第 17 项开始正式产品界面。
