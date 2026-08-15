@@ -15,9 +15,9 @@ Desto 的配置需要支持格式演进、存储根迁移和未知字段保留�
 
 ## Decision
 
-使用 vendored `nlohmann/json` 3.11.3，仅由 `JsonConfigStore` 使用。配置根对象包含 `schemaVersion`，存储根位于 `storage.root`；保存时读取现有文档并只更新已知字段，以保留未知字段。
+使用 vendored `nlohmann/json` 3.11.3，仅由 `JsonConfigStore` 使用。配置根对象包含 `schemaVersion`，当前 schema 为 2，存储根位于 `storage.root`；保存时读取现有文档并只更新已知字段，以保留未知字段。v1 到 v2 通过显式迁移补齐 Card 集合。
 
-Windows 写入流程为临时文件 `CREATE_NEW`、`FlushFileBuffers`、`ReplaceFileW`（首次写入使用 `MoveFileExW`）。临时文件发布失败时删除，不覆盖最后一次有效配置。
+Windows 写入流程为临时文件 `CREATE_NEW`、`FlushFileBuffers`、`ReplaceFileW`（首次写入使用 `MoveFileExW`）。替换前复制最后有效文件为 `.bak`；临时文件发布失败时删除，不覆盖最后一次有效配置。主文件损坏时只恢复 `.bak`，未来 schema 不回退。
 
 ## Consequences
 

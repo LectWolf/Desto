@@ -114,7 +114,7 @@ void RunTests() {
 })";
         JsonConfigStore configStore(configPath);
         auto loadedConfig = configStore.load();
-        DESTO_CHECK(loadedConfig.schemaVersion == 1);
+        DESTO_CHECK(loadedConfig.schemaVersion == ApplicationConfig::CurrentSchemaVersion);
         DESTO_CHECK(loadedConfig.storageRoot == std::filesystem::path("C:\\OldDesto"));
         DESTO_CHECK(loadedConfig.workspace.placements().size() == 1);
         loadedConfig.cards = {
@@ -197,6 +197,34 @@ void RunTests() {
         DESTO_CHECK(invalidRestoreRejected);
         DESTO_CHECK(restoredRuntime.findCard("card-1") != nullptr);
         DESTO_CHECK(!restoredRuntime.findCard("card-1")->isVisible());
+
+        const auto recoveryConfigPath = testRoot / "recovery" / "settings.json";
+        JsonConfigStore recoveryStore(recoveryConfigPath);
+        auto recoveryConfig = reloadedConfig;
+        recoveryConfig.storageRoot = testRoot / "recovery-storage-1";
+        recoveryStore.save(recoveryConfig);
+        recoveryConfig.storageRoot = testRoot / "recovery-storage-2";
+        recoveryStore.save(recoveryConfig);
+        std::ofstream(recoveryConfigPath, std::ios::binary | std::ios::trunc) << "{broken";
+        const auto recoveredConfig = recoveryStore.load();
+        DESTO_CHECK(recoveredConfig.recoveredFromBackup);
+        DESTO_CHECK(recoveredConfig.storageRoot == testRoot / "recovery-storage-1");
+        DESTO_CHECK(recoveredConfig.cards.size() == 3);
+        recoveryStore.save(recoveredConfig);
+        DESTO_CHECK(!recoveryStore.load().recoveredFromBackup);
+        std::filesystem::remove(recoveryConfigPath);
+        DESTO_CHECK(recoveryStore.load().recoveredFromBackup);
+        recoveryStore.save(recoveredConfig);
+
+        std::ofstream(recoveryConfigPath, std::ios::binary | std::ios::trunc)
+            << R"({"schemaVersion": 99})";
+        bool futureVersionRejected = false;
+        try {
+            (void)recoveryStore.load();
+        } catch (const std::runtime_error&) {
+            futureVersionRejected = true;
+        }
+        DESTO_CHECK(futureVersionRejected);
 
         const auto configuredMigrationSource = testRoot / "configured-migration-source";
         const auto configuredMigrationTarget = testRoot / "configured-migration-target";

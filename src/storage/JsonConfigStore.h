@@ -9,12 +9,13 @@
 namespace desto::storage {
 
 struct ApplicationConfig {
-    static constexpr int CurrentSchemaVersion = 1;
+    static constexpr int CurrentSchemaVersion = 2;
 
     int schemaVersion = CurrentSchemaVersion;
     std::filesystem::path storageRoot;
     std::vector<domain::CardSnapshot> cards;
     domain::WorkspaceLayout workspace;
+    bool recoveredFromBackup = false;
 };
 
 class JsonConfigStore {

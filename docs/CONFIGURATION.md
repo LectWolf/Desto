@@ -43,11 +43,13 @@ WorkspaceLayout
 - 高频交互先更新内存状态，再合并和延迟持久化。
 - 缓存可以删除重建，配置和布局不能依赖缓存才能恢复。
 
-当前原型使用 `JsonConfigStore` 保存版本化 JSON。已知字段包括 `schemaVersion`、`storage.root`、`cards` 和 `workspace.placements`；Card 的存储目录仍记录为相对于 `storage.root` 的路径。新增字段对没有 `cards` 的旧 schema 1 文件向后兼容，写入时读取并保留未知字段。Windows 使用临时文件、`FlushFileBuffers` 和原子替换；发布失败会删除临时文件并保留旧配置。
+当前原型使用 `JsonConfigStore` 保存 schema 2 JSON。已知字段包括 `schemaVersion`、`storage.root`、`cards` 和 `workspace.placements`；Card 的存储目录仍记录为相对于 `storage.root` 的路径。v1 -> v2 迁移会显式补齐 `cards` 字段，写入时读取并保留未知字段。Windows 使用临时文件、`FlushFileBuffers` 和原子替换；发布前保留 `settings.json.bak`，发布失败不会覆盖最后有效配置。
 
 `cards` 保存 Card 身份、类型、可见/展开状态、Chrome 入口偏好、外观偏好和类型专属内容；`workspace.placements` 只保存原始布局。当前显示器拓扑与 Projection 不写入配置，启动后由平台适配器重新提供。
 
-`workspace.placements` 保存 Placement 的稳定 ID、Card ID、Display Target、相对工作区矩形和层级。当前只接受 schema version 1；未来版本必须通过显式迁移后才能写回，不能让旧版本猜测新结构。
+`workspace.placements` 保存 Placement 的稳定 ID、Card ID、Display Target、相对工作区矩形和层级。当前只接受 schema version 2；旧版本必须通过显式迁移后才能写回，未来版本直接拒绝，不能让旧版本猜测新结构。
+
+主配置损坏、无法读取或在写入中断后缺失时，读取会尝试最后有效的 `.bak` 文件，并在 `ApplicationConfig::recoveredFromBackup` 中标记来源。未来版本错误不会回退到旧备份，以避免静默降级或覆盖新格式。
 
 ## Physical Layout
 

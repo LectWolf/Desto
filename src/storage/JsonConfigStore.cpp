@@ -19,6 +19,13 @@ namespace {
 
 using Json = nlohmann::json;
 
+class UnsupportedSchemaError final : public std::runtime_error {
+public:
+    explicit UnsupportedSchemaError(const std::string& message)
+        : std::runtime_error(message) {
+    }
+};
+
 std::string ToUtf8(const std::filesystem::path& path) {
     const auto value = path.u8string();
     return {reinterpret_cast<const char*>(value.data()), value.size()};
@@ -56,13 +63,55 @@ Json ReadDocument(const std::filesystem::path& path) {
     }
 }
 
-void WriteAtomically(const std::filesystem::path& target, const std::string& content) {
+Json MigrateDocument(Json document) {
+    if (!document.is_object()) {
+        throw std::runtime_error("Configuration root must be a JSON object.");
+    }
+
+    const auto sourceVersion = document.value("schemaVersion", 1);
+    if (sourceVersion > ApplicationConfig::CurrentSchemaVersion) {
+        throw UnsupportedSchemaError("Configuration schema version is newer than this build.");
+    }
+    if (sourceVersion < 1) {
+        throw std::runtime_error("Configuration schema version is invalid.");
+    }
+
+    auto version = sourceVersion;
+    while (version < ApplicationConfig::CurrentSchemaVersion) {
+        if (version == 1) {
+            // Schema 2 makes the Card collection explicit; old files may omit it.
+            if (!document.contains("cards")) {
+                document["cards"] = Json::array();
+            }
+            document["schemaVersion"] = 2;
+            version = 2;
+            continue;
+        }
+        throw std::runtime_error("Configuration schema migration is unavailable.");
+    }
+    return document;
+}
+
+std::filesystem::path BackupPath(const std::filesystem::path& target) {
+    return target.parent_path() / (target.filename().wstring() + L".bak");
+}
+
+void WriteAtomically(
+    const std::filesystem::path& target,
+    const std::string& content,
+    bool preserveBackup) {
     std::filesystem::create_directories(target.parent_path());
     const auto temporary = target.parent_path()
         / (target.filename().wstring() + L".tmp-" + std::to_wstring(
             std::chrono::high_resolution_clock::now().time_since_epoch().count()));
 
     try {
+        if (std::filesystem::exists(target) && !preserveBackup) {
+            std::filesystem::copy_file(
+                target,
+                BackupPath(target),
+                std::filesystem::copy_options::overwrite_existing);
+        }
 #ifdef _WIN32
         const auto handle = CreateFileW(
             temporary.c_str(),
@@ -124,8 +173,7 @@ JsonConfigStore::JsonConfigStore(std::filesystem::path configPath)
     configPath_ = configPath_.lexically_normal();
 }
 
-ApplicationConfig JsonConfigStore::load() const {
-    const auto document = ReadDocument(configPath_);
+ApplicationConfig ParseDocument(const Json& document) {
     if (!document.is_object()) {
         throw std::runtime_error("Configuration root must be a JSON object.");
     }
@@ -298,6 +346,37 @@ ApplicationConfig JsonConfigStore::load() const {
     return result;
 }
 
+ApplicationConfig JsonConfigStore::load() const {
+    const auto backup = BackupPath(configPath_);
+    if (!std::filesystem::exists(configPath_) && std::filesystem::exists(backup)) {
+        auto recovered = ParseDocument(MigrateDocument(ReadDocument(backup)));
+        recovered.recoveredFromBackup = true;
+        return recovered;
+    }
+    try {
+        return ParseDocument(MigrateDocument(ReadDocument(configPath_)));
+    } catch (const UnsupportedSchemaError&) {
+        throw;
+    } catch (const std::exception& primaryError) {
+        if (!std::filesystem::exists(backup)) {
+            throw;
+        }
+        try {
+            auto recovered = ParseDocument(MigrateDocument(ReadDocument(backup)));
+            recovered.recoveredFromBackup = true;
+            return recovered;
+        } catch (const UnsupportedSchemaError&) {
+            throw;
+        } catch (const std::exception& backupError) {
+            throw std::runtime_error(
+                std::format(
+                    "Configuration and backup are invalid. Primary: {} Backup: {}",
+                    primaryError.what(),
+                    backupError.what()));
+        }
+    }
+}
+
 void JsonConfigStore::save(const ApplicationConfig& config) const {
     if (config.schemaVersion != ApplicationConfig::CurrentSchemaVersion) {
         throw std::invalid_argument("Configuration schema version is not supported.");
@@ -340,9 +419,21 @@ void JsonConfigStore::save(const ApplicationConfig& config) const {
         }
     }
 
-    auto document = ReadDocument(configPath_);
-    if (!document.is_object()) {
-        throw std::runtime_error("Configuration root must be a JSON object.");
+    Json document;
+    bool usedBackup = false;
+    try {
+        if (!std::filesystem::exists(configPath_)
+            && std::filesystem::exists(BackupPath(configPath_))) {
+            document = MigrateDocument(ReadDocument(BackupPath(configPath_)));
+            usedBackup = true;
+        } else {
+            document = MigrateDocument(ReadDocument(configPath_));
+        }
+    } catch (const UnsupportedSchemaError&) {
+        throw;
+    } catch (const std::exception&) {
+        document = MigrateDocument(ReadDocument(BackupPath(configPath_)));
+        usedBackup = true;
     }
     document["schemaVersion"] = config.schemaVersion;
     document["storage"]["root"] = ToUtf8(config.storageRoot);
@@ -468,7 +559,7 @@ void JsonConfigStore::save(const ApplicationConfig& config) const {
         value["zIndex"] = placement.zIndex;
         placements.push_back(std::move(value));
     }
-    WriteAtomically(configPath_, document.dump(2) + "\n");
+    WriteAtomically(configPath_, document.dump(2) + "\n", usedBackup);
 }
 
 } // namespace desto::storage

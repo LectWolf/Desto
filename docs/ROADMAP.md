@@ -52,7 +52,7 @@
 
 把 Card 内容、实例偏好、Placement、默认值和实例覆盖写入同一可恢复快照。退出条件是创建、修改、删除、重启恢复均不丢失身份和用户明确设置。
 
-### 11. Schema migration and recovery
+### 11. Schema migration and recovery [x]
 
 实现显式 schema 迁移链、未来版本拒绝策略、损坏配置恢复、备份/回滚和迁移日志。退出条件是旧版本升级、未知字段、损坏文件和中断迁移都有确定结果。
 

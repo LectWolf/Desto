@@ -23,4 +23,4 @@ Desto 是一个面向 Windows 的轻量桌面整理工具，目前处于架构�
 
 ## Status
 
-当前处于 `（11/34）Schema migration and recovery`。事项 1-10 已完成，正在补齐显式 schema 迁移、损坏配置恢复和备份回滚；第 14 项开始 UI 原型，第 17 项开始正式产品界面。
+当前处于 `（12/34）Process lifecycle and diagnostics`。事项 1-11 已完成，正在补齐单实例、启动顺序、正常退出、托盘退出和诊断日志；第 14 项开始 UI 原型，第 17 项开始正式产品界面。

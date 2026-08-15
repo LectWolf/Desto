@@ -35,7 +35,7 @@ public:
         const StorageRoot& source,
         std::filesystem::path target,
         const JsonConfigStore& configStore,
-        int schemaVersion = 1) const;
+        int schemaVersion = ApplicationConfig::CurrentSchemaVersion) const;
 };
 
 } // namespace desto::storage
