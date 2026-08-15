@@ -14,6 +14,7 @@ Desto 是一个面向 Windows 的轻量桌面整理工具，目前处于架构�
 
 - [产品边界](docs/PRODUCT.md)
 - [领域模型](docs/DOMAIN.md)
+- [存储与迁移](docs/STORAGE.md)
 - [架构原则](docs/ARCHITECTURE.md)
 - [性能策略](docs/PERFORMANCE.md)
 - [配置模型](docs/CONFIGURATION.md)

@@ -78,13 +78,13 @@ private:
 
 class ApplicationCard final : public Card {
 public:
-    ApplicationCard(CardId id, std::filesystem::path managedRoot);
+    ApplicationCard(CardId id, std::filesystem::path relativeStoragePath);
 
-    [[nodiscard]] const std::filesystem::path& managedRoot() const noexcept { return managedRoot_; }
-    void setManagedRoot(std::filesystem::path managedRoot);
+    [[nodiscard]] const std::filesystem::path& relativeStoragePath() const noexcept { return relativeStoragePath_; }
+    void setRelativeStoragePath(std::filesystem::path relativeStoragePath);
 
 private:
-    std::filesystem::path managedRoot_;
+    std::filesystem::path relativeStoragePath_;
 };
 
 class FolderMappingCard final : public Card {
@@ -98,7 +98,7 @@ public:
 
 private:
     std::filesystem::path sourceRoot_;
-    bool allowsSourceMutation_ = false;
+    bool allowsSourceMutation_ = true;
 };
 
 class ReferenceCard final : public Card {

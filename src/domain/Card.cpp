@@ -41,19 +41,19 @@ void Card::setAppearance(CardAppearancePreferences preferences) {
     appearance_ = std::move(preferences);
 }
 
-ApplicationCard::ApplicationCard(CardId id, std::filesystem::path managedRoot)
+ApplicationCard::ApplicationCard(CardId id, std::filesystem::path relativeStoragePath)
     : Card(std::move(id), CardType::Application),
-      managedRoot_(std::move(managedRoot)) {
-    if (managedRoot_.empty()) {
-        throw std::invalid_argument("Application card managed root must not be empty.");
+      relativeStoragePath_(std::move(relativeStoragePath)) {
+    if (relativeStoragePath_.empty() || relativeStoragePath_.is_absolute()) {
+        throw std::invalid_argument("Application card storage path must be relative and non-empty.");
     }
 }
 
-void ApplicationCard::setManagedRoot(std::filesystem::path managedRoot) {
-    if (managedRoot.empty()) {
-        throw std::invalid_argument("Application card managed root must not be empty.");
+void ApplicationCard::setRelativeStoragePath(std::filesystem::path relativeStoragePath) {
+    if (relativeStoragePath.empty() || relativeStoragePath.is_absolute()) {
+        throw std::invalid_argument("Application card storage path must be relative and non-empty.");
     }
-    managedRoot_ = std::move(managedRoot);
+    relativeStoragePath_ = std::move(relativeStoragePath);
 }
 
 FolderMappingCard::FolderMappingCard(CardId id, std::filesystem::path sourceRoot)
