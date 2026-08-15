@@ -1,10 +1,13 @@
 #include "ApplicationCardReturn.h"
+#include "JsonConfigStore.h"
 #include "MappingRegistry.h"
+#include "StorageRootMigration.h"
 
 #include <cassert>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <stdexcept>
 
 using namespace desto::domain;
@@ -75,6 +78,59 @@ int main() {
         assert(registry.size() == 1);
         registry.unregister("mapping-1");
         assert(!registry.ownerOf(testRoot / "OtherProjects").has_value());
+
+        const auto migrationSourcePath = testRoot / "migration-source";
+        const auto migrationTargetPath = testRoot / "migration-target";
+        std::filesystem::create_directories(migrationSourcePath / "nested");
+        std::ofstream(migrationSourcePath / "nested" / "data.txt") << "data";
+        StorageRootMigrationService migrationService;
+        const auto migrationPlan = migrationService.plan(
+            StorageRoot(migrationSourcePath),
+            migrationTargetPath);
+        const auto migration = migrationService.execute(migrationPlan);
+        assert(migration.succeeded);
+        assert(!std::filesystem::exists(migrationSourcePath));
+        assert(std::filesystem::exists(migrationTargetPath / "nested" / "data.txt"));
+        const auto migrationRollback = FileMoveTransaction::rollback(migration.completedMoves);
+        assert(migrationRollback.succeeded);
+        assert(std::filesystem::exists(migrationSourcePath / "nested" / "data.txt"));
+
+        const auto configPath = testRoot / "config" / "settings.json";
+        std::filesystem::create_directories(configPath.parent_path());
+        std::ofstream(configPath) << R"({
+  "schemaVersion": 1,
+  "storage": {"root": "C:\\OldDesto"},
+  "futureFeature": {"enabled": true}
+})";
+        JsonConfigStore configStore(configPath);
+        const auto loadedConfig = configStore.load();
+        assert(loadedConfig.schemaVersion == 1);
+        assert(loadedConfig.storageRoot == std::filesystem::path("C:\\OldDesto"));
+        configStore.save({.schemaVersion = 1, .storageRoot = testRoot / "new-storage"});
+        std::ifstream savedConfig(configPath);
+        const std::string savedText{
+            std::istreambuf_iterator<char>(savedConfig),
+            std::istreambuf_iterator<char>()};
+        assert(savedText.find("futureFeature") != std::string::npos);
+        assert(savedText.find("new-storage") != std::string::npos);
+        for (const auto& entry : std::filesystem::directory_iterator(configPath.parent_path())) {
+            assert(entry.path().filename().wstring().find(L"settings.json.tmp-") == std::wstring::npos);
+        }
+
+        const auto failedMigrationSource = testRoot / "failed-migration-source";
+        const auto failedMigrationTarget = testRoot / "failed-migration-target";
+        std::filesystem::create_directories(failedMigrationSource);
+        std::ofstream(failedMigrationSource / "data.txt") << "data";
+        const auto invalidConfigPath = testRoot / "config-directory";
+        std::filesystem::create_directories(invalidConfigPath);
+        JsonConfigStore invalidConfigStore(invalidConfigPath);
+        const auto failedMigration = migrationService.migrate(
+            StorageRoot(failedMigrationSource),
+            failedMigrationTarget,
+            invalidConfigStore);
+        assert(!failedMigration.succeeded);
+        assert(std::filesystem::exists(failedMigrationSource / "data.txt"));
+        assert(!std::filesystem::exists(failedMigrationTarget / "data.txt"));
     } catch (...) {
         std::filesystem::remove_all(testRoot);
         throw;

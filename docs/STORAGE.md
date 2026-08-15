@@ -30,6 +30,8 @@ ResolvedPath = D:\DestoData\cards\application-1
 
 迁移过程中不能让 Card 指向一个配置上成功、实际内容不存在的位置。
 
+当前实现由 `StorageRootMigrationService` 负责：`plan` 只接受空目标目录，并拒绝源目录与目标目录互相嵌套；`migrate` 在文件事务成功后保存配置，配置保存失败会逆序恢复已移动项目。
+
 ## Ownership Policies
 
 | Card type | Source of truth | Default ownership |

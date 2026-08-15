@@ -38,20 +38,6 @@ std::filesystem::path FindAvailableDestination(
     throw std::runtime_error("Unable to find a conflict-free desktop name.");
 }
 
-void MoveEntry(const std::filesystem::path& source, const std::filesystem::path& destination) {
-    std::filesystem::create_directories(destination.parent_path());
-    try {
-        std::filesystem::rename(source, destination);
-    } catch (const std::filesystem::filesystem_error&) {
-        std::filesystem::copy(
-            source,
-            destination,
-            std::filesystem::copy_options::recursive
-                | std::filesystem::copy_options::copy_symlinks);
-        std::filesystem::remove_all(source);
-    }
-}
-
 } // namespace
 
 ApplicationCardReturnService::ApplicationCardReturnService(StorageRoot storageRoot)
@@ -104,11 +90,14 @@ ApplicationCardDeletionResult ApplicationCardReturnService::execute(
     }
 
     ApplicationCardDeletionResult result;
+    const auto transaction = FileMoveTransaction::execute(plan.moves);
+    if (!transaction.succeeded) {
+        result.failures = transaction.failures;
+        return result;
+    }
+    result.completedMoves = transaction.completedMoves;
+
     try {
-        for (const auto& move : plan.moves) {
-            MoveEntry(move.source, move.destination);
-            result.completedMoves.push_back(move);
-        }
         if (std::filesystem::exists(plan.cardDirectory)) {
             std::filesystem::remove(plan.cardDirectory);
         }
@@ -116,16 +105,14 @@ ApplicationCardDeletionResult ApplicationCardReturnService::execute(
         return result;
     } catch (const std::exception& exception) {
         result.failures.push_back(exception.what());
-        for (auto iterator = result.completedMoves.rbegin();
-             iterator != result.completedMoves.rend();
-             ++iterator) {
-            try {
-                MoveEntry(iterator->destination, iterator->source);
-            } catch (const std::exception& rollbackException) {
-                result.failures.push_back(rollbackException.what());
-            }
+        const auto rollbackResult = FileMoveTransaction::rollback(result.completedMoves);
+        result.failures.insert(
+            result.failures.end(),
+            rollbackResult.failures.begin(),
+            rollbackResult.failures.end());
+        if (rollbackResult.succeeded) {
+            result.completedMoves.clear();
         }
-        result.completedMoves.clear();
         return result;
     }
 }

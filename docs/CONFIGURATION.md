@@ -43,6 +43,8 @@ WorkspaceLayout
 - 高频交互先更新内存状态，再合并和延迟持久化。
 - 缓存可以删除重建，配置和布局不能依赖缓存才能恢复。
 
+当前原型使用 `JsonConfigStore` 保存版本化 JSON。已知字段为 `schemaVersion` 和 `storage.root`，写入时读取并保留未知字段。Windows 使用临时文件、`FlushFileBuffers` 和原子替换；发布失败会删除临时文件并保留旧配置。
+
 ## Physical Layout
 
 最终文件格式将在存储原型后确定。逻辑上至少区分：

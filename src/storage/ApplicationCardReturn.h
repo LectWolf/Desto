@@ -5,14 +5,12 @@
 #include <vector>
 
 #include "Card.h"
+#include "FileMoveTransaction.h"
 #include "StorageRoot.h"
 
 namespace desto::storage {
 
-struct ReturnMove {
-    std::filesystem::path source;
-    std::filesystem::path destination;
-};
+using ReturnMove = FileMove;
 
 struct ApplicationCardDeletionPlan {
     domain::CardDeletionPreview preview;

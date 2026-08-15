@@ -16,6 +16,9 @@ std::string ComparisonKey(const std::filesystem::path& path) {
         [](unsigned char character) {
             return static_cast<char>(std::tolower(character));
         });
+    while (value.size() > 1 && value.back() == '/') {
+        value.pop_back();
+    }
     return value;
 }
 
