@@ -61,6 +61,17 @@ build\benchmarks\Release\desto_headless_baseline.exe --scenario hidden
 
 Debug 同一场景的私有工作集为 0.69/0.95/2.79/0.93 MB，启动为 0.828/5.584/42.060/11.186 ms（Empty/Typical/Heavy/Hidden）。这些数据用于验证基线程序可重复，不用于发布性能门槛。
 
+### UI Prototype Comparison
+
+2026-08-16 在同一 Windows 11 环境、同一 4 Card/当前显示器拓扑和 Release 配置下，各启动一次原型并在约 700 ms 后采样私有工作集。采样包含窗口和渲染初始化，不是最终产品预算：
+
+| Prototype | Rendering/host | Private MB | Exit | Residual process |
+| --- | --- | ---: | ---: | --- |
+| Native | Win32 layered window + GDI DIB | 1.35 | 0 | none |
+| Alternative | DirectComposition + Direct2D + DWrite | 59.85 | 0 | none |
+
+Qt/qmake 未安装在当前构建环境，因此事项 15 采用 Windows SDK 自带 DirectComposition 作为可构建候选。事项 16 需要结合这组数据和输入、DPI、桌面层级、发布依赖等维度做技术选择，不能只按渲染效果判断。
+
 ## Initial Targets
 
 以下数字是原型阶段的目标，不是未经验证的承诺：
