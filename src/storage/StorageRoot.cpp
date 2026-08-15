@@ -58,4 +58,3 @@ void StorageRoot::ensureExists() const {
 }
 
 } // namespace desto::storage
-

@@ -131,4 +131,3 @@ ApplicationCardDeletionResult ApplicationCardReturnService::execute(
 }
 
 } // namespace desto::storage
-

@@ -18,4 +18,3 @@ target_link_libraries(desto_storage
     PUBLIC
         desto_domain
 )
-
