@@ -1,0 +1,175 @@
+#include "ApplicationRuntime.h"
+#include "TestSupport.h"
+
+using namespace desto::application;
+using namespace desto::domain;
+
+namespace {
+
+void RunTests() {
+    ApplicationRuntime runtime;
+
+    const auto applicationCreated = runtime.execute(CreateApplicationCard{
+        .cardId = "application-1",
+        .relativeStoragePath = "cards/application-1",
+    });
+    DESTO_CHECK(applicationCreated.status == CommandStatus::Applied);
+    DESTO_CHECK(applicationCreated.revision == 1);
+    DESTO_CHECK(applicationCreated.changes.createdCards == std::vector<CardId>{"application-1"});
+    DESTO_CHECK(applicationCreated.changes.persistence == PersistenceUrgency::Deferred);
+
+    DESTO_CHECK(runtime.execute(CreateMappingCard{"mapping-1"}).status == CommandStatus::Applied);
+    DESTO_CHECK(runtime.execute(CreateTodoCard{"todo-1"}).status == CommandStatus::Applied);
+    DESTO_CHECK(runtime.cards().size() == 3);
+    DESTO_CHECK(runtime.cards()[0]->id() == "application-1");
+    DESTO_CHECK(runtime.cards()[1]->id() == "mapping-1");
+    DESTO_CHECK(runtime.cards()[2]->id() == "todo-1");
+
+    const auto duplicate = runtime.execute(CreateTodoCard{"todo-1"});
+    DESTO_CHECK(duplicate.status == CommandStatus::Rejected);
+    DESTO_CHECK(duplicate.error == CommandError::DuplicateCardId);
+    DESTO_CHECK(duplicate.revision == 3);
+
+    const auto invalid = runtime.execute(CreateApplicationCard{
+        .cardId = "invalid",
+        .relativeStoragePath = "C:/absolute",
+    });
+    DESTO_CHECK(invalid.status == CommandStatus::Rejected);
+    DESTO_CHECK(invalid.error == CommandError::InvalidCommand);
+    DESTO_CHECK(runtime.findCard("invalid") == nullptr);
+
+    const std::vector<DisplaySnapshot> twoDisplays{
+        {.id = "display-a", .workAreaWidth = 1280, .workAreaHeight = 720},
+        {.id = "display-b", .workAreaWidth = 1920, .workAreaHeight = 1040, .primary = true},
+    };
+    const auto topology = runtime.execute(UpdateDisplayTopology{twoDisplays});
+    DESTO_CHECK(topology.status == CommandStatus::Applied);
+    DESTO_CHECK(topology.changes.displayTopologyChanged);
+    DESTO_CHECK(!topology.changes.projectionsChanged);
+    DESTO_CHECK(topology.changes.persistence == PersistenceUrgency::None);
+
+    const CardPlacement placement{
+        .id = "placement-1",
+        .cardId = "application-1",
+        .target = DisplayTarget::specific("display-a"),
+        .rect = {40, 50, 320, 220},
+    };
+    const auto placed = runtime.execute(SetPlacement{placement});
+    DESTO_CHECK(placed.status == CommandStatus::Applied);
+    DESTO_CHECK(placed.changes.layoutChanged);
+    DESTO_CHECK(placed.changes.projectionsChanged);
+    DESTO_CHECK(placed.changes.persistence == PersistenceUrgency::Deferred);
+    DESTO_CHECK(runtime.projections().size() == 1);
+    DESTO_CHECK(runtime.projections().front().displayId == "display-a");
+
+    const auto placementNoChange = runtime.execute(SetPlacement{placement});
+    DESTO_CHECK(placementNoChange.status == CommandStatus::NoChange);
+    const auto revisionBeforeVisibility = runtime.revision();
+    const auto hidden = runtime.execute(SetCardVisibility{"application-1", false});
+    DESTO_CHECK(hidden.status == CommandStatus::Applied);
+    DESTO_CHECK(hidden.changes.changedCards == std::vector<CardId>{"application-1"});
+    DESTO_CHECK(!runtime.findCard("application-1")->isVisible());
+    DESTO_CHECK(runtime.revision() == revisionBeforeVisibility + 1);
+    DESTO_CHECK(runtime.execute(SetCardVisibility{"application-1", false}).status
+                == CommandStatus::NoChange);
+
+    const auto collapsed = runtime.execute(SetCardExpanded{"todo-1", false});
+    DESTO_CHECK(collapsed.status == CommandStatus::Applied);
+    DESTO_CHECK(!runtime.findCard("todo-1")->isExpanded());
+    DESTO_CHECK(runtime.execute(SetCardExpanded{"todo-1", false}).status
+                == CommandStatus::NoChange);
+
+    const auto revisionBeforeInvalidPlacement = runtime.revision();
+    const auto invalidPlacement = runtime.execute(SetPlacement{{
+        .id = "invalid-placement",
+        .cardId = "todo-1",
+        .target = DisplayTarget::all(),
+        .rect = {0, 0, 0, 220},
+    }});
+    DESTO_CHECK(invalidPlacement.status == CommandStatus::Rejected);
+    DESTO_CHECK(invalidPlacement.error == CommandError::InvalidCommand);
+    DESTO_CHECK(runtime.revision() == revisionBeforeInvalidPlacement);
+    DESTO_CHECK(runtime.workspace().placements().size() == 1);
+
+    const auto missingCardPlacement = runtime.execute(SetPlacement{{
+        .id = "missing-card-placement",
+        .cardId = "missing-card",
+        .target = DisplayTarget::all(),
+    }});
+    DESTO_CHECK(missingCardPlacement.status == CommandStatus::Rejected);
+    DESTO_CHECK(missingCardPlacement.error == CommandError::CardNotFound);
+
+    const auto fallbackTopology = runtime.execute(UpdateDisplayTopology{{
+        {.id = "display-b", .workAreaWidth = 1920, .workAreaHeight = 1040, .primary = true},
+    }});
+    DESTO_CHECK(fallbackTopology.status == CommandStatus::Applied);
+    DESTO_CHECK(fallbackTopology.changes.projectionsChanged);
+    DESTO_CHECK(runtime.projections().front().fallback);
+    DESTO_CHECK(runtime.projections().front().displayId == "display-b");
+    DESTO_CHECK(runtime.workspace().placements().front().target.displayId() == "display-a");
+
+    const auto revisionBeforeRepeatedTopology = runtime.revision();
+    const auto repeatedTopology = runtime.execute(UpdateDisplayTopology{{
+        {.id = "display-b", .workAreaWidth = 1920, .workAreaHeight = 1040, .primary = true},
+    }});
+    DESTO_CHECK(repeatedTopology.status == CommandStatus::NoChange);
+    DESTO_CHECK(runtime.revision() == revisionBeforeRepeatedTopology);
+
+    const auto revisionBeforeInvalidTopology = runtime.revision();
+    const auto invalidTopology = runtime.execute(UpdateDisplayTopology{{
+        {.id = "duplicate", .workAreaWidth = 100, .workAreaHeight = 100},
+        {.id = "duplicate", .workAreaWidth = 100, .workAreaHeight = 100},
+    }});
+    DESTO_CHECK(invalidTopology.status == CommandStatus::Rejected);
+    DESTO_CHECK(invalidTopology.error == CommandError::InvalidCommand);
+    DESTO_CHECK(runtime.revision() == revisionBeforeInvalidTopology);
+    DESTO_CHECK(runtime.displays().size() == 1);
+
+    const auto deletion = runtime.execute(RequestCardDeletion{"application-1"});
+    DESTO_CHECK(deletion.status == CommandStatus::Applied);
+    DESTO_CHECK(deletion.changes.deletionRequest.has_value());
+    DESTO_CHECK(deletion.changes.deletionRequest->preview.effect
+                == CardDeletionEffect::ReturnManagedItemsToDesktop);
+    DESTO_CHECK(runtime.findCard("application-1") != nullptr);
+
+    const auto token = deletion.changes.deletionRequest->token;
+    const auto duplicateDeletion = runtime.execute(RequestCardDeletion{"application-1"});
+    DESTO_CHECK(duplicateDeletion.error == CommandError::DeletionAlreadyPending);
+    const auto wrongToken = runtime.execute(CommitCardDeletion{"application-1", token + 1});
+    DESTO_CHECK(wrongToken.status == CommandStatus::Rejected);
+    DESTO_CHECK(wrongToken.error == CommandError::DeletionTokenMismatch);
+    DESTO_CHECK(runtime.findCard("application-1") != nullptr);
+
+    const auto committed = runtime.execute(CommitCardDeletion{"application-1", token});
+    DESTO_CHECK(committed.status == CommandStatus::Applied);
+    DESTO_CHECK(committed.changes.removedCards == std::vector<CardId>{"application-1"});
+    DESTO_CHECK(committed.changes.layoutChanged);
+    DESTO_CHECK(committed.changes.projectionsChanged);
+    DESTO_CHECK(committed.changes.persistence == PersistenceUrgency::Immediate);
+    DESTO_CHECK(runtime.findCard("application-1") == nullptr);
+    DESTO_CHECK(runtime.workspace().placements().empty());
+    DESTO_CHECK(runtime.projections().empty());
+
+    const auto mappingDeletion = runtime.execute(RequestCardDeletion{"mapping-1"});
+    DESTO_CHECK(mappingDeletion.changes.deletionRequest->preview.effect
+                == CardDeletionEffect::RemoveCardOnly);
+    const auto mappingToken = mappingDeletion.changes.deletionRequest->token;
+    const auto wrongCancel = runtime.execute(CancelCardDeletion{"mapping-1", mappingToken + 1});
+    DESTO_CHECK(wrongCancel.status == CommandStatus::Rejected);
+    DESTO_CHECK(wrongCancel.error == CommandError::DeletionTokenMismatch);
+    DESTO_CHECK(runtime.pendingDeletion("mapping-1").has_value());
+    DESTO_CHECK(runtime.execute(CancelCardDeletion{"mapping-1", mappingToken}).status
+                == CommandStatus::Applied);
+    DESTO_CHECK(!runtime.pendingDeletion("mapping-1").has_value());
+    DESTO_CHECK(runtime.findCard("mapping-1") != nullptr);
+
+    const auto missingPlacement = runtime.execute(RemovePlacement{"missing"});
+    DESTO_CHECK(missingPlacement.status == CommandStatus::Rejected);
+    DESTO_CHECK(missingPlacement.error == CommandError::PlacementNotFound);
+}
+
+} // namespace
+
+int main() {
+    return desto::test::Run(RunTests);
+}

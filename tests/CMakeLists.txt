@@ -44,6 +44,19 @@ endif()
 
 add_test(NAME desto_display_topology_tests COMMAND desto_display_topology_tests)
 
+add_executable(desto_application_runtime_tests
+    application/ApplicationRuntimeTests.cpp
+)
+
+target_include_directories(desto_application_runtime_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+target_link_libraries(desto_application_runtime_tests
+    PRIVATE
+        desto_application
+)
+
+add_test(NAME desto_application_runtime_tests COMMAND desto_application_runtime_tests)
+
 add_executable(desto_storage_tests
     storage/StorageTests.cpp
 )

@@ -44,7 +44,7 @@
 
 监听 `WM_DISPLAYCHANGE`、DPI 和显示器相关系统变化，加入防抖、重复事件合并和快照差异计算。退出条件是拓扑抖动不会产生重复布局写入，变化能触发新的 Projection 计算。
 
-### 09. Application state and command runtime
+### 09. Application state and command runtime [x]
 
 建立应用状态、命令、状态变更结果和事件分发；把 UI、文件系统和平台副作用放到外围 Adapter。退出条件是无 UI 测试可以驱动 Card/Workspace 的完整状态变更。
 

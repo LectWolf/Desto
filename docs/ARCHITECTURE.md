@@ -95,6 +95,30 @@ native input
 
 领域状态变化应先形成明确结果，再由外围模块执行窗口、文件和配置副作用。
 
+### Application Runtime
+
+`ApplicationRuntime` 是 Card 与 Workspace 状态变更的应用层模块。它只公开一个命令入口，应用循环必须串行调用；模块自身不创建线程，也不直接访问窗口、文件系统或平台接口。
+
+每条命令返回 `CommandResult`，明确区分：
+
+- 已应用、无变化和被拒绝。
+- Card、布局、临时 Projection 和显示器拓扑的变化范围。
+- 无需持久化、可延迟合并和必须立即落盘。
+- 可供日志记录的诊断信息。
+
+显示器拓扑属于瞬时运行状态。拓扑变化会重新计算 Projection，但不会改写持久化 Placement，也不会请求配置写入。
+
+Card 删除使用两阶段流程：
+
+```text
+RequestCardDeletion
+  -> 返回副作用预览和一次性 token
+  -> 外围 Adapter 完成确认与文件事务
+  -> CommitCardDeletion(token) 或 CancelCardDeletion(token)
+```
+
+提交前 Card、Placement 和 Projection 均保留；错误或过期 token 不能删除状态。应用 Card 的文件退回桌面由外围文件事务完成，运行时只在成功后提交内存状态。
+
 ## Multi-display Foundation
 
 - 显示器使用可恢复的稳定身份，不以枚举顺序作为持久化主键。
