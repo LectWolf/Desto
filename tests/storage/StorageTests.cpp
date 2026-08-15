@@ -98,18 +98,32 @@ void RunTests() {
         std::ofstream(configPath) << R"({
   "schemaVersion": 1,
   "storage": {"root": "C:\\OldDesto"},
-  "futureFeature": {"enabled": true}
+  "futureFeature": {"enabled": true},
+  "workspace": {
+    "futureWorkspaceField": "keep-me",
+    "placements": [{
+      "id": "placement-1",
+      "cardId": "card-1",
+      "target": {"kind": "specific", "displayId": "display-a"},
+      "rect": {"left": 10, "top": 20, "width": 300, "height": 200},
+      "futurePlacementField": {"value": 42}
+    }]
+  }
 })";
         JsonConfigStore configStore(configPath);
-        const auto loadedConfig = configStore.load();
+        auto loadedConfig = configStore.load();
         DESTO_CHECK(loadedConfig.schemaVersion == 1);
         DESTO_CHECK(loadedConfig.storageRoot == std::filesystem::path("C:\\OldDesto"));
-        configStore.save({.schemaVersion = 1, .storageRoot = testRoot / "new-storage"});
+        DESTO_CHECK(loadedConfig.workspace.placements().size() == 1);
+        loadedConfig.storageRoot = testRoot / "new-storage";
+        configStore.save(loadedConfig);
         std::ifstream savedConfig(configPath);
         const std::string savedText{
             std::istreambuf_iterator<char>(savedConfig),
             std::istreambuf_iterator<char>()};
         DESTO_CHECK(savedText.find("futureFeature") != std::string::npos);
+        DESTO_CHECK(savedText.find("futureWorkspaceField") != std::string::npos);
+        DESTO_CHECK(savedText.find("futurePlacementField") != std::string::npos);
         DESTO_CHECK(savedText.find("new-storage") != std::string::npos);
         for (const auto& entry : std::filesystem::directory_iterator(configPath.parent_path())) {
             DESTO_CHECK(entry.path().filename().wstring().find(L"settings.json.tmp-") == std::wstring::npos);

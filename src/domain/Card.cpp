@@ -6,12 +6,6 @@
 namespace desto::domain {
 namespace {
 
-void ValidateRect(const CardRect& rect) {
-    if (rect.width <= 0 || rect.height <= 0) {
-        throw std::invalid_argument("Card dimensions must be positive.");
-    }
-}
-
 void ValidateAppearance(const CardAppearancePreferences& appearance) {
     if (appearance.opacity < 0 || appearance.opacity > 1) {
         throw std::invalid_argument("Card opacity must be between 0 and 1.");
@@ -25,11 +19,6 @@ Card::Card(CardId id, CardType type)
     if (id_.empty()) {
         throw std::invalid_argument("Card id must not be empty.");
     }
-}
-
-void Card::setRect(CardRect rect) {
-    ValidateRect(rect);
-    rect_ = rect;
 }
 
 void Card::setChrome(CardChromePreferences preferences) {

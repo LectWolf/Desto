@@ -18,12 +18,23 @@ Card
 所有 Card 共享：
 
 - 稳定 ID 和类型标识。
-- 所属显示器或虚拟工作区。
-- 位置、尺寸、层级和可见状态。
 - 支持的能力集合。
 - 实例级入口偏好。
 - 实例级外观偏好。
 - 创建、更新和删除生命周期。
+
+位置不属于 Card 本身，而由 WorkspaceLayout 中的 Placement 管理。这样同一个 Card 可以在多个指定显示器上出现，也可以使用一个“所有显示器”Placement。
+
+### Workspace And Multi-display Layout
+
+WorkspaceLayout 使用稳定的 DisplayIdentity 保存 Placement 目标，不使用 Windows 枚举序号。Placement 的坐标是相对于目标显示器工作区的 DIP 坐标；平台适配层负责将它转换为实际窗口坐标。
+
+- 一个 Card 可以拥有多个不同指定显示器的 Placement。
+- 一个 Card 可以拥有一个所有显示器 Placement，但不能与指定显示器 Placement 混用。
+- DisplaySnapshot 是当前连接状态，不能覆盖持久化布局。
+- 目标显示器断开时生成 Fallback Projection，优先放到主显示器；没有主显示器时使用稳定排序后的第一个显示器。
+- Fallback Projection 只在当前拓扑下生效，原目标重连后恢复原 Placement。
+- 超出工作区的尺寸和位置只在投影阶段夹取，不能改写保存值。
 
 ### ApplicationCard
 

@@ -52,14 +52,6 @@ void RunTests() {
 
     bool rejected = false;
     try {
-        application.setRect({0, 0, 0, 220});
-    } catch (const std::invalid_argument&) {
-        rejected = true;
-    }
-    DESTO_CHECK(rejected);
-
-    rejected = false;
-    try {
         ApplicationCard invalid("invalid", "C:/absolute");
     } catch (const std::invalid_argument&) {
         rejected = true;

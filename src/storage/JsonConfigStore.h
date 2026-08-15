@@ -2,11 +2,16 @@
 
 #include <filesystem>
 
+#include "WorkspaceLayout.h"
+
 namespace desto::storage {
 
 struct ApplicationConfig {
-    int schemaVersion = 1;
+    static constexpr int CurrentSchemaVersion = 1;
+
+    int schemaVersion = CurrentSchemaVersion;
     std::filesystem::path storageRoot;
+    domain::WorkspaceLayout workspace;
 };
 
 class JsonConfigStore {

@@ -97,8 +97,9 @@ native input
 
 - 显示器使用可恢复的稳定身份，不以枚举顺序作为持久化主键。
 - 布局模型与当前连接状态分离。
+- `WorkspaceLayout` 保存 Placement；`DisplaySnapshot` 只描述当前拓扑；`PlacementProjection` 是临时解析结果。
 - 坐标转换集中在显示模块，Card 不直接依赖系统显示器对象。
-- DPI、工作区和虚拟桌面坐标在模块接口中具有明确语义。
+- Placement 使用相对显示器工作区的 DIP 坐标，DPI、工作区和虚拟桌面坐标在模块接口中具有明确语义。
 - 显示器拓扑变化产生布局决策，不直接破坏持久化的原始布局。
 
 ## Atomic Feature Delivery

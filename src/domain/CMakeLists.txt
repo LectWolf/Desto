@@ -1,6 +1,8 @@
 add_library(desto_domain STATIC
     Card.cpp
     Card.h
+    WorkspaceLayout.cpp
+    WorkspaceLayout.h
 )
 
 target_compile_features(desto_domain PUBLIC cxx_std_20)

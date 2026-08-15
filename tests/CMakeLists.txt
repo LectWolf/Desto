@@ -11,6 +11,19 @@ target_link_libraries(desto_domain_tests
 
 add_test(NAME desto_domain_tests COMMAND desto_domain_tests)
 
+add_executable(desto_workspace_layout_tests
+    domain/WorkspaceLayoutTests.cpp
+)
+
+target_include_directories(desto_workspace_layout_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+target_link_libraries(desto_workspace_layout_tests
+    PRIVATE
+        desto_domain
+)
+
+add_test(NAME desto_workspace_layout_tests COMMAND desto_workspace_layout_tests)
+
 add_executable(desto_storage_tests
     storage/StorageTests.cpp
 )

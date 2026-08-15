@@ -1,6 +1,7 @@
 #include "JsonConfigStore.h"
 
 #include <chrono>
+#include <algorithm>
 #include <fstream>
 #include <format>
 #include <stdexcept>
@@ -110,34 +111,129 @@ JsonConfigStore::JsonConfigStore(std::filesystem::path configPath)
 
 ApplicationConfig JsonConfigStore::load() const {
     const auto document = ReadDocument(configPath_);
+    if (!document.is_object()) {
+        throw std::runtime_error("Configuration root must be a JSON object.");
+    }
     ApplicationConfig result;
     if (document.contains("schemaVersion")) {
         result.schemaVersion = document.at("schemaVersion").get<int>();
     }
-    if (document.contains("storage") && document.at("storage").is_object()
-        && document.at("storage").contains("root")) {
-        result.storageRoot = FromUtf8(document.at("storage").at("root").get<std::string>());
+    if (document.contains("storage")) {
+        const auto& storage = document.at("storage");
+        if (!storage.is_object() || !storage.contains("root") || !storage.at("root").is_string()) {
+            throw std::runtime_error("Configuration storage.root must be a string.");
+        }
+        result.storageRoot = FromUtf8(storage.at("root").get<std::string>());
     }
-    if (result.schemaVersion < 1) {
+    if (result.schemaVersion != ApplicationConfig::CurrentSchemaVersion) {
         throw std::runtime_error("Unsupported configuration schema version.");
     }
     if (!result.storageRoot.empty() && !result.storageRoot.is_absolute()) {
         throw std::runtime_error("Configuration storage root must be absolute.");
     }
+    if (document.contains("workspace")) {
+        const auto& workspace = document.at("workspace");
+        if (!workspace.is_object() || !workspace.contains("placements")
+            || !workspace.at("placements").is_array()) {
+            throw std::runtime_error("Configuration workspace.placements must be an array.");
+        }
+        for (const auto& value : workspace.at("placements")) {
+            if (!value.is_object() || !value.contains("id") || !value.contains("cardId")
+                || !value.contains("target") || !value.contains("rect")) {
+                throw std::runtime_error("Configuration placement is missing required fields.");
+            }
+            const auto& target = value.at("target");
+            if (!target.is_object() || !target.contains("kind")) {
+                throw std::runtime_error("Configuration placement target is invalid.");
+            }
+            const auto kind = target.at("kind").get<std::string>();
+            if (kind != "all" && kind != "specific") {
+                throw std::runtime_error("Configuration placement target kind is invalid.");
+            }
+            if (kind == "specific" && (!target.contains("displayId")
+                                         || !target.at("displayId").is_string())) {
+                throw std::runtime_error("Configuration specific target is missing displayId.");
+            }
+            const auto displayTarget = kind == "all"
+                ? domain::DisplayTarget::all()
+                : domain::DisplayTarget::specific(target.at("displayId").get<std::string>());
+            const auto& rect = value.at("rect");
+            if (!rect.is_object()) {
+                throw std::runtime_error("Configuration placement rect is invalid.");
+            }
+            result.workspace.setPlacement({
+                .id = value.at("id").get<domain::PlacementId>(),
+                .cardId = value.at("cardId").get<domain::CardId>(),
+                .target = displayTarget,
+                .rect = {
+                    .left = rect.at("left").get<double>(),
+                    .top = rect.at("top").get<double>(),
+                    .width = rect.at("width").get<double>(),
+                    .height = rect.at("height").get<double>(),
+                },
+                .zIndex = value.value("zIndex", 0),
+            });
+        }
+    }
     return result;
 }
 
 void JsonConfigStore::save(const ApplicationConfig& config) const {
-    if (config.schemaVersion < 1) {
-        throw std::invalid_argument("Configuration schema version must be positive.");
+    if (config.schemaVersion != ApplicationConfig::CurrentSchemaVersion) {
+        throw std::invalid_argument("Configuration schema version is not supported.");
     }
     if (config.storageRoot.empty() || !config.storageRoot.is_absolute()) {
         throw std::invalid_argument("Configuration storage root must be absolute and non-empty.");
     }
 
     auto document = ReadDocument(configPath_);
+    if (!document.is_object()) {
+        throw std::runtime_error("Configuration root must be a JSON object.");
+    }
     document["schemaVersion"] = config.schemaVersion;
     document["storage"]["root"] = ToUtf8(config.storageRoot);
+
+    auto& placements = document["workspace"]["placements"];
+    if (!placements.is_array()) {
+        placements = Json::array();
+    }
+    Json existingById = Json::object();
+    for (const auto& value : placements) {
+        if (value.is_object() && value.contains("id") && value.at("id").is_string()) {
+            existingById[value.at("id").get<std::string>()] = value;
+        }
+    }
+    placements = Json::array();
+    auto layoutPlacements = config.workspace.placements();
+    std::sort(
+        layoutPlacements.begin(),
+        layoutPlacements.end(),
+        [](const domain::CardPlacement& left, const domain::CardPlacement& right) {
+            return left.id < right.id;
+        });
+    for (const auto& placement : layoutPlacements) {
+        auto value = existingById.contains(placement.id)
+            ? existingById.at(placement.id)
+            : Json::object();
+        value["id"] = placement.id;
+        value["cardId"] = placement.cardId;
+        value["target"]["kind"] = placement.target.kind() == domain::DisplayTargetKind::AllDisplays
+            ? "all"
+            : "specific";
+        if (placement.target.kind() == domain::DisplayTargetKind::SpecificDisplay) {
+            value["target"]["displayId"] = placement.target.displayId();
+        } else {
+            value["target"].erase("displayId");
+        }
+        value["rect"] = {
+            {"left", placement.rect.left},
+            {"top", placement.rect.top},
+            {"width", placement.rect.width},
+            {"height", placement.rect.height},
+        };
+        value["zIndex"] = placement.zIndex;
+        placements.push_back(std::move(value));
+    }
     WriteAtomically(configPath_, document.dump(2) + "\n");
 }
 

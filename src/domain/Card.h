@@ -33,13 +33,6 @@ struct CardDeletionPreview {
     bool requiresConfirmation = true;
 };
 
-struct CardRect {
-    double left = 0;
-    double top = 0;
-    double width = 320;
-    double height = 220;
-};
-
 struct CardChromePreferences {
     bool showCollapseControl = true;
     bool showCloseControl = true;
@@ -68,7 +61,6 @@ public:
 
     [[nodiscard]] const CardId& id() const noexcept { return id_; }
     [[nodiscard]] CardType type() const noexcept { return type_; }
-    [[nodiscard]] const CardRect& rect() const noexcept { return rect_; }
     [[nodiscard]] bool isVisible() const noexcept { return visible_; }
     [[nodiscard]] bool isExpanded() const noexcept { return expanded_; }
     [[nodiscard]] const CardChromePreferences& chrome() const noexcept { return chrome_; }
@@ -77,7 +69,6 @@ public:
     [[nodiscard]] CardDeletionPreview deletionPreview() const noexcept;
     [[nodiscard]] virtual CardDeletionEffect deletionEffect() const noexcept = 0;
 
-    void setRect(CardRect rect);
     void setVisible(bool visible) noexcept { visible_ = visible; }
     void setExpanded(bool expanded) noexcept { expanded_ = expanded; }
     void setChrome(CardChromePreferences preferences);
@@ -89,7 +80,6 @@ protected:
 private:
     CardId id_;
     CardType type_;
-    CardRect rect_;
     bool visible_ = true;
     bool expanded_ = true;
     CardChromePreferences chrome_;
