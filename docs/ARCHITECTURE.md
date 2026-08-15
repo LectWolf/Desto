@@ -41,8 +41,6 @@ Application
 Card
   |-- identity
   |-- type identity
-  |-- workspace placement
-  |-- geometry
   |-- lifecycle state
   |-- capabilities
   |-- chrome preferences
@@ -52,6 +50,8 @@ Concrete Card
   |-- content model
   |-- type-specific commands
   `-- type-specific persistence
+
+WorkspaceLayout 独立保存 Card 的 Placement 和几何位置；Card 不持有 Windows 窗口或显示器对象。
 ```
 
 继承只表达真正的类型关系。可选行为、外观和入口使用组合模型，避免为每种配置组合创建子类。
@@ -77,6 +77,8 @@ application default
 - Domain 与 Windows 平台能力之间。
 - Domain 与持久化之间。
 - Presentation 与渲染实现之间。
+
+Windows 平台当前提供 `DisplayTopologyProvider` 的两个 Adapter：生产环境的 `WindowsDisplayTopology` 和测试使用的 `MemoryDisplayTopologyProvider`。接口只暴露 `DisplaySnapshot`，不暴露 Win32 句柄、RECT 或 DPI API。
 
 模块内部可以拥有测试所需的内部接缝，但不得把实现细节扩散为公共接口。出现第二种真实实现前，不创建假想的可插拔体系。
 
