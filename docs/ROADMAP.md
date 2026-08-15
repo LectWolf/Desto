@@ -40,7 +40,7 @@
 
 完成 `DisplayTopologyProvider`、内存 Adapter 和 Windows `monitorDevicePath` 适配器。退出条件是稳定身份、工作区、DPI、主屏状态和异常拓扑可明确表示。
 
-### 08. Topology change listener
+### 08. Topology change listener [x]
 
 监听 `WM_DISPLAYCHANGE`、DPI 和显示器相关系统变化，加入防抖、重复事件合并和快照差异计算。退出条件是拓扑抖动不会产生重复布局写入，变化能触发新的 Projection 计算。
 

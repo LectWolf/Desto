@@ -1,6 +1,8 @@
 add_library(desto_platform STATIC
     DisplayTopology.cpp
     DisplayTopology.h
+    DisplayTopologyMonitor.cpp
+    DisplayTopologyMonitor.h
 )
 
 target_compile_features(desto_platform PUBLIC cxx_std_20)

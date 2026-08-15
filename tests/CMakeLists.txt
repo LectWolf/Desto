@@ -35,6 +35,13 @@ target_link_libraries(desto_display_topology_tests
         desto_platform
 )
 
+if(WIN32)
+    target_link_libraries(desto_display_topology_tests
+        PRIVATE
+            desto_platform_windows
+    )
+endif()
+
 add_test(NAME desto_display_topology_tests COMMAND desto_display_topology_tests)
 
 add_executable(desto_storage_tests

@@ -1,4 +1,6 @@
 add_library(desto_platform_windows STATIC
+    WindowsDisplayChangeSource.cpp
+    WindowsDisplayChangeSource.h
     WindowsDisplayTopology.cpp
     WindowsDisplayTopology.h
 )
