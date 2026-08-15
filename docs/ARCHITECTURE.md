@@ -1,0 +1,114 @@
+# Architecture
+
+## Goals
+
+架构需要同时支持低资源占用、多显示器、实例级配置和不同 Container 类型，并且让这些能力能够独立演进。
+
+技术框架尚未决定。本文件描述稳定模块和数据流，不绑定 Qt、Win32 或具体目录命名。
+
+## Module Map
+
+```text
+Application
+  |-- Domain
+  |    |-- Container
+  |    |-- Workspace
+  |    `-- Layout
+  |-- Features
+  |    `-- concrete container capabilities
+  |-- Presentation
+  |    |-- desktop surfaces
+  |    |-- container chrome
+  |    `-- settings UI
+  |-- Platform.Windows
+  |    |-- displays and DPI
+  |    |-- desktop shell
+  |    |-- input and drag/drop
+  |    `-- native item metadata
+  `-- Storage
+       |-- settings
+       |-- layouts
+       `-- migrations
+```
+
+## Container Model
+
+`Container` 是稳定基类。它拥有通用状态和生命周期，但不包含具体内容类型的实现细节。
+
+概念模型：
+
+```text
+Container
+  |-- identity
+  |-- type identity
+  |-- workspace placement
+  |-- geometry
+  |-- lifecycle state
+  |-- capabilities
+  |-- chrome preferences
+  `-- appearance preferences
+
+Concrete Container
+  |-- content model
+  |-- type-specific commands
+  `-- type-specific persistence
+```
+
+继承只表达真正的类型关系。可选行为、外观和入口使用组合模型，避免为每种配置组合创建子类。
+
+## Configuration Resolution
+
+Container 的有效配置按以下顺序解析：
+
+```text
+application default
+        -> container-type default
+        -> container instance override
+```
+
+实例覆盖拥有最高优先级。更改全局默认只影响没有明确覆盖该属性的实例。
+
+入口可见性是实例配置的一部分。Presentation 根据 Container 的能力与实例偏好共同决定显示内容，不通过具体类型判断堆叠条件分支。
+
+## Stable Seams
+
+第一阶段只保留确定存在变化的接缝：
+
+- Domain 与 Windows 平台能力之间。
+- Domain 与持久化之间。
+- Presentation 与渲染实现之间。
+
+模块内部可以拥有测试所需的内部接缝，但不得把实现细节扩散为公共接口。出现第二种真实实现前，不创建假想的可插拔体系。
+
+## Event Flow
+
+```text
+native input
+  -> application command
+  -> domain state transition
+  -> immutable change result
+  -> persistence scheduling
+  -> presentation update
+```
+
+领域状态变化应先形成明确结果，再由外围模块执行窗口、文件和配置副作用。
+
+## Multi-display Foundation
+
+- 显示器使用可恢复的稳定身份，不以枚举顺序作为持久化主键。
+- 布局模型与当前连接状态分离。
+- 坐标转换集中在显示模块，Container 不直接依赖系统显示器对象。
+- DPI、工作区和虚拟桌面坐标在模块接口中具有明确语义。
+- 显示器拓扑变化产生布局决策，不直接破坏持久化的原始布局。
+
+## Atomic Feature Delivery
+
+一个功能模块只有在以下内容同时成立时才算完成：
+
+- 领域行为明确。
+- 实例配置和默认继承明确。
+- Presentation 能反映状态。
+- 持久化和迁移明确。
+- 失败路径可观察。
+- 自动验证覆盖稳定接口。
+- 资源成本已测量。
