@@ -3,6 +3,8 @@ add_library(desto_platform_windows STATIC
     WindowsSingleInstanceGate.h
     WindowsDisplayChangeSource.cpp
     WindowsDisplayChangeSource.h
+    WindowsDesktopHost.cpp
+    WindowsDesktopHost.h
     WindowsDisplayTopology.cpp
     WindowsDisplayTopology.h
 )
@@ -21,4 +23,5 @@ target_link_libraries(desto_platform_windows
         Shcore
         User32
         Kernel32
+        Gdi32
 )

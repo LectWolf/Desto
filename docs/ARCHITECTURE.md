@@ -4,7 +4,7 @@
 
 架构需要同时支持低资源占用、多显示器、实例级配置和不同 Card 类型，并且让这些能力能够独立演进。
 
-技术决策已在事项 16 固化。本文件描述稳定模块和数据流；正式桌面宿主使用 Win32，卡片内容使用 Direct2D 离屏渲染后提交到分层窗口，不引入 Qt、WinUI 或 WebView 常驻运行时。
+技术决策已在事项 16 固化。本文件描述稳定模块和数据流；正式桌面宿主使用 Win32，卡片内容使用轻量 GDI DIB 渲染后提交到分层窗口，不引入 Qt、WinUI 或 WebView 常驻运行时。高质量渲染后端可以在后续以显式可选方式加入，但不能改变默认资源预算。
 
 ## Module Map
 
@@ -78,7 +78,7 @@ application default
 - Domain 与持久化之间。
 - Presentation 与渲染实现之间。
 
-正式 Presentation 宿主的边界已确定：Win32 窗口生命周期、输入和桌面层级属于 Platform/Presentation 宿主；Card 不持有 HWND。卡片渲染器输出预乘 Alpha 位图，由宿主通过 `UpdateLayeredWindow` 批量提交。DirectComposition 原型仅用于比较，不作为常驻卡片窗口的默认合成路径。
+正式 Presentation 宿主的边界已确定：Win32 窗口生命周期、输入和桌面层级属于 Platform/Presentation 宿主；Card 不持有 HWND。卡片渲染器输出预乘 Alpha 位图，由宿主通过 `UpdateLayeredWindow` 批量提交。DirectComposition 和 Direct2D 原型仅用于比较，不作为常驻卡片窗口的默认合成路径。
 
 Windows 平台当前提供 `DisplayTopologyProvider` 的两个 Adapter：生产环境的 `WindowsDisplayTopology` 和测试使用的 `MemoryDisplayTopologyProvider`。`DisplayTopologyMonitor` 负责快照差异和防抖，`WindowsDisplayChangeSource` 负责系统消息输入。接口只暴露 `DisplaySnapshot`，不暴露 Win32 句柄、RECT 或 DPI API。
 

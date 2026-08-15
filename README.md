@@ -23,4 +23,4 @@ Desto 是一个面向 Windows 的轻量桌面整理工具，目前处于架构�
 
 ## Status
 
-当前处于 `（17/34）Production desktop host`。事项 1-16 已完成；已确定采用 Win32 原生窗口宿主、分层窗口、批量定位和 Direct2D 离屏渲染，不引入 Qt/WinUI/CEF 常驻运行时。下一步开始正式产品窗口宿主，第 17 项进入产品界面实现。
+当前处于 `（18/34）Card chrome and rendering`。事项 1-17 已完成；正式桌面宿主已可运行，使用 Win32 分层窗口、批量定位和轻量 GDI DIB 渲染，Release 采样约 3.6 MB 私有工作集。下一步实现 Card 标题、图标、展开/收起、关闭/固定入口和实例级外观配置。

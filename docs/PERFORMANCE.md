@@ -70,6 +70,8 @@ Debug 同一场景的私有工作集为 0.69/0.95/2.79/0.93 MB，启动为 0.828
 | Native | Win32 layered window + GDI DIB | 1.35 | 0 | none |
 | Alternative | DirectComposition + Direct2D + DWrite | 59.85 | 0 | none |
 
+事项 17 的正式宿主使用 Win32 layered/GDI DIB，当前 3 个 Card 在每个活动显示器上投影时 Release 私有工作集采样约 3.6 MB，退出码为 0 且无残留进程。该数值仍会随 Card 内容、Shell 图标和文件监视功能增加，后续事项必须继续用相同工具复测。
+
 Qt/qmake 未安装在当前构建环境，因此事项 15 采用 Windows SDK 自带 DirectComposition 作为可构建候选。事项 16 需要结合这组数据和输入、DPI、桌面层级、发布依赖等维度做技术选择，不能只按渲染效果判断。
 
 ## Initial Targets
