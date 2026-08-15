@@ -58,4 +58,3 @@ FolderMappingCard 和 ReferenceCard 删除时不移动外部文件，只删除�
 ## Mapping Exclusivity
 
 一个外部源文件夹在同一 Desto 配置中只能被一个 FolderMappingCard 占用。这个约束由存储/卡片注册模块统一检查，不能依赖界面层阻止重复创建。
-
