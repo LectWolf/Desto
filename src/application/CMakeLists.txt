@@ -1,6 +1,12 @@
 add_library(desto_application STATIC
+    ApplicationLifecycle.cpp
+    ApplicationLifecycle.h
     ApplicationRuntime.cpp
     ApplicationRuntime.h
+    Diagnostics.cpp
+    Diagnostics.h
+    SingleInstance.cpp
+    SingleInstance.h
 )
 
 target_compile_features(desto_application PUBLIC cxx_std_20)

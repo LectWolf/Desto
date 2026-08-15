@@ -1,4 +1,6 @@
 add_library(desto_platform_windows STATIC
+    WindowsSingleInstanceGate.cpp
+    WindowsSingleInstanceGate.h
     WindowsDisplayChangeSource.cpp
     WindowsDisplayChangeSource.h
     WindowsDisplayTopology.cpp
@@ -15,6 +17,8 @@ target_include_directories(desto_platform_windows
 target_link_libraries(desto_platform_windows
     PUBLIC
         desto_platform
+        desto_application
         Shcore
         User32
+        Kernel32
 )

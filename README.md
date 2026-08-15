@@ -23,4 +23,4 @@ Desto 是一个面向 Windows 的轻量桌面整理工具，目前处于架构�
 
 ## Status
 
-当前处于 `（12/34）Process lifecycle and diagnostics`。事项 1-11 已完成，正在补齐单实例、启动顺序、正常退出、托盘退出和诊断日志；第 14 项开始 UI 原型，第 17 项开始正式产品界面。
+当前处于 `（13/34）Headless integration and performance baseline`。事项 1-12 已完成，正在补齐无 UI 端到端场景和 Empty/Typical/Heavy/Hidden 性能基线；第 14 项开始 UI 原型，第 17 项开始正式产品界面。

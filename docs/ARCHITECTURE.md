@@ -121,6 +121,21 @@ RequestCardDeletion
 
 持久化通过 `CardSnapshot` 值对象跨越 Storage seam。快照包含 Card 的通用状态、实例 Chrome/外观偏好和类型专属内容；`WorkspaceLayout` 作为同一配置快照的一部分保存 Placement。运行时恢复先在临时状态中构造并校验全部 Card 与 Placement，成功后一次替换，失败不会污染当前状态。
 
+### Process Lifecycle
+
+`ApplicationLifecycle` 统一管理进程启动和退出顺序：
+
+```text
+Created
+  -> begin / acquire single-instance gate
+  -> configurationLoaded
+  -> runtimeReady / Running
+  -> requestShutdown
+  -> completeShutdown / Stopped
+```
+
+单实例接缝由 Windows 命名 Mutex Adapter 实现，测试使用内存 Adapter。生命周期析构时也会释放已持有的 gate，避免异常路径留下进程锁。诊断只记录固定事件码、等级和序号，并限制内存容量，不记录用户路径或文件内容。
+
 ## Multi-display Foundation
 
 - 显示器使用可恢复的稳定身份，不以枚举顺序作为持久化主键。
