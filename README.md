@@ -17,9 +17,10 @@ Desto 是一个面向 Windows 的轻量桌面整理工具，目前处于架构�
 - [存储与迁移](docs/STORAGE.md)
 - [架构原则](docs/ARCHITECTURE.md)
 - [性能策略](docs/PERFORMANCE.md)
+- [交付路线](docs/ROADMAP.md)
 - [配置模型](docs/CONFIGURATION.md)
 - [架构决策记录](docs/adr/README.md)
 
 ## Status
 
-领域模块骨架已经建立。最终 UI 技术栈尚未确定，下一阶段将用等价原型比较候选实现，再通过 ADR 固化决定。
+当前处于 `（1/5）底层与运行骨架`。领域、存储、多屏布局和 Windows 显示器身份基础已建立，正在补齐运行编排、拓扑监听、恢复和性能基线；达到阶段退出条件后再进入 UI 技术原型。
