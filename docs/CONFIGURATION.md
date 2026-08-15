@@ -14,10 +14,10 @@
 ApplicationSettings
   `-- application-wide defaults
 
-ContainerTypeDefaults
-  `-- defaults supplied by each container type
+CardTypeDefaults
+  `-- defaults supplied by each card type
 
-ContainerInstanceSettings
+CardInstanceSettings
   |-- chrome preferences
   |-- appearance preferences
   |-- behavior preferences
@@ -25,7 +25,7 @@ ContainerInstanceSettings
 
 WorkspaceLayout
   |-- display mappings
-  `-- container placements
+  `-- card placements
 ```
 
 ## Resolution Rules

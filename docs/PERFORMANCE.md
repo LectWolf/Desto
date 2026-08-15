@@ -11,25 +11,25 @@
 - 冷启动到首个稳定画面的时间。
 - 空布局的私有工作集和提交大小。
 - 典型布局的私有工作集和提交大小。
-- 全部 Container 显示和隐藏的提交延迟。
+- 全部 Card 显示和隐藏的提交延迟。
 - 拖动、缩放和吸附的输入到画面延迟。
 - 空闲 CPU、线程数和周期性唤醒。
-- 每增加一个显示器、Container 和可见项目的边际成本。
+- 每增加一个显示器、Card 和可见项目的边际成本。
 
 ## Benchmark Scenarios
 
 ```text
 Empty
-  1 display, 0 containers
+  1 display, 0 cards
 
 Typical
-  2 displays, 4 containers, 100 visible items
+  2 displays, 4 cards, 100 visible items
 
 Heavy
-  3 displays, 20 containers, 1000 total items
+  3 displays, 20 cards, 1000 total items
 
 Hidden
-  Typical layout with every container hidden
+  Typical layout with every card hidden
 ```
 
 候选 UI 技术必须在相同场景、相同素材和相同构建配置下比较。

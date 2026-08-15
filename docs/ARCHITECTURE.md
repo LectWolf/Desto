@@ -2,7 +2,7 @@
 
 ## Goals
 
-架构需要同时支持低资源占用、多显示器、实例级配置和不同 Container 类型，并且让这些能力能够独立演进。
+架构需要同时支持低资源占用、多显示器、实例级配置和不同 Card 类型，并且让这些能力能够独立演进。
 
 技术框架尚未决定。本文件描述稳定模块和数据流，不绑定 Qt、Win32 或具体目录命名。
 
@@ -11,14 +11,14 @@
 ```text
 Application
   |-- Domain
-  |    |-- Container
+  |    |-- Card
   |    |-- Workspace
   |    `-- Layout
   |-- Features
-  |    `-- concrete container capabilities
+  |    `-- concrete card capabilities
   |-- Presentation
   |    |-- desktop surfaces
-  |    |-- container chrome
+  |    |-- card chrome
   |    `-- settings UI
   |-- Platform.Windows
   |    |-- displays and DPI
@@ -31,14 +31,14 @@ Application
        `-- migrations
 ```
 
-## Container Model
+## Card Model
 
-`Container` 是稳定基类。它拥有通用状态和生命周期，但不包含具体内容类型的实现细节。
+`Card` 是稳定基类。它拥有通用状态和生命周期，但不包含具体内容类型的实现细节。
 
 概念模型：
 
 ```text
-Container
+Card
   |-- identity
   |-- type identity
   |-- workspace placement
@@ -48,7 +48,7 @@ Container
   |-- chrome preferences
   `-- appearance preferences
 
-Concrete Container
+Concrete Card
   |-- content model
   |-- type-specific commands
   `-- type-specific persistence
@@ -58,17 +58,17 @@ Concrete Container
 
 ## Configuration Resolution
 
-Container 的有效配置按以下顺序解析：
+Card 的有效配置按以下顺序解析：
 
 ```text
 application default
-        -> container-type default
-        -> container instance override
+        -> card-type default
+        -> card instance override
 ```
 
 实例覆盖拥有最高优先级。更改全局默认只影响没有明确覆盖该属性的实例。
 
-入口可见性是实例配置的一部分。Presentation 根据 Container 的能力与实例偏好共同决定显示内容，不通过具体类型判断堆叠条件分支。
+入口可见性是实例配置的一部分。Presentation 根据 Card 的能力与实例偏好共同决定显示内容，不通过具体类型判断堆叠条件分支。
 
 ## Stable Seams
 
@@ -97,7 +97,7 @@ native input
 
 - 显示器使用可恢复的稳定身份，不以枚举顺序作为持久化主键。
 - 布局模型与当前连接状态分离。
-- 坐标转换集中在显示模块，Container 不直接依赖系统显示器对象。
+- 坐标转换集中在显示模块，Card 不直接依赖系统显示器对象。
 - DPI、工作区和虚拟桌面坐标在模块接口中具有明确语义。
 - 显示器拓扑变化产生布局决策，不直接破坏持久化的原始布局。
 
