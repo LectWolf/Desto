@@ -7,8 +7,7 @@
 ```text
 Card
   |-- ApplicationCard
-  |-- FolderMappingCard
-  |-- ReferenceCard
+  |-- MappingCard
   `-- TodoCard
 ```
 
@@ -36,24 +35,16 @@ ApplicationCard 管理自己的内容目录。卡片只记录相对于 Desto 存
 
 移动、重命名、删除和跨磁盘行为必须由存储事务模块负责，不能隐含在拖放代码中。
 
-### FolderMappingCard
+### MappingCard
 
-FolderMappingCard 映射一个外部文件夹，卡片内容以该文件夹当前状态为准。
+FolderMappingCard 和 ReferenceCard 合并为 MappingCard。MappingCard 根据内容来源拥有三种状态：空、单一文件夹来源、显式引用集合。
 
-- 外部文件夹新增或删除项目时，卡片可以同步变化。
-- 卡片不拥有该文件夹的文件。
-- 卡片默认允许反向修改文件夹；是否允许修改仍是实例策略，可以按卡片关闭。
-- 同一个源文件夹不能同时被多个 FolderMappingCard 占用。
+- 空状态和单一文件夹来源可以在界面上显示为“文件夹映射”。
+- 文件夹来源会实时反映外部文件夹，且默认允许从卡片反向修改源文件夹。
+- 一个源文件夹不能同时被多个 MappingCard 占用。
+- 反向修改仍是实例策略，可以按卡片关闭。
 
-### ReferenceCard
-
-ReferenceCard 保存用户明确加入的文件引用，不移动原文件。它就是“只负责映射移动进入的文件”的内部模型，中文名称暂不决定。
-
-- 每个项目保存稳定引用信息和当前可解析状态。
-- 原文件移动或删除后，卡片应能表达失效状态。
-- 引用集合与外部目录内容不自动等同。
-
-如果后续验证表明 FolderMappingCard 与 ReferenceCard 的用户体验可以统一，可以保留同一个 Mapping 入口，在内部使用不同的来源策略；不应因此复制两套 Card 基础实现。
+显式引用集合保存用户主动加入的文件引用，不移动原文件；原文件移动或删除后，卡片应能表达失效状态。内部使用 `References` 状态，用户可见名称暂不决定。
 
 ### TodoCard
 
@@ -69,7 +60,7 @@ Card
   `-- content source and ownership policy
 ```
 
-内容来源决定项目从哪里来，归属策略决定加入、移动、删除和失效如何处理。把两者拆开，可以避免“映射文件夹”和“引用集合”重复实现全部 Card 行为。
+内容来源决定项目从哪里来，归属策略决定加入、移动、删除和失效如何处理。MappingCard 只替换内容来源策略，不复制全部 Card 行为。
 
 ## Naming
 

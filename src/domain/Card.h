@@ -11,9 +11,26 @@ using CardId = std::string;
 
 enum class CardType {
     Application,
-    FolderMapping,
-    Reference,
+    Mapping,
     Todo,
+};
+
+enum class CardDeletionEffect {
+    ReturnManagedItemsToDesktop,
+    RemoveCardOnly,
+};
+
+enum class MappingMode {
+    Empty,
+    Folder,
+    References,
+};
+
+struct CardDeletionPreview {
+    CardId cardId;
+    CardType cardType;
+    CardDeletionEffect effect;
+    bool requiresConfirmation = true;
 };
 
 struct CardRect {
@@ -56,6 +73,9 @@ public:
     [[nodiscard]] bool isExpanded() const noexcept { return expanded_; }
     [[nodiscard]] const CardChromePreferences& chrome() const noexcept { return chrome_; }
     [[nodiscard]] const CardAppearancePreferences& appearance() const noexcept { return appearance_; }
+    [[nodiscard]] bool requiresDeletionConfirmation() const noexcept { return true; }
+    [[nodiscard]] CardDeletionPreview deletionPreview() const noexcept;
+    [[nodiscard]] virtual CardDeletionEffect deletionEffect() const noexcept = 0;
 
     void setRect(CardRect rect);
     void setVisible(bool visible) noexcept { visible_ = visible; }
@@ -80,6 +100,9 @@ class ApplicationCard final : public Card {
 public:
     ApplicationCard(CardId id, std::filesystem::path relativeStoragePath);
 
+    [[nodiscard]] CardDeletionEffect deletionEffect() const noexcept override {
+        return CardDeletionEffect::ReturnManagedItemsToDesktop;
+    }
     [[nodiscard]] const std::filesystem::path& relativeStoragePath() const noexcept { return relativeStoragePath_; }
     void setRelativeStoragePath(std::filesystem::path relativeStoragePath);
 
@@ -87,35 +110,36 @@ private:
     std::filesystem::path relativeStoragePath_;
 };
 
-class FolderMappingCard final : public Card {
+class MappingCard final : public Card {
 public:
-    FolderMappingCard(CardId id, std::filesystem::path sourceRoot);
+    explicit MappingCard(CardId id);
 
+    [[nodiscard]] CardDeletionEffect deletionEffect() const noexcept override {
+        return CardDeletionEffect::RemoveCardOnly;
+    }
+    [[nodiscard]] MappingMode mode() const noexcept;
+    [[nodiscard]] bool presentsAsFolderMapping() const noexcept { return mode() != MappingMode::References; }
     [[nodiscard]] const std::filesystem::path& sourceRoot() const noexcept { return sourceRoot_; }
     [[nodiscard]] bool allowsSourceMutation() const noexcept { return allowsSourceMutation_; }
-    void setSourceRoot(std::filesystem::path sourceRoot);
+    [[nodiscard]] const std::vector<FileReference>& references() const noexcept { return references_; }
+    void setFolderSource(std::filesystem::path sourceRoot);
+    void setReferences(std::vector<FileReference> references);
+    void clearSource() noexcept;
     void setAllowsSourceMutation(bool allowed) noexcept { allowsSourceMutation_ = allowed; }
 
 private:
     std::filesystem::path sourceRoot_;
-    bool allowsSourceMutation_ = true;
-};
-
-class ReferenceCard final : public Card {
-public:
-    explicit ReferenceCard(CardId id);
-
-    [[nodiscard]] const std::vector<FileReference>& references() const noexcept { return references_; }
-    void setReferences(std::vector<FileReference> references);
-
-private:
     std::vector<FileReference> references_;
+    bool allowsSourceMutation_ = true;
 };
 
 class TodoCard final : public Card {
 public:
     explicit TodoCard(CardId id);
 
+    [[nodiscard]] CardDeletionEffect deletionEffect() const noexcept override {
+        return CardDeletionEffect::RemoveCardOnly;
+    }
     [[nodiscard]] const std::vector<TodoItem>& items() const noexcept { return items_; }
     void setItems(std::vector<TodoItem> items);
 

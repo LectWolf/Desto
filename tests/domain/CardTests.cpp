@@ -7,31 +7,46 @@ using namespace desto::domain;
 
 int main() {
     ApplicationCard application("application-1", "cards/application-1");
-    FolderMappingCard folder("folder-1", "C:/Projects");
-    ReferenceCard references("references-1");
+    MappingCard mapping("mapping-1");
     TodoCard todos("todos-1");
 
     assert(application.type() == CardType::Application);
-    assert(folder.type() == CardType::FolderMapping);
-    assert(references.type() == CardType::Reference);
+    assert(mapping.type() == CardType::Mapping);
     assert(todos.type() == CardType::Todo);
     assert(application.relativeStoragePath() == "cards/application-1");
-    assert(folder.allowsSourceMutation());
+    assert(mapping.requiresDeletionConfirmation());
+    assert(application.deletionEffect() == CardDeletionEffect::ReturnManagedItemsToDesktop);
+    assert(mapping.deletionEffect() == CardDeletionEffect::RemoveCardOnly);
+    assert(todos.deletionEffect() == CardDeletionEffect::RemoveCardOnly);
+    assert(application.deletionPreview().requiresConfirmation);
+    assert(mapping.deletionPreview().requiresConfirmation);
+    assert(todos.deletionPreview().requiresConfirmation);
+    assert(mapping.mode() == MappingMode::Empty);
+    assert(mapping.presentsAsFolderMapping());
 
     auto chrome = application.chrome();
     chrome.showCollapseControl = false;
     application.setChrome(chrome);
     assert(!application.chrome().showCollapseControl);
-    assert(folder.chrome().showCollapseControl);
+    assert(mapping.chrome().showCollapseControl);
 
     application.setAppearance({"compact", 0.8});
     assert(application.appearance().preset == "compact");
     assert(application.appearance().opacity == 0.8);
 
-    folder.setAllowsSourceMutation(false);
-    assert(!folder.allowsSourceMutation());
-    folder.setAllowsSourceMutation(true);
-    assert(folder.allowsSourceMutation());
+    mapping.setFolderSource("C:/Projects");
+    assert(mapping.mode() == MappingMode::Folder);
+    assert(mapping.presentsAsFolderMapping());
+    assert(mapping.allowsSourceMutation());
+
+    mapping.setReferences({{"item-1", "C:/Projects/App.exe"}, {"item-2", "C:/Projects/Tool.exe"}});
+    assert(mapping.mode() == MappingMode::References);
+    assert(!mapping.presentsAsFolderMapping());
+    assert(mapping.sourceRoot().empty());
+
+    mapping.clearSource();
+    assert(mapping.mode() == MappingMode::Empty);
+    assert(mapping.presentsAsFolderMapping());
 
     bool rejected = false;
     try {
@@ -49,6 +64,6 @@ int main() {
     }
     assert(rejected);
 
-    assert(ToString(CardType::Reference) == "reference");
+    assert(ToString(CardType::Mapping) == "mapping");
     return 0;
 }

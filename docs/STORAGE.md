@@ -35,8 +35,8 @@ ResolvedPath = D:\DestoData\cards\application-1
 | Card type | Source of truth | Default ownership |
 | --- | --- | --- |
 | ApplicationCard | Desto storage root | Desto manages files |
-| FolderMappingCard | One external folder | External folder owns files |
-| ReferenceCard | Explicit references | Original locations own files |
+| MappingCard (folder mode) | One external folder | External folder owns files |
+| MappingCard (references mode) | Explicit references | Original locations own files |
 | TodoCard | Card data | Desto owns card data |
 
 ## Deleting An ApplicationCard
@@ -49,7 +49,7 @@ ResolvedPath = D:\DestoData\cards\application-1
 - 所有移动完成或进入可恢复失败状态后，才删除卡片记录。
 - 中断时保留迁移日志，支持继续处理或人工恢复。
 
-FolderMappingCard 和 ReferenceCard 删除时不移动外部文件，只删除映射或引用关系。
+MappingCard 删除时不移动外部文件，只删除映射或引用关系。
 
 ## External Paths
 
@@ -57,4 +57,14 @@ FolderMappingCard 和 ReferenceCard 删除时不移动外部文件，只删除�
 
 ## Mapping Exclusivity
 
-一个外部源文件夹在同一 Desto 配置中只能被一个 FolderMappingCard 占用。这个约束由存储/卡片注册模块统一检查，不能依赖界面层阻止重复创建。
+一个外部源文件夹在同一 Desto 配置中只能被一个 MappingCard 占用。这个约束由存储/卡片注册模块统一检查，不能依赖界面层阻止重复创建。
+
+## All-card Deletion Confirmation
+
+所有 Card 的删除都必须经过二次确认。确认内容由删除预览提供，至少说明卡片名称、类型、影响项目数量和实际副作用：
+
+- ApplicationCard 会将受管理文件退回桌面，并处理同名冲突。
+- MappingCard 只删除映射或引用关系，不移动外部文件。
+- TodoCard 只删除待办数据。
+
+Presentation 不得提供绕过删除预览的快捷删除路径。

@@ -41,6 +41,15 @@ void Card::setAppearance(CardAppearancePreferences preferences) {
     appearance_ = std::move(preferences);
 }
 
+CardDeletionPreview Card::deletionPreview() const noexcept {
+    return {
+        .cardId = id_,
+        .cardType = type_,
+        .effect = deletionEffect(),
+        .requiresConfirmation = true,
+    };
+}
+
 ApplicationCard::ApplicationCard(CardId id, std::filesystem::path relativeStoragePath)
     : Card(std::move(id), CardType::Application),
       relativeStoragePath_(std::move(relativeStoragePath)) {
@@ -56,26 +65,26 @@ void ApplicationCard::setRelativeStoragePath(std::filesystem::path relativeStora
     relativeStoragePath_ = std::move(relativeStoragePath);
 }
 
-FolderMappingCard::FolderMappingCard(CardId id, std::filesystem::path sourceRoot)
-    : Card(std::move(id), CardType::FolderMapping),
-      sourceRoot_(std::move(sourceRoot)) {
-    if (sourceRoot_.empty()) {
-        throw std::invalid_argument("Folder mapping source root must not be empty.");
-    }
+MappingCard::MappingCard(CardId id)
+    : Card(std::move(id), CardType::Mapping) {
 }
 
-void FolderMappingCard::setSourceRoot(std::filesystem::path sourceRoot) {
-    if (sourceRoot.empty()) {
-        throw std::invalid_argument("Folder mapping source root must not be empty.");
+MappingMode MappingCard::mode() const noexcept {
+    if (!sourceRoot_.empty()) {
+        return MappingMode::Folder;
     }
+    return references_.empty() ? MappingMode::Empty : MappingMode::References;
+}
+
+void MappingCard::setFolderSource(std::filesystem::path sourceRoot) {
+    if (sourceRoot.empty()) {
+        throw std::invalid_argument("Mapping folder source must not be empty.");
+    }
+    references_.clear();
     sourceRoot_ = std::move(sourceRoot);
 }
 
-ReferenceCard::ReferenceCard(CardId id)
-    : Card(std::move(id), CardType::Reference) {
-}
-
-void ReferenceCard::setReferences(std::vector<FileReference> references) {
+void MappingCard::setReferences(std::vector<FileReference> references) {
     references.erase(
         std::remove_if(
             references.begin(),
@@ -84,7 +93,13 @@ void ReferenceCard::setReferences(std::vector<FileReference> references) {
                 return reference.id.empty() || reference.path.empty();
             }),
         references.end());
+    sourceRoot_.clear();
     references_ = std::move(references);
+}
+
+void MappingCard::clearSource() noexcept {
+    sourceRoot_.clear();
+    references_.clear();
 }
 
 TodoCard::TodoCard(CardId id)
@@ -107,10 +122,8 @@ std::string_view ToString(CardType type) noexcept {
     switch (type) {
     case CardType::Application:
         return "application";
-    case CardType::FolderMapping:
-        return "folder-mapping";
-    case CardType::Reference:
-        return "reference";
+    case CardType::Mapping:
+        return "mapping";
     case CardType::Todo:
         return "todo";
     }
