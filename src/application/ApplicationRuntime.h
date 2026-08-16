@@ -28,6 +28,34 @@ struct CreateTodoCard {
     domain::CardId cardId;
 };
 
+struct AddTodoItem {
+    domain::CardId cardId;
+    std::string itemId;
+    std::string title;
+};
+
+struct RenameTodoItem {
+    domain::CardId cardId;
+    std::string itemId;
+    std::string title;
+};
+
+struct SetTodoItemCompleted {
+    domain::CardId cardId;
+    std::string itemId;
+    bool completed;
+};
+
+struct RemoveTodoItem {
+    domain::CardId cardId;
+    std::string itemId;
+};
+
+struct ReorderTodoItems {
+    domain::CardId cardId;
+    std::vector<std::string> orderedItemIds;
+};
+
 struct SetCardVisibility {
     domain::CardId cardId;
     bool visible;
@@ -98,6 +126,11 @@ using ApplicationCommand = std::variant<
     CreateApplicationCard,
     CreateMappingCard,
     CreateTodoCard,
+    AddTodoItem,
+    RenameTodoItem,
+    SetTodoItemCompleted,
+    RemoveTodoItem,
+    ReorderTodoItems,
     SetCardVisibility,
     SetCardExpanded,
     SetCardContentPreferences,
@@ -128,6 +161,8 @@ enum class CommandError {
     DeletionNotPending,
     DeletionTokenMismatch,
     MappingSourceAlreadyMapped,
+    TodoItemNotFound,
+    DuplicateTodoItemId,
     InvalidCommand,
 };
 
@@ -193,6 +228,11 @@ private:
     [[nodiscard]] CommandResult handle(const CreateApplicationCard& command);
     [[nodiscard]] CommandResult handle(const CreateMappingCard& command);
     [[nodiscard]] CommandResult handle(const CreateTodoCard& command);
+    [[nodiscard]] CommandResult handle(const AddTodoItem& command);
+    [[nodiscard]] CommandResult handle(const RenameTodoItem& command);
+    [[nodiscard]] CommandResult handle(const SetTodoItemCompleted& command);
+    [[nodiscard]] CommandResult handle(const RemoveTodoItem& command);
+    [[nodiscard]] CommandResult handle(const ReorderTodoItems& command);
     [[nodiscard]] CommandResult handle(const SetCardVisibility& command);
     [[nodiscard]] CommandResult handle(const SetCardExpanded& command);
     [[nodiscard]] CommandResult handle(const SetCardContentPreferences& command);

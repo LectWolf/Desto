@@ -28,6 +28,34 @@ void RunTests() {
     DESTO_CHECK(mapping.mode() == MappingMode::Empty);
     DESTO_CHECK(mapping.presentsAsFolderMapping());
 
+    todos.setItems({
+        {.id = "todo-1", .title = "First", .completed = false},
+        {.id = "todo-2", .title = "Second", .completed = true},
+    });
+    DESTO_CHECK(todos.items().size() == 2);
+    const auto validTodos = todos.items();
+
+    bool invalidTodosRejected = false;
+    try {
+        todos.setItems({
+            {.id = "duplicate", .title = "First"},
+            {.id = "duplicate", .title = "Second"},
+        });
+    } catch (const std::invalid_argument&) {
+        invalidTodosRejected = true;
+    }
+    DESTO_CHECK(invalidTodosRejected);
+    DESTO_CHECK(todos.items() == validTodos);
+
+    invalidTodosRejected = false;
+    try {
+        todos.setItems({{.id = "blank", .title = "  \t"}});
+    } catch (const std::invalid_argument&) {
+        invalidTodosRejected = true;
+    }
+    DESTO_CHECK(invalidTodosRejected);
+    DESTO_CHECK(todos.items() == validTodos);
+
     auto chrome = application.chrome();
     chrome.showCollapseControl = false;
     application.setChrome(chrome);

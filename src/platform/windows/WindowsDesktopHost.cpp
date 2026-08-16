@@ -33,6 +33,35 @@ constexpr UINT DropPreviewResetDelayMilliseconds = 90;
 constexpr UINT CardItemsRefreshMessage = WM_APP + 0x41;
 constexpr UINT CardTooltipInfoSize = TTTOOLINFOW_V2_SIZE;
 
+std::wstring Utf8ToWide(const std::string& value) {
+    if (value.empty()) return {};
+    const auto length = MultiByteToWideChar(
+        CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), nullptr, 0);
+    if (length <= 0) throw std::invalid_argument("Todo title is not valid UTF-8.");
+    std::wstring result(static_cast<std::size_t>(length), L'\0');
+    if (MultiByteToWideChar(
+            CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()),
+            result.data(), length) != length) {
+        throw std::runtime_error("Unable to decode Todo title.");
+    }
+    return result;
+}
+
+std::string WideToUtf8(const std::wstring& value) {
+    if (value.empty()) return {};
+    const auto length = WideCharToMultiByte(
+        CP_UTF8, WC_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()),
+        nullptr, 0, nullptr, nullptr);
+    if (length <= 0) throw std::invalid_argument("Todo title contains invalid text.");
+    std::string result(static_cast<std::size_t>(length), '\0');
+    if (WideCharToMultiByte(
+            CP_UTF8, WC_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()),
+            result.data(), length, nullptr, nullptr) != length) {
+        throw std::runtime_error("Unable to encode Todo title.");
+    }
+    return result;
+}
+
 struct Surface {
     HWND window = nullptr;
     HDC memoryDc = nullptr;
@@ -48,8 +77,10 @@ struct Surface {
     int interactiveHeight = 0;
     bool collapseHovered = false;
     bool collapsePressed = false;
+    bool todoAddHovered = false;
     HWND tooltip = nullptr;
     std::optional<std::size_t> hoveredItem;
+    std::optional<std::size_t> hoveredTodoRow;
     std::wstring tooltipText;
     IDropTarget* dropTarget = nullptr;
     std::optional<std::size_t> dropInsertionIndex;
@@ -57,6 +88,9 @@ struct Surface {
     std::optional<std::size_t> pressedItem;
     POINT itemDragStart{};
     bool itemDragActive = false;
+    std::optional<std::size_t> pressedTodoRow;
+    std::optional<std::size_t> todoDragTarget;
+    POINT todoDragStart{};
 };
 
 LRESULT CALLBACK GuideWindowProcedure(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
@@ -70,7 +104,23 @@ LRESULT CALLBACK GuideWindowProcedure(HWND window, UINT message, WPARAM wParam, 
         const auto dc = BeginPaint(window, &paint);
         RECT bounds{};
         GetClientRect(window, &bounds);
-        FillRect(dc, &bounds, reinterpret_cast<HBRUSH>(GetClassLongPtrW(window, GCLP_HBRBACKGROUND)));
+        FillRect(dc, &bounds, reinterpret_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
+        const auto brush = CreateSolidBrush(RGB(74, 132, 255));
+        if (brush != nullptr) {
+            const auto vertical = (bounds.bottom - bounds.top) > (bounds.right - bounds.left);
+            constexpr int dash = 11;
+            constexpr int gap = 7;
+            const auto length = vertical ? bounds.bottom : bounds.right;
+            for (int position = 0; position < length; position += dash + gap) {
+                RECT segment = vertical
+                    ? RECT{bounds.left, position, bounds.right,
+                        std::min<LONG>(position + dash, bounds.bottom)}
+                    : RECT{position, bounds.top,
+                        std::min<LONG>(position + dash, bounds.right), bounds.bottom};
+                FillRect(dc, &segment, brush);
+            }
+            DeleteObject(brush);
+        }
         EndPaint(window, &paint);
         return 0;
     }
@@ -92,6 +142,7 @@ struct WindowsDesktopHost::Impl {
     }
 
     ~Impl() {
+        if (todoEditor != nullptr) finishTodoEdit(todoEditor, false);
         destroyGuides();
         destroySurfaces();
         if (guideWindowClassRegistered) {
@@ -99,9 +150,6 @@ struct WindowsDesktopHost::Impl {
         }
         if (windowClassRegistered) {
             UnregisterClassW(className.c_str(), module);
-        }
-        if (guideBrush != nullptr) {
-            DeleteObject(guideBrush);
         }
         if (oleInitialized) {
             OleUninitialize();
@@ -118,18 +166,25 @@ struct WindowsDesktopHost::Impl {
     bool oleInitialized = false;
     HWND verticalGuide = nullptr;
     HWND horizontalGuide = nullptr;
-    HBRUSH guideBrush = nullptr;
     WindowsDesktopHost::PlacementChangedCallback placementChanged;
     WindowsDesktopHost::CardExpandedChangedCallback cardExpandedChanged;
     WindowsDesktopHost::ApplicationItemsDroppedCallback applicationItemsDropped;
     WindowsDesktopHost::ApplicationItemDragCompletedCallback applicationItemDragCompleted;
     WindowsDesktopHost::CardItemActivatedCallback cardItemActivated;
     WindowsDesktopHost::CardItemsRefreshCallback cardItemsRefresh;
+    WindowsDesktopHost::TodoItemAddedCallback todoItemAdded;
+    WindowsDesktopHost::TodoItemRenamedCallback todoItemRenamed;
+    WindowsDesktopHost::TodoItemCompletedChangedCallback todoItemCompletedChanged;
+    WindowsDesktopHost::TodoItemRemovedCallback todoItemRemoved;
+    WindowsDesktopHost::TodoItemsReorderedCallback todoItemsReordered;
     std::vector<Surface> surfaces;
     std::vector<domain::DisplaySnapshot> displays;
     DWORD ownerThreadId = 0;
     std::mutex pendingRefreshMutex;
     std::unordered_set<domain::CardId> pendingRefreshCards;
+    HWND todoEditor = nullptr;
+    HWND todoEditorSurface = nullptr;
+    std::optional<std::string> todoEditorItemId;
 
     static LRESULT CALLBACK WindowProcedure(
         HWND window,
@@ -180,6 +235,10 @@ struct WindowsDesktopHost::Impl {
             break;
         case WM_LBUTTONDOWN:
             if (instance != nullptr
+                && instance->beginTodoPress(window, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) {
+                return 0;
+            }
+            if (instance != nullptr
                 && instance->beginCollapsePress(window, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) {
                 return 0;
             }
@@ -190,6 +249,15 @@ struct WindowsDesktopHost::Impl {
             break;
         case WM_LBUTTONDBLCLK:
             if (instance != nullptr
+                && instance->beginCollapsePress(
+                    window, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) {
+                return 0;
+            }
+            if (instance != nullptr
+                && instance->editTodoAt(window, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) {
+                return 0;
+            }
+            if (instance != nullptr
                 && instance->activateCardItem(
                     window,
                     GET_X_LPARAM(lParam),
@@ -198,6 +266,10 @@ struct WindowsDesktopHost::Impl {
             }
             break;
         case WM_LBUTTONUP:
+            if (instance != nullptr
+                && instance->endTodoPress(window, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) {
+                return 0;
+            }
             if (instance != nullptr
                 && instance->endCollapsePress(window, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) {
                 return 0;
@@ -208,6 +280,13 @@ struct WindowsDesktopHost::Impl {
             break;
         case WM_MOUSEMOVE:
             if (instance != nullptr) {
+                if (instance->updateTodoDrag(
+                        window,
+                        GET_X_LPARAM(lParam),
+                        GET_Y_LPARAM(lParam),
+                        wParam)) {
+                    return 0;
+                }
                 if (instance->updateItemDrag(
                         window,
                         GET_X_LPARAM(lParam),
@@ -219,6 +298,12 @@ struct WindowsDesktopHost::Impl {
                     window,
                     GET_X_LPARAM(lParam),
                     GET_Y_LPARAM(lParam));
+            }
+            break;
+        case WM_RBUTTONUP:
+            if (instance != nullptr
+                && instance->removeTodoAt(window, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) {
+                return 0;
             }
             break;
         case WM_MOUSELEAVE:
@@ -239,6 +324,7 @@ struct WindowsDesktopHost::Impl {
             break;
         case WM_CAPTURECHANGED:
             if (instance != nullptr) {
+                instance->cancelTodoPress(window);
                 instance->cancelCollapsePress(window);
                 instance->cancelItemPress(window);
                 return 0;
@@ -250,6 +336,34 @@ struct WindowsDesktopHost::Impl {
             return DefWindowProcW(window, message, wParam, lParam);
         }
         return DefWindowProcW(window, message, wParam, lParam);
+    }
+
+    static LRESULT CALLBACK TodoEditorProcedure(
+        HWND window,
+        UINT message,
+        WPARAM wParam,
+        LPARAM lParam,
+        UINT_PTR,
+        DWORD_PTR reference) {
+        auto* instance = reinterpret_cast<Impl*>(reference);
+        if (instance != nullptr && message == WM_KEYDOWN) {
+            if (wParam == VK_RETURN) {
+                instance->finishTodoEdit(window, true);
+                return 0;
+            }
+            if (wParam == VK_ESCAPE) {
+                instance->finishTodoEdit(window, false);
+                return 0;
+            }
+        }
+        if (instance != nullptr && message == WM_KILLFOCUS) {
+            instance->finishTodoEdit(window, true);
+            return 0;
+        }
+        if (message == WM_NCDESTROY) {
+            RemoveWindowSubclass(window, &TodoEditorProcedure, 1);
+        }
+        return DefSubclassProc(window, message, wParam, lParam);
     }
 
     void initialize() {
@@ -277,16 +391,12 @@ struct WindowsDesktopHost::Impl {
         }
         windowClassRegistered = true;
 
-        guideBrush = CreateSolidBrush(RGB(74, 132, 255));
-        if (guideBrush == nullptr) {
-            throw std::runtime_error("CreateSolidBrush failed for alignment guides.");
-        }
         WNDCLASSW guideClass{};
         guideClass.lpfnWndProc = &GuideWindowProcedure;
         guideClass.hInstance = module;
         guideClass.lpszClassName = guideClassName.c_str();
         guideClass.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(IDC_ARROW));
-        guideClass.hbrBackground = guideBrush;
+        guideClass.hbrBackground = reinterpret_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
         if (RegisterClassW(&guideClass) == 0) {
             throw std::runtime_error("RegisterClassW failed for alignment guides.");
         }
@@ -358,6 +468,29 @@ struct WindowsDesktopHost::Impl {
             surface.width - inset,
             inset + size,
         };
+    }
+
+    static RECT todoAddControlRect(const Surface& surface) noexcept {
+        const auto size = dipToPixels(36.0, surface);
+        const auto inset = dipToPixels(6.0, surface);
+        const auto right = surface.card.showCollapseControl
+            ? collapseControlRect(surface).left - dipToPixels(2.0, surface)
+            : surface.width - inset;
+        return {right - size, inset, right, inset + size};
+    }
+
+    static RECT todoRowRect(const Surface& surface, std::size_t index) noexcept {
+        const auto inset = dipToPixels(10.0, surface);
+        const auto top = dipToPixels(52.0 + index * 36.0, surface);
+        return {inset, top, surface.width - inset, top + dipToPixels(34.0, surface)};
+    }
+
+    static RECT todoCheckboxRect(const Surface& surface, std::size_t index) noexcept {
+        const auto row = todoRowRect(surface, index);
+        const auto size = dipToPixels(18.0, surface);
+        const auto left = row.left + dipToPixels(8.0, surface);
+        const auto top = row.top + ((row.bottom - row.top) - size) / 2;
+        return {left, top, left + size, top + size};
     }
 
     static bool pointInside(const RECT& rect, int x, int y) noexcept {
@@ -451,6 +584,31 @@ struct WindowsDesktopHost::Impl {
     }
 
     static domain::PlacementRect contentDrivenRect(const Surface& surface) {
+        if (surface.card.type == domain::CardType::Todo) {
+            auto rect = surface.projection.rect;
+            const auto right = rect.left + rect.width;
+            const auto horizontalCenter = rect.left + rect.width / 2.0;
+            const auto bottom = rect.top + rect.height;
+            const auto verticalCenter = rect.top + rect.height / 2.0;
+            rect.width = std::min(std::max(240.0, rect.width), surface.display.workAreaWidth);
+            rect.height = std::min(
+                std::max(100.0, 58.0 + 36.0 * std::max<std::size_t>(1, surface.card.todoItems.size())),
+                surface.display.workAreaHeight);
+            if (surface.projection.horizontalAnchor == domain::PlacementHorizontalAnchor::Right) {
+                rect.left = right - rect.width;
+            } else if (surface.projection.horizontalAnchor
+                       == domain::PlacementHorizontalAnchor::Center) {
+                rect.left = horizontalCenter - rect.width / 2.0;
+            }
+            if (surface.projection.verticalAnchor == domain::PlacementVerticalAnchor::Bottom) {
+                rect.top = bottom - rect.height;
+            } else if (surface.projection.verticalAnchor
+                       == domain::PlacementVerticalAnchor::Center) {
+                rect.top = verticalCenter - rect.height / 2.0;
+            }
+            return presentation::ResolvePlacementInteraction(
+                rect, surface.display.workAreaWidth, surface.display.workAreaHeight, {}, true);
+        }
         const auto settings = itemLayoutSettings(surface);
         const auto columns = settings.preferredColumns;
         const auto width = std::max(
@@ -598,6 +756,21 @@ struct WindowsDesktopHost::Impl {
         return std::nullopt;
     }
 
+    static std::optional<std::size_t> todoRowAt(const Surface& surface, int x, int y) noexcept {
+        if (!surface.card.expanded || surface.card.type != domain::CardType::Todo) {
+            return std::nullopt;
+        }
+        for (std::size_t index = 0; index < surface.card.todoItems.size(); ++index) {
+            if (pointInside(todoRowRect(surface, index), x, y)) return index;
+        }
+        return std::nullopt;
+    }
+
+    static bool isTodoAddControlHit(const Surface& surface, int x, int y) noexcept {
+        return surface.card.type == domain::CardType::Todo
+            && pointInside(todoAddControlRect(surface), x, y);
+    }
+
     bool isCollapseControlHit(const Surface& surface, int x, int y) const noexcept {
         return surface.card.showCollapseControl
             && pointInside(collapseControlRect(surface), x, y);
@@ -615,7 +788,9 @@ struct WindowsDesktopHost::Impl {
         if (y < 0 || y >= surface->interactiveHeight) {
             return HTTRANSPARENT;
         }
-        if (y < dipToPixels(48.0, *surface) && !isCollapseControlHit(*surface, x, y)) {
+        if (y < dipToPixels(48.0, *surface)
+            && !isCollapseControlHit(*surface, x, y)
+            && !isTodoAddControlHit(*surface, x, y)) {
             return HTCAPTION;
         }
         return HTCLIENT;
@@ -659,7 +834,7 @@ struct WindowsDesktopHost::Impl {
             if (window == nullptr) {
                 throw std::runtime_error("CreateWindowExW failed for alignment guide.");
             }
-            SetLayeredWindowAttributes(window, 0, 210, LWA_ALPHA);
+            SetLayeredWindowAttributes(window, RGB(0, 0, 0), 220, LWA_ALPHA | LWA_COLORKEY);
             return window;
         };
         if (verticalGuide == nullptr) {
@@ -721,7 +896,7 @@ struct WindowsDesktopHost::Impl {
             otherCards,
             false);
         ensureGuides();
-        constexpr int guideThickness = 2;
+        const auto guideThickness = std::max(3, static_cast<int>(std::lround(3.0 * scale)));
         const auto workLeft = static_cast<int>(std::lround(target.workAreaLeft * scale));
         const auto workTop = static_cast<int>(std::lround(target.workAreaTop * scale));
         const auto workWidth = std::max(1, static_cast<int>(std::lround(
@@ -758,19 +933,255 @@ struct WindowsDesktopHost::Impl {
         }
     }
 
+    Surface* findSurfaceByCard(const domain::CardId& cardId) noexcept {
+        const auto found = std::ranges::find_if(surfaces, [&](const Surface& surface) {
+            return surface.card.id == cardId;
+        });
+        return found == surfaces.end() ? nullptr : &*found;
+    }
+
+    void repaintTodoCard(const domain::CardId& cardId) noexcept {
+        const auto* source = findSurfaceByCard(cardId);
+        if (source == nullptr) return;
+        const auto items = source->card.todoItems;
+        for (auto& surface : surfaces) {
+            if (surface.card.id != cardId) continue;
+            try {
+                surface.card.todoItems = items;
+                resizeSurfaceForContent(surface, true);
+                render(surface, surface.display, surface.card, surface.ordinal);
+            } catch (...) {
+            }
+        }
+    }
+
+    void finishTodoEdit(HWND editor, bool commit) noexcept {
+        if (editor == nullptr || editor != todoEditor) return;
+        const auto surfaceWindow = todoEditorSurface;
+        const auto itemId = todoEditorItemId;
+        todoEditor = nullptr;
+        todoEditorSurface = nullptr;
+        todoEditorItemId.reset();
+        std::wstring text;
+        if (commit) {
+            const auto length = GetWindowTextLengthW(editor);
+            text.resize(static_cast<std::size_t>(std::max(0, length)));
+            if (length > 0) GetWindowTextW(editor, text.data(), length + 1);
+        }
+        RemoveWindowSubclass(editor, &TodoEditorProcedure, 1);
+        DestroyWindow(editor);
+        if (!commit || text.empty() || surfaceWindow == nullptr) return;
+        auto* surface = findSurface(surfaceWindow);
+        if (surface == nullptr) return;
+        try {
+            const auto utf8 = WideToUtf8(text);
+            bool accepted = false;
+            if (itemId.has_value()) {
+                accepted = todoItemRenamed
+                    && todoItemRenamed(surface->card.id, *itemId, utf8);
+                if (accepted) {
+                    for (auto& item : surface->card.todoItems) {
+                        if (item.id == *itemId) item.title = utf8;
+                    }
+                }
+            } else if (todoItemAdded) {
+                const auto added = todoItemAdded(surface->card.id, utf8);
+                if (added.has_value()) {
+                    surface->card.todoItems.push_back(*added);
+                    accepted = true;
+                }
+            }
+            if (accepted) repaintTodoCard(surface->card.id);
+        } catch (...) {
+        }
+    }
+
+    void beginTodoEdit(HWND window, std::optional<std::size_t> row) noexcept {
+        try {
+        auto* surface = findSurface(window);
+        if (surface == nullptr || surface->card.type != domain::CardType::Todo
+            || todoEditor != nullptr) return;
+        std::wstring initial;
+        std::optional<std::string> itemId;
+        if (row.has_value() && *row < surface->card.todoItems.size()) {
+            itemId = surface->card.todoItems[*row].id;
+            initial = Utf8ToWide(surface->card.todoItems[*row].title);
+        }
+        RECT anchor = row.has_value() ? todoRowRect(*surface, *row) : todoAddControlRect(*surface);
+        POINT topLeft{anchor.left, anchor.top};
+        ClientToScreen(window, &topLeft);
+        const auto width = std::max(180, surface->width - dipToPixels(24.0, *surface));
+        const auto height = dipToPixels(30.0, *surface);
+        auto editor = CreateWindowExW(
+            WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
+            L"EDIT",
+            initial.c_str(),
+            WS_POPUP | WS_BORDER | ES_AUTOHSCROLL,
+            topLeft.x,
+            topLeft.y,
+            width,
+            height,
+            window,
+            nullptr,
+            module,
+            nullptr);
+        if (editor == nullptr) return;
+        SendMessageW(editor, EM_SETLIMITTEXT, 512, 0);
+        SendMessageW(editor, WM_SETFONT, reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)), TRUE);
+        todoEditor = editor;
+        todoEditorSurface = window;
+        todoEditorItemId = std::move(itemId);
+        SetWindowSubclass(editor, &TodoEditorProcedure, 1, reinterpret_cast<DWORD_PTR>(this));
+        ShowWindow(editor, SW_SHOWNOACTIVATE);
+        SetWindowPos(editor, HWND_TOPMOST, topLeft.x, topLeft.y, width, height, SWP_SHOWWINDOW);
+        SetForegroundWindow(editor);
+        SetFocus(editor);
+        SendMessageW(editor, EM_SETSEL, 0, -1);
+        } catch (...) {
+        }
+    }
+
+    bool beginTodoPress(HWND window, int x, int y) noexcept {
+        auto* surface = findSurface(window);
+        if (surface == nullptr || surface->card.type != domain::CardType::Todo) return false;
+        if (isTodoAddControlHit(*surface, x, y)) {
+            beginTodoEdit(window, std::nullopt);
+            return true;
+        }
+        if (!surface->card.expanded) return false;
+        if (surface->card.todoItems.empty()
+            && pointInside(todoRowRect(*surface, 0), x, y)) {
+            beginTodoEdit(window, std::nullopt);
+            return true;
+        }
+        const auto row = todoRowAt(*surface, x, y);
+        if (!row.has_value()) return false;
+        if (pointInside(todoCheckboxRect(*surface, *row), x, y)) {
+            const auto& item = surface->card.todoItems[*row];
+            if (todoItemCompletedChanged
+                && todoItemCompletedChanged(surface->card.id, item.id, !item.completed)) {
+                surface->card.todoItems[*row].completed = !item.completed;
+                repaintTodoCard(surface->card.id);
+            }
+            return true;
+        }
+        surface->pressedTodoRow = row;
+        surface->todoDragStart = {x, y};
+        SetCapture(window);
+        return true;
+    }
+
+    bool editTodoAt(HWND window, int x, int y) noexcept {
+        auto* surface = findSurface(window);
+        if (surface == nullptr || surface->card.type != domain::CardType::Todo) return false;
+        const auto row = todoRowAt(*surface, x, y);
+        if (!row.has_value()) return false;
+        beginTodoEdit(window, row);
+        return true;
+    }
+
+    bool updateTodoDrag(HWND window, int x, int y, WPARAM keyState) noexcept {
+        auto* surface = findSurface(window);
+        if (surface == nullptr || !surface->pressedTodoRow.has_value()) return false;
+        if ((keyState & MK_LBUTTON) == 0) return endTodoPress(window, x, y);
+        if (!surface->todoDragTarget.has_value()) {
+            const auto thresholdX = GetSystemMetrics(SM_CXDRAG);
+            const auto thresholdY = GetSystemMetrics(SM_CYDRAG);
+            if (std::abs(x - surface->todoDragStart.x) < thresholdX
+                && std::abs(y - surface->todoDragStart.y) < thresholdY) return true;
+        }
+        auto target = todoRowAt(*surface, x, y);
+        if (!target.has_value() && !surface->card.todoItems.empty()) {
+            target = y < todoRowRect(*surface, 0).top
+                ? 0 : surface->card.todoItems.size() - 1;
+        }
+        if (target != surface->todoDragTarget) {
+            surface->todoDragTarget = target;
+            try { render(*surface, surface->display, surface->card, surface->ordinal); } catch (...) {}
+        }
+        return true;
+    }
+
+    bool endTodoPress(HWND window, int x, int y) noexcept {
+        auto* surface = findSurface(window);
+        if (surface == nullptr || !surface->pressedTodoRow.has_value()) return false;
+        const auto source = *surface->pressedTodoRow;
+        auto target = surface->todoDragTarget;
+        surface->pressedTodoRow.reset();
+        surface->todoDragTarget.reset();
+        if (GetCapture() == window) ReleaseCapture();
+        if (target.has_value() && source != *target && *target < surface->card.todoItems.size()) {
+            auto reordered = surface->card.todoItems;
+            const auto moved = reordered[source];
+            reordered.erase(reordered.begin() + static_cast<std::ptrdiff_t>(source));
+            const auto destination = std::min(*target, reordered.size());
+            reordered.insert(reordered.begin() + static_cast<std::ptrdiff_t>(destination), moved);
+            std::vector<std::string> order;
+            order.reserve(reordered.size());
+            for (const auto& item : reordered) order.push_back(item.id);
+            if (todoItemsReordered && todoItemsReordered(surface->card.id, order)) {
+                surface->card.todoItems = std::move(reordered);
+            }
+        }
+        try { render(*surface, surface->display, surface->card, surface->ordinal); } catch (...) {}
+        return true;
+    }
+
+    void cancelTodoPress(HWND window) noexcept {
+        auto* surface = findSurface(window);
+        if (surface == nullptr) return;
+        surface->pressedTodoRow.reset();
+        surface->todoDragTarget.reset();
+    }
+
+    bool removeTodoAt(HWND window, int x, int y) noexcept {
+        auto* surface = findSurface(window);
+        if (surface == nullptr || surface->card.type != domain::CardType::Todo) return false;
+        const auto row = todoRowAt(*surface, x, y);
+        if (!row.has_value() || !todoItemRemoved) return false;
+        const auto itemId = surface->card.todoItems[*row].id;
+        HMENU menu = CreatePopupMenu();
+        if (menu == nullptr) return true;
+        AppendMenuW(menu, MF_STRING, 1, L"删除");
+        POINT point{x, y};
+        ClientToScreen(window, &point);
+        SetForegroundWindow(window);
+        const auto command = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY, point.x, point.y, 0, window, nullptr);
+        DestroyMenu(menu);
+        if (command == 1 && todoItemRemoved(surface->card.id, itemId)) {
+            surface->card.todoItems.erase(surface->card.todoItems.begin() + static_cast<std::ptrdiff_t>(*row));
+            repaintTodoCard(surface->card.id);
+        }
+        return true;
+    }
+
     bool beginCollapsePress(HWND window, int x, int y) noexcept {
         auto* surface = findSurface(window);
         if (surface == nullptr || !isCollapseControlHit(*surface, x, y)) {
             return false;
         }
         surface->collapseHovered = true;
-        surface->collapsePressed = true;
-        SetCapture(window);
+        surface->collapsePressed = false;
+        const auto expanded = !surface->card.expanded;
+        surface->card.expanded = expanded;
         try {
             render(*surface, surface->display, surface->card, surface->ordinal);
         } catch (...) {
-            surface->collapsePressed = false;
-            ReleaseCapture();
+            return true;
+        }
+        for (auto& other : surfaces) {
+            if (other.window == window || other.card.id != surface->card.id) continue;
+            other.card.expanded = expanded;
+            try {
+                render(other, other.display, other.card, other.ordinal);
+            } catch (...) {
+            }
+        }
+        if (cardExpandedChanged) {
+            try {
+                cardExpandedChanged(surface->card.id, expanded);
+            } catch (...) {
+            }
         }
         return true;
     }
@@ -931,9 +1342,13 @@ struct WindowsDesktopHost::Impl {
                 FALSE,
                 reinterpret_cast<LPARAM>(&tool));
         }
-        const auto changed = surface->hoveredItem.has_value() || surface->collapseHovered;
+        const auto changed = surface->hoveredItem.has_value()
+            || surface->hoveredTodoRow.has_value() || surface->collapseHovered
+            || surface->todoAddHovered;
         surface->hoveredItem.reset();
+        surface->hoveredTodoRow.reset();
         surface->collapseHovered = false;
+        surface->todoAddHovered = false;
         if (changed && repaint) {
             try {
                 render(*surface, surface->display, surface->card, surface->ordinal);
@@ -945,7 +1360,7 @@ struct WindowsDesktopHost::Impl {
     void showItemTooltip(HWND window) noexcept {
         auto* surface = findSurface(window);
         if (surface == nullptr || surface->tooltip == nullptr
-            || !surface->hoveredItem.has_value()) {
+            || (!surface->hoveredItem.has_value() && !surface->hoveredTodoRow.has_value())) {
             return;
         }
         KillTimer(window, ItemTooltipTimerId);
@@ -977,15 +1392,36 @@ struct WindowsDesktopHost::Impl {
         };
         TrackMouseEvent(&tracking);
         const auto collapseHovered = isCollapseControlHit(*surface, x, y);
-        const auto index = collapseHovered
+        const auto todoAddHovered = !collapseHovered && isTodoAddControlHit(*surface, x, y);
+        const auto todoRow = collapseHovered || todoAddHovered ? std::optional<std::size_t>{}
+            : todoRowAt(*surface, x, y);
+        const auto index = collapseHovered || todoAddHovered || todoRow.has_value()
             ? std::optional<std::size_t>{}
             : itemAt(*surface, x, y);
-        if (index == surface->hoveredItem
-            && collapseHovered == surface->collapseHovered) {
+        if (index == surface->hoveredItem && todoRow == surface->hoveredTodoRow
+            && collapseHovered == surface->collapseHovered
+            && todoAddHovered == surface->todoAddHovered) {
             return;
         }
         clearPointerHover(window, false);
         surface->collapseHovered = collapseHovered;
+        surface->todoAddHovered = todoAddHovered;
+        surface->hoveredTodoRow = todoRow;
+        if (todoRow.has_value()) {
+            surface->tooltipText = Utf8ToWide(surface->card.todoItems[*todoRow].title);
+            if (surface->tooltip != nullptr) {
+                TOOLINFOW tool{
+                    .cbSize = CardTooltipInfoSize,
+                    .hwnd = surface->window,
+                    .uId = 1,
+                    .lpszText = surface->tooltipText.data(),
+                };
+                SendMessageW(surface->tooltip, TTM_UPDATETIPTEXTW, 0, reinterpret_cast<LPARAM>(&tool));
+                SetTimer(window, ItemTooltipTimerId, ItemTooltipDelayMilliseconds, nullptr);
+            }
+            try { render(*surface, surface->display, surface->card, surface->ordinal); } catch (...) {}
+            return;
+        }
         if (!index.has_value() || surface->tooltip == nullptr) {
             try {
                 render(*surface, surface->display, surface->card, surface->ordinal);
@@ -1412,8 +1848,12 @@ struct WindowsDesktopHost::Impl {
         RECT textRect{
             textLeft,
             0,
-            card.showCollapseControl ? control.left - dipToPixels(4.0, surface)
-                                     : surface.width - textLeft,
+            std::min(
+                card.showCollapseControl ? control.left - dipToPixels(4.0, surface)
+                                         : surface.width - textLeft,
+                card.type == domain::CardType::Todo
+                    ? todoAddControlRect(surface).left - dipToPixels(4.0, surface)
+                    : surface.width - textLeft),
             std::min(visibleBottom, dipToPixels(48.0, surface)),
         };
         DrawTextW(
@@ -1443,6 +1883,122 @@ struct WindowsDesktopHost::Impl {
             };
             pixel = (mix(16) << 16) | (mix(8) << 8) | mix(0);
         };
+        const auto drawDashedRoundedBorder = [&](
+            const RECT& rect,
+            double radius,
+            std::uint32_t color,
+            double opacity = 1.0) {
+            const auto centerX = (rect.left + rect.right) / 2.0;
+            const auto centerY = (rect.top + rect.bottom) / 2.0;
+            const auto halfWidth = (rect.right - rect.left) / 2.0;
+            const auto halfHeight = (rect.bottom - rect.top) / 2.0;
+            const auto strokeWidth = static_cast<double>(dipToPixels(2.0, surface));
+            const auto period = static_cast<double>(dipToPixels(9.0, surface));
+            const auto dashLength = static_cast<double>(dipToPixels(5.5, surface));
+            for (int y = rect.top - 2; y <= rect.bottom + 1; ++y) {
+                for (int x = rect.left - 2; x <= rect.right + 1; ++x) {
+                    const auto qx = std::abs(x + 0.5 - centerX) - (halfWidth - radius);
+                    const auto qy = std::abs(y + 0.5 - centerY) - (halfHeight - radius);
+                    const auto outsideX = std::max(qx, 0.0);
+                    const auto outsideY = std::max(qy, 0.0);
+                    const auto distance = std::sqrt(outsideX * outsideX + outsideY * outsideY)
+                        + std::min(std::max(qx, qy), 0.0) - radius;
+                    const auto strokeCoverage = std::clamp(
+                        strokeWidth / 2.0 + 0.5 - std::abs(distance), 0.0, 1.0);
+                    const auto along = std::abs(qx) > std::abs(qy)
+                        ? std::abs(y + 0.5 - centerY)
+                        : std::abs(x + 0.5 - centerX);
+                    if (std::fmod(along, period) <= dashLength) {
+                        blendRgb(x, y, color, strokeCoverage * opacity);
+                    }
+                }
+            }
+        };
+        if (card.expanded && card.type == domain::CardType::Todo) {
+            const auto rowFill = darkSurface ? 0x00FFFFFFu : 0x00111827u;
+            if (surface.hoveredTodoRow.has_value()
+                && *surface.hoveredTodoRow < card.todoItems.size()) {
+                const auto row = todoRowRect(surface, *surface.hoveredTodoRow);
+                for (int y = row.top; y < row.bottom; ++y) {
+                    for (int x = row.left; x < row.right; ++x) {
+                        blendRgb(x, y, rowFill, darkSurface ? 0.08 : 0.05);
+                    }
+                }
+            }
+            const auto todoFont = CreateFontW(
+                -dipToPixels(13.0, surface), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Variable Text");
+            const auto previousTodoFont = todoFont == nullptr
+                ? nullptr : SelectObject(surface.memoryDc, todoFont);
+            for (std::size_t index = 0; index < card.todoItems.size(); ++index) {
+                const auto& item = card.todoItems[index];
+                const auto row = todoRowRect(surface, index);
+                const auto checkbox = todoCheckboxRect(surface, index);
+                const auto checkboxColor = item.completed
+                    ? (darkSurface ? RGB(135, 190, 255) : RGB(55, 116, 220))
+                    : (darkSurface ? RGB(190, 196, 207) : RGB(142, 149, 162));
+                const auto previousBrush = SelectObject(
+                    surface.memoryDc,
+                    GetStockObject(item.completed ? WHITE_BRUSH : NULL_BRUSH));
+                const auto pen = CreatePen(PS_SOLID, std::max(1, dipToPixels(1.2, surface)), checkboxColor);
+                const auto previousPen = pen == nullptr ? nullptr : SelectObject(surface.memoryDc, pen);
+                Ellipse(surface.memoryDc, checkbox.left, checkbox.top, checkbox.right, checkbox.bottom);
+                if (item.completed) {
+                    const auto markPen = CreatePen(PS_SOLID, std::max(1, dipToPixels(1.5, surface)), checkboxColor);
+                    const auto previousMarkPen = markPen == nullptr ? nullptr : SelectObject(surface.memoryDc, markPen);
+                    MoveToEx(surface.memoryDc, checkbox.left + dipToPixels(4.0, surface), (checkbox.top + checkbox.bottom) / 2, nullptr);
+                    LineTo(surface.memoryDc, checkbox.left + dipToPixels(8.0, surface), checkbox.bottom - dipToPixels(4.0, surface));
+                    LineTo(surface.memoryDc, checkbox.right - dipToPixels(3.0, surface), checkbox.top + dipToPixels(4.0, surface));
+                    if (previousMarkPen != nullptr) SelectObject(surface.memoryDc, previousMarkPen);
+                    if (markPen != nullptr) DeleteObject(markPen);
+                }
+                if (previousPen != nullptr) SelectObject(surface.memoryDc, previousPen);
+                if (pen != nullptr) DeleteObject(pen);
+                SelectObject(surface.memoryDc, previousBrush);
+                SetTextColor(surface.memoryDc, item.completed
+                    ? (darkSurface ? RGB(156, 161, 172) : RGB(126, 132, 142)) : foreground);
+                RECT label{checkbox.right + dipToPixels(9.0, surface), row.top, row.right - dipToPixels(8.0, surface), row.bottom};
+                const auto itemTitle = Utf8ToWide(item.title);
+                DrawTextW(
+                    surface.memoryDc,
+                    itemTitle.c_str(),
+                    -1,
+                    &label,
+                    DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
+                if (item.completed) {
+                    SIZE textExtent{};
+                    GetTextExtentPoint32W(
+                        surface.memoryDc,
+                        itemTitle.c_str(),
+                        static_cast<int>(itemTitle.size()),
+                        &textExtent);
+                    const auto textWidth = std::min<LONG>(
+                        textExtent.cx, label.right - label.left);
+                    const auto lineY = (label.top + label.bottom) / 2;
+                    const auto linePen = CreatePen(PS_SOLID, std::max(1, dipToPixels(1.0, surface)),
+                        darkSurface ? RGB(156, 161, 172) : RGB(126, 132, 142));
+                    const auto previousLinePen = linePen == nullptr ? nullptr : SelectObject(surface.memoryDc, linePen);
+                    MoveToEx(surface.memoryDc, label.left, lineY, nullptr);
+                    LineTo(surface.memoryDc, label.left + textWidth, lineY);
+                    if (previousLinePen != nullptr) SelectObject(surface.memoryDc, previousLinePen);
+                    if (linePen != nullptr) DeleteObject(linePen);
+                }
+            }
+            if (previousTodoFont != nullptr) SelectObject(surface.memoryDc, previousTodoFont);
+            if (todoFont != nullptr) DeleteObject(todoFont);
+            if (card.todoItems.empty()) {
+                auto empty = todoRowRect(surface, 0);
+                drawDashedRoundedBorder(
+                    empty,
+                    static_cast<double>(dipToPixels(10.0, surface)),
+                    darkSurface ? 0x009AA0AAu : 0x00848A94u,
+                    0.92);
+                SetTextColor(surface.memoryDc, darkSurface ? RGB(177, 182, 191) : RGB(124, 131, 142));
+                DrawTextW(surface.memoryDc, L"添加待办", -1, &empty,
+                    DT_CENTER | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+            }
+        }
         if (card.expanded
             && (card.type == domain::CardType::Application
                 || card.type == domain::CardType::Mapping)
@@ -1457,21 +2013,11 @@ struct WindowsDesktopHost::Impl {
             };
             if (emptyRect.right > emptyRect.left && emptyRect.bottom > emptyRect.top) {
                 const auto emptyColor = darkSurface ? RGB(154, 160, 170) : RGB(132, 138, 148);
-                const auto pen = CreatePen(PS_DASH, 1, emptyColor);
-                const auto previousPen = pen == nullptr
-                    ? nullptr : SelectObject(surface.memoryDc, pen);
-                const auto previousBrush = SelectObject(surface.memoryDc, GetStockObject(NULL_BRUSH));
-                RoundRect(
-                    surface.memoryDc,
-                    emptyRect.left,
-                    emptyRect.top,
-                    emptyRect.right,
-                    emptyRect.bottom,
-                    dipToPixels(12.0, surface),
-                    dipToPixels(12.0, surface));
-                SelectObject(surface.memoryDc, previousBrush);
-                if (previousPen != nullptr) SelectObject(surface.memoryDc, previousPen);
-                if (pen != nullptr) DeleteObject(pen);
+                drawDashedRoundedBorder(
+                    emptyRect,
+                    static_cast<double>(dipToPixels(12.0, surface)),
+                    darkSurface ? 0x009AA0AAu : 0x00848A94u,
+                    0.92);
 
                 const auto emptyFont = CreateFontW(
                     -dipToPixels(12.0, surface), 0, 0, 0, FW_NORMAL,
@@ -1598,18 +2144,13 @@ struct WindowsDesktopHost::Impl {
                             y,
                             0x004A84FFu,
                             fillCoverage * (darkSurface ? 0.12 : 0.08));
-                        const auto dashPhase = (x + y) % dipToPixels(7.0, surface);
-                        if (dashPhase < dipToPixels(4.0, surface)) {
-                            const auto strokeCoverage = std::clamp(
-                                1.5 - std::abs(distance), 0.0, 1.0);
-                            blendRgb(
-                                x,
-                                y,
-                                0x004A84FFu,
-                                strokeCoverage * (darkSurface ? 0.92 : 0.78));
-                        }
                     }
                 }
+                drawDashedRoundedBorder(
+                    preview,
+                    previewRadius,
+                    0x004A84FFu,
+                    darkSurface ? 0.96 : 0.86);
             }
 
             for (const auto& projected : projection) {
@@ -1696,6 +2237,33 @@ struct WindowsDesktopHost::Impl {
                 DeleteObject(itemFont);
             }
             SetTextColor(surface.memoryDc, foreground);
+        }
+        if (card.type == domain::CardType::Todo) {
+            const auto addControl = todoAddControlRect(surface);
+            const auto centerX = (addControl.left + addControl.right) / 2;
+            const auto centerY = (addControl.top + addControl.bottom) / 2;
+            const auto color = darkSurface ? 0x00E5E8EDu : 0x005B6069u;
+            if (surface.todoAddHovered) {
+                const auto hoverRadius = 14.0 * display.effectiveDpi / 96.0;
+                for (int y = addControl.top; y < addControl.bottom; ++y) {
+                    for (int x = addControl.left; x < addControl.right; ++x) {
+                        const auto dx = x + 0.5 - centerX;
+                        const auto dy = y + 0.5 - centerY;
+                        const auto coverage = std::clamp(
+                            hoverRadius + 0.5 - std::sqrt(dx * dx + dy * dy), 0.0, 1.0);
+                        blendRgb(
+                            x, y, darkSurface ? 0x00FFFFFFu : 0x00000000u,
+                            coverage * (darkSurface ? 0.10 : 0.06));
+                    }
+                }
+            }
+            const auto radius = std::max(1, dipToPixels(1.2, surface));
+            for (int y = centerY - dipToPixels(7.0, surface); y <= centerY + dipToPixels(7.0, surface); ++y) {
+                for (int x = centerX - radius; x <= centerX + radius; ++x) blendRgb(x, y, color, 1.0);
+            }
+            for (int x = centerX - dipToPixels(7.0, surface); x <= centerX + dipToPixels(7.0, surface); ++x) {
+                for (int y = centerY - radius; y <= centerY + radius; ++y) blendRgb(x, y, color, 1.0);
+            }
         }
         if (card.showCollapseControl) {
             const auto centerX = (control.left + control.right) / 2.0;
@@ -2038,6 +2606,21 @@ struct WindowsDesktopHost::Impl {
         for (auto* surface : affected) commitSurface(*surface);
     }
 
+    void updateTodoItems(
+        const domain::CardId& cardId,
+        const std::vector<domain::TodoItem>& items) {
+        std::vector<Surface*> affected;
+        for (auto& surface : surfaces) {
+            if (surface.card.id != cardId) continue;
+            clearPointerHover(surface.window, false);
+            surface.card.todoItems = items;
+            resizeSurfaceForContent(surface, true);
+            render(surface, surface.display, surface.card, surface.ordinal, false);
+            affected.push_back(&surface);
+        }
+        for (auto* surface : affected) commitSurface(*surface);
+    }
+
     void queueCardItemsRefresh(const domain::CardId& cardId) noexcept {
         if (cardId.empty()) {
             return;
@@ -2204,6 +2787,27 @@ void WindowsDesktopHost::setCardItemsRefreshCallback(CardItemsRefreshCallback ca
     impl_->cardItemsRefresh = std::move(callback);
 }
 
+void WindowsDesktopHost::setTodoItemAddedCallback(TodoItemAddedCallback callback) {
+    impl_->todoItemAdded = std::move(callback);
+}
+
+void WindowsDesktopHost::setTodoItemRenamedCallback(TodoItemRenamedCallback callback) {
+    impl_->todoItemRenamed = std::move(callback);
+}
+
+void WindowsDesktopHost::setTodoItemCompletedChangedCallback(
+    TodoItemCompletedChangedCallback callback) {
+    impl_->todoItemCompletedChanged = std::move(callback);
+}
+
+void WindowsDesktopHost::setTodoItemRemovedCallback(TodoItemRemovedCallback callback) {
+    impl_->todoItemRemoved = std::move(callback);
+}
+
+void WindowsDesktopHost::setTodoItemsReorderedCallback(TodoItemsReorderedCallback callback) {
+    impl_->todoItemsReordered = std::move(callback);
+}
+
 void WindowsDesktopHost::updateCardItems(
     const domain::CardId& cardId,
     std::vector<presentation::CardItemView> items) {
@@ -2212,6 +2816,12 @@ void WindowsDesktopHost::updateCardItems(
 
 void WindowsDesktopHost::updateCardItemsBatch(std::vector<CardItemsUpdate> updates) {
     impl_->updateCardItemsBatch(updates);
+}
+
+void WindowsDesktopHost::updateTodoItems(
+    const domain::CardId& cardId,
+    std::vector<domain::TodoItem> items) {
+    impl_->updateTodoItems(cardId, items);
 }
 
 void WindowsDesktopHost::requestCardItemsRefresh(const domain::CardId& cardId) noexcept {

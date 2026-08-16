@@ -276,6 +276,122 @@ CommandResult ApplicationRuntime::handle(const CreateTodoCard& command) {
     });
 }
 
+CommandResult ApplicationRuntime::handle(const AddTodoItem& command) {
+    auto card = cards_.find(command.cardId);
+    if (card == cards_.end() || card->second->type() != domain::CardType::Todo) {
+        return rejected(CommandError::CardNotFound);
+    }
+    auto* todo = static_cast<domain::TodoCard*>(card->second.get());
+    if (std::ranges::any_of(todo->items(), [&](const domain::TodoItem& item) {
+            return item.id == command.itemId;
+        })) {
+        return rejected(CommandError::DuplicateTodoItemId);
+    }
+    auto items = todo->items();
+    items.push_back({command.itemId, command.title, false});
+    todo->setItems(std::move(items));
+    return applied({
+        .changedCards = {command.cardId},
+        .persistence = PersistenceUrgency::Deferred,
+    });
+}
+
+CommandResult ApplicationRuntime::handle(const RenameTodoItem& command) {
+    auto card = cards_.find(command.cardId);
+    if (card == cards_.end() || card->second->type() != domain::CardType::Todo) {
+        return rejected(CommandError::CardNotFound);
+    }
+    auto* todo = static_cast<domain::TodoCard*>(card->second.get());
+    auto items = todo->items();
+    const auto item = std::ranges::find(items, command.itemId, &domain::TodoItem::id);
+    if (item == items.end()) {
+        return rejected(CommandError::TodoItemNotFound);
+    }
+    if (item->title == command.title) {
+        return noChange();
+    }
+    item->title = command.title;
+    todo->setItems(std::move(items));
+    return applied({
+        .changedCards = {command.cardId},
+        .persistence = PersistenceUrgency::Deferred,
+    });
+}
+
+CommandResult ApplicationRuntime::handle(const SetTodoItemCompleted& command) {
+    auto card = cards_.find(command.cardId);
+    if (card == cards_.end() || card->second->type() != domain::CardType::Todo) {
+        return rejected(CommandError::CardNotFound);
+    }
+    auto* todo = static_cast<domain::TodoCard*>(card->second.get());
+    auto items = todo->items();
+    const auto item = std::ranges::find(items, command.itemId, &domain::TodoItem::id);
+    if (item == items.end()) {
+        return rejected(CommandError::TodoItemNotFound);
+    }
+    if (item->completed == command.completed) {
+        return noChange();
+    }
+    item->completed = command.completed;
+    todo->setItems(std::move(items));
+    return applied({
+        .changedCards = {command.cardId},
+        .persistence = PersistenceUrgency::Deferred,
+    });
+}
+
+CommandResult ApplicationRuntime::handle(const RemoveTodoItem& command) {
+    auto card = cards_.find(command.cardId);
+    if (card == cards_.end() || card->second->type() != domain::CardType::Todo) {
+        return rejected(CommandError::CardNotFound);
+    }
+    auto* todo = static_cast<domain::TodoCard*>(card->second.get());
+    auto items = todo->items();
+    const auto item = std::ranges::find(items, command.itemId, &domain::TodoItem::id);
+    if (item == items.end()) {
+        return rejected(CommandError::TodoItemNotFound);
+    }
+    items.erase(item);
+    todo->setItems(std::move(items));
+    return applied({
+        .changedCards = {command.cardId},
+        .persistence = PersistenceUrgency::Deferred,
+    });
+}
+
+CommandResult ApplicationRuntime::handle(const ReorderTodoItems& command) {
+    auto card = cards_.find(command.cardId);
+    if (card == cards_.end() || card->second->type() != domain::CardType::Todo) {
+        return rejected(CommandError::CardNotFound);
+    }
+    auto* todo = static_cast<domain::TodoCard*>(card->second.get());
+    const auto& existing = todo->items();
+    if (command.orderedItemIds.size() != existing.size()) {
+        return rejected(CommandError::InvalidCommand, "Todo order must contain every item once.");
+    }
+    std::vector<domain::TodoItem> reordered;
+    reordered.reserve(existing.size());
+    for (const auto& id : command.orderedItemIds) {
+        const auto item = std::ranges::find(existing, id, &domain::TodoItem::id);
+        if (item == existing.end()
+            || std::ranges::any_of(reordered, [&](const domain::TodoItem& value) {
+                return value.id == id;
+            })) {
+            return rejected(
+                CommandError::InvalidCommand, "Todo order must contain every item once.");
+        }
+        reordered.push_back(*item);
+    }
+    if (reordered == existing) {
+        return noChange();
+    }
+    todo->setItems(std::move(reordered));
+    return applied({
+        .changedCards = {command.cardId},
+        .persistence = PersistenceUrgency::Deferred,
+    });
+}
+
 CommandResult ApplicationRuntime::handle(const SetCardVisibility& command) {
     auto card = cards_.find(command.cardId);
     if (card == cards_.end()) {

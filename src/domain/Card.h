@@ -96,6 +96,8 @@ struct TodoItem {
     std::string id;
     std::string title;
     bool completed = false;
+
+    bool operator==(const TodoItem&) const = default;
 };
 
 // Persistence-neutral value representation used at the storage seam.

@@ -270,8 +270,14 @@ void RunTests() {
 
     SendMessageW(window, WM_MOUSEMOVE, 0, MAKELPARAM(232, 24));
     SendMessageW(window, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(232, 24));
-    SendMessageW(window, WM_LBUTTONUP, 0, MAKELPARAM(232, 24));
     DESTO_CHECK(expansionCallbackCalled);
+    DESTO_CHECK(!expanded);
+    SendMessageW(window, WM_LBUTTONUP, 0, MAKELPARAM(232, 24));
+    expansionCallbackCalled = false;
+    SendMessageW(window, WM_LBUTTONDBLCLK, MK_LBUTTON, MAKELPARAM(232, 24));
+    DESTO_CHECK(expansionCallbackCalled);
+    DESTO_CHECK(expanded);
+    SendMessageW(window, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(232, 24));
     DESTO_CHECK(!expanded);
     DESTO_CHECK(SendMessageW(
         window,
@@ -347,6 +353,75 @@ void RunTests() {
             L"DestoDesktopHostSurface", L"Desto Immutable Mapping Host Test");
         DESTO_CHECK(immutableWindow != nullptr);
         DESTO_CHECK(RevokeDragDrop(immutableWindow) == DRAGDROP_E_NOTREGISTERED);
+    }
+
+    const std::vector<PlacementProjection> todoProjections{1, {
+        .placementId = "todo-placement",
+        .cardId = "todo-card",
+        .displayId = "display-test",
+        .rect = {760, 48, 320, 220},
+    }};
+    std::vector<CardView> todoCards{1, {
+        .id = "todo-card",
+        .type = CardType::Todo,
+        .title = L"Todo",
+        .typeLabel = L"Todo",
+        .todoItems = {
+            {.id = "todo-first", .title = "First task", .completed = false},
+            {.id = "todo-second", .title = "Second task", .completed = false},
+        },
+    }};
+    {
+        WindowsDesktopHost todoHost(L"Desto Todo Host Test");
+        bool completedChanged = false;
+        bool renamed = false;
+        std::vector<std::string> reordered;
+        todoHost.setTodoItemCompletedChangedCallback(
+            [&](const CardId& cardId, const std::string& itemId, bool completed) {
+                DESTO_CHECK(cardId == "todo-card");
+                DESTO_CHECK(itemId == "todo-first");
+                completedChanged = completed;
+                return true;
+            });
+        todoHost.setTodoItemRenamedCallback(
+            [&](const CardId& cardId, const std::string& itemId, const std::string& title) {
+                DESTO_CHECK(cardId == "todo-card");
+                DESTO_CHECK(itemId == "todo-second");
+                renamed = title == "Renamed task";
+                return renamed;
+            });
+        todoHost.setTodoItemsReorderedCallback(
+            [&](const CardId& cardId, const std::vector<std::string>& order) {
+                DESTO_CHECK(cardId == "todo-card");
+                reordered = order;
+                return true;
+            });
+        todoHost.present(todoProjections, displays, todoCards);
+        const auto todoWindow = FindWindowW(L"DestoDesktopHostSurface", L"Desto Todo Host Test");
+        DESTO_CHECK(todoWindow != nullptr);
+        RECT todoRect{};
+        DESTO_CHECK(GetWindowRect(todoWindow, &todoRect));
+        DESTO_CHECK(todoRect.bottom - todoRect.top == 130);
+
+        SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(26, 69));
+        DESTO_CHECK(completedChanged);
+
+        SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(100, 69));
+        SendMessageW(todoWindow, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(100, 105));
+        SendMessageW(todoWindow, WM_LBUTTONUP, 0, MAKELPARAM(100, 105));
+        DESTO_CHECK(reordered == std::vector<std::string>({"todo-second", "todo-first"}));
+
+        SendMessageW(todoWindow, WM_LBUTTONDBLCLK, MK_LBUTTON, MAKELPARAM(100, 69));
+        const auto editor = FindWindowW(L"Edit", L"Second task");
+        DESTO_CHECK(editor != nullptr);
+        SetWindowTextW(editor, L"Renamed task");
+        SendMessageW(editor, WM_KEYDOWN, VK_RETURN, 0);
+        DESTO_CHECK(renamed);
+
+        todoCards.front().todoItems.push_back({"todo-third", "Third task", false});
+        todoHost.updateTodoItems("todo-card", todoCards.front().todoItems);
+        DESTO_CHECK(GetWindowRect(todoWindow, &todoRect));
+        DESTO_CHECK(todoRect.bottom - todoRect.top == 166);
     }
 }
 

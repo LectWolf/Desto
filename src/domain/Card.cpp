@@ -209,14 +209,16 @@ TodoCard::TodoCard(CardId id)
 }
 
 void TodoCard::setItems(std::vector<TodoItem> items) {
-    items.erase(
-        std::remove_if(
-            items.begin(),
-            items.end(),
-            [](const TodoItem& item) {
-                return item.id.empty() || item.title.empty();
-            }),
-        items.end());
+    std::unordered_set<std::string> ids;
+    for (const auto& item : items) {
+        const auto hasVisibleTitle = item.title.find_first_not_of(" \t\r\n")
+            != std::string::npos;
+        if (item.id.empty() || !hasVisibleTitle || item.title.size() > 512
+            || !ids.insert(item.id).second) {
+            throw std::invalid_argument(
+                "Todo items must have unique ids and non-empty titles up to 512 bytes.");
+        }
+    }
     items_ = std::move(items);
 }
 

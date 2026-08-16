@@ -416,6 +416,44 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                     diagnostics.record(DiagnosticLevel::Warning, "desktop.expansion_rejected");
                 }
             });
+        std::uint64_t nextTodoItemSequence = 1;
+        host.setTodoItemAddedCallback(
+            [&](const CardId& cardId, const std::string& title)
+                -> std::optional<TodoItem> {
+                const auto* card = runtime.findCard(cardId);
+                if (card == nullptr || card->type() != CardType::Todo) return std::nullopt;
+                const auto* todo = static_cast<const TodoCard*>(card);
+                std::string itemId;
+                do {
+                    itemId = cardId + "-item-" + std::to_string(nextTodoItemSequence++);
+                } while (std::ranges::any_of(todo->items(), [&](const TodoItem& item) {
+                    return item.id == itemId;
+                }));
+                const auto result = runtime.execute(AddTodoItem{cardId, itemId, title});
+                return result.status == CommandStatus::Applied
+                    ? std::optional<TodoItem>{{itemId, title, false}}
+                    : std::nullopt;
+            });
+        host.setTodoItemRenamedCallback(
+            [&](const CardId& cardId, const std::string& itemId, const std::string& title) {
+                return runtime.execute(RenameTodoItem{cardId, itemId, title}).status
+                    != CommandStatus::Rejected;
+            });
+        host.setTodoItemCompletedChangedCallback(
+            [&](const CardId& cardId, const std::string& itemId, bool completed) {
+                return runtime.execute(SetTodoItemCompleted{cardId, itemId, completed}).status
+                    != CommandStatus::Rejected;
+            });
+        host.setTodoItemRemovedCallback(
+            [&](const CardId& cardId, const std::string& itemId) {
+                return runtime.execute(RemoveTodoItem{cardId, itemId}).status
+                    != CommandStatus::Rejected;
+            });
+        host.setTodoItemsReorderedCallback(
+            [&](const CardId& cardId, const std::vector<std::string>& order) {
+                return runtime.execute(ReorderTodoItems{cardId, order}).status
+                    != CommandStatus::Rejected;
+            });
         host.setApplicationItemsDroppedCallback(
             [&](const CardId& cardId,
                 const std::vector<std::filesystem::path>& paths,

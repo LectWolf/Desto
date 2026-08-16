@@ -47,6 +47,14 @@ void RunTests() {
     const auto mappingView = MakeCardView(mapping);
     DESTO_CHECK(mappingView.mappingMode == MappingMode::Folder);
     DESTO_CHECK(!mappingView.mappingAllowsSourceMutation);
+
+    TodoCard todo("todo-1");
+    todo.setItems({
+        {.id = "first", .title = "First task", .completed = false},
+        {.id = "second", .title = "Second task", .completed = true},
+    });
+    const auto todoView = MakeCardView(todo);
+    DESTO_CHECK(todoView.todoItems == todo.items());
 }
 
 } // namespace

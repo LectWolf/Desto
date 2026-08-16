@@ -85,7 +85,7 @@ application default
 
 Application Card 的目录所有权、Shell 解析和失败语义记录在 [APPLICATION_CARD.md](APPLICATION_CARD.md)。Explorer 文件交换由独立 OLE Adapter 处理 `CF_HDROP`、`IDataObject` 与 `IDropTarget`；宿主只计算插入槽位和发出命令。Storage Adapter 先完成可回滚移动，再以源/目标内存快照生成同一批项目视图；窗口消息过程不直接修改领域状态或执行零散文件操作。
 
-拖动由 Win32 标题区命中测试发起，窗口边缘始终返回内容命中，不提供鼠标自由缩放。Card 尺寸由实例内容偏好计算：自适应模式从图标规格的建议列数开始，自定义布局按稀疏占用边界和拖放方向扩缩；固定模式使用明确格数。尺寸变化先在离屏位图完成，再以一次 Layered Window 提交更新。`presentation::ResolvePlacementInteraction` 在不依赖 HWND 的情况下完成屏幕边缘、中心和 Card 等距吸附；Ctrl 只绕过吸附，8 DIP 安全间隔和工作区夹取仍保留。拖动跨屏时宿主在 `WM_MOVING` 阶段按目标 DPI 重建鼠标下的窗口，操作结束后再把 Display ID、逻辑矩形、横纵锚点和参考工作区提交给 `ApplicationRuntime::SetPlacement`。
+拖动由 Win32 标题区命中测试发起，窗口边缘始终返回内容命中，不提供鼠标自由缩放。Card 尺寸由实例内容偏好计算：自适应模式从图标规格的建议列数开始，自定义布局按稀疏占用边界和拖放方向扩缩；固定模式使用明确格数。尺寸变化先在离屏位图完成，再以一次 Layered Window 提交更新。`presentation::ResolvePlacementInteraction` 在不依赖 HWND 的情况下完成屏幕边缘、中心和 Card 等距吸附；Ctrl 只绕过吸附，8 DIP 安全间隔和工作区夹取仍保留。吸附意图只在拖动期间创建按需的 3 DIP 透明间隔虚线，不保留空闲计时器或渲染循环。拖动跨屏时宿主在 `WM_MOVING` 阶段按目标 DPI 重建鼠标下的窗口，操作结束后再把 Display ID、逻辑矩形、横纵锚点和参考工作区提交给 `ApplicationRuntime::SetPlacement`。
 
 `WindowsShellItemCatalog` 根据 Card 的四档内容偏好选择两级 Shell 图标源：小/中使用 16 px，大/特大使用 32 px。CardItem 只携带当前所需的预乘 Alpha 位图；跨 Card 移动或实例偏好跨源档位切换时重新解析目标档位，避免长期放大低分辨率图标，也不为尚未选择的档位增加常驻内存。宿主使用预乘 Alpha 双线性采样生成目标 DPI 下的显示像素。
 

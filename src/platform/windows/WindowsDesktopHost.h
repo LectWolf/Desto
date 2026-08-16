@@ -38,6 +38,23 @@ public:
     using CardItemsRefreshCallback = std::function<std::vector<presentation::CardItemView>(
         const domain::CardId&,
         domain::CardItemSize)>;
+    using TodoItemAddedCallback = std::function<std::optional<domain::TodoItem>(
+        const domain::CardId&,
+        const std::string&)>;
+    using TodoItemRenamedCallback = std::function<bool(
+        const domain::CardId&,
+        const std::string&,
+        const std::string&)>;
+    using TodoItemCompletedChangedCallback = std::function<bool(
+        const domain::CardId&,
+        const std::string&,
+        bool)>;
+    using TodoItemRemovedCallback = std::function<bool(
+        const domain::CardId&,
+        const std::string&)>;
+    using TodoItemsReorderedCallback = std::function<bool(
+        const domain::CardId&,
+        const std::vector<std::string>&)>;
 
     explicit WindowsDesktopHost(std::wstring title = L"Desto");
     ~WindowsDesktopHost();
@@ -60,6 +77,11 @@ public:
     void setApplicationItemDragCompletedCallback(ApplicationItemDragCompletedCallback callback);
     void setCardItemActivatedCallback(CardItemActivatedCallback callback);
     void setCardItemsRefreshCallback(CardItemsRefreshCallback callback);
+    void setTodoItemAddedCallback(TodoItemAddedCallback callback);
+    void setTodoItemRenamedCallback(TodoItemRenamedCallback callback);
+    void setTodoItemCompletedChangedCallback(TodoItemCompletedChangedCallback callback);
+    void setTodoItemRemovedCallback(TodoItemRemovedCallback callback);
+    void setTodoItemsReorderedCallback(TodoItemsReorderedCallback callback);
     void updateCardItems(
         const domain::CardId& cardId,
         std::vector<presentation::CardItemView> items);
@@ -70,6 +92,9 @@ public:
         std::vector<domain::ApplicationItemPlacement> itemPlacements;
     };
     void updateCardItemsBatch(std::vector<CardItemsUpdate> updates);
+    void updateTodoItems(
+        const domain::CardId& cardId,
+        std::vector<domain::TodoItem> items);
     // Thread-safe. The refresh callback and rendering run later on the host thread.
     void requestCardItemsRefresh(const domain::CardId& cardId) noexcept;
     void updateCardContentPreferences(

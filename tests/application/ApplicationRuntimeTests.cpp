@@ -28,6 +28,51 @@ void RunTests() {
     DESTO_CHECK(runtime.cards()[1]->id() == "mapping-1");
     DESTO_CHECK(runtime.cards()[2]->id() == "todo-1");
 
+    auto todoResult = runtime.execute(AddTodoItem{"todo-1", "todo-a", "First task"});
+    DESTO_CHECK(todoResult.status == CommandStatus::Applied);
+    DESTO_CHECK(todoResult.changes.changedCards == std::vector<CardId>{"todo-1"});
+    DESTO_CHECK(todoResult.changes.persistence == PersistenceUrgency::Deferred);
+    DESTO_CHECK(runtime.execute(AddTodoItem{"todo-1", "todo-b", "Second task"}).status
+                == CommandStatus::Applied);
+    const auto* todo = static_cast<const TodoCard*>(runtime.findCard("todo-1"));
+    DESTO_CHECK(todo->items().size() == 2);
+    DESTO_CHECK(todo->items()[0].title == "First task");
+
+    const auto duplicateTodo = runtime.execute(AddTodoItem{"todo-1", "todo-a", "Duplicate"});
+    DESTO_CHECK(duplicateTodo.status == CommandStatus::Rejected);
+    DESTO_CHECK(duplicateTodo.error == CommandError::DuplicateTodoItemId);
+    DESTO_CHECK(todo->items().size() == 2);
+    DESTO_CHECK(runtime.execute(AddTodoItem{"todo-1", "blank", "  "}).status
+                == CommandStatus::Rejected);
+    DESTO_CHECK(todo->items().size() == 2);
+
+    DESTO_CHECK(runtime.execute(RenameTodoItem{"todo-1", "todo-a", "Renamed"}).status
+                == CommandStatus::Applied);
+    DESTO_CHECK(todo->items()[0].title == "Renamed");
+    DESTO_CHECK(runtime.execute(RenameTodoItem{"todo-1", "missing", "Nope"}).error
+                == CommandError::TodoItemNotFound);
+    DESTO_CHECK(runtime.execute(SetTodoItemCompleted{"todo-1", "todo-a", true}).status
+                == CommandStatus::Applied);
+    DESTO_CHECK(todo->items()[0].completed);
+    DESTO_CHECK(todo->items()[1].id == "todo-b");
+
+    DESTO_CHECK(runtime.execute(ReorderTodoItems{
+        "todo-1", {"todo-b", "todo-a"}}).status == CommandStatus::Applied);
+    DESTO_CHECK(todo->items()[0].id == "todo-b");
+    const auto invalidOrder = runtime.execute(ReorderTodoItems{
+        "todo-1", {"todo-b", "todo-b"}});
+    DESTO_CHECK(invalidOrder.status == CommandStatus::Rejected);
+    DESTO_CHECK(todo->items()[0].id == "todo-b");
+    DESTO_CHECK(runtime.execute(RemoveTodoItem{"todo-1", "todo-a"}).status
+                == CommandStatus::Applied);
+    const std::vector<TodoItem> expectedTodoItems{{"todo-b", "Second task", false}};
+    DESTO_CHECK(todo->items() == expectedTodoItems);
+
+    ApplicationRuntime todoRestore;
+    todoRestore.restore(runtime.cardSnapshots(), runtime.workspace());
+    const auto* restoredTodo = static_cast<const TodoCard*>(todoRestore.findCard("todo-1"));
+    DESTO_CHECK(restoredTodo->items() == todo->items());
+
     const auto mappingRoot =
         (std::filesystem::temp_directory_path() / "DestoRuntimeMappingSource").lexically_normal();
     const auto mappingFolder = runtime.execute(SetMappingFolderSource{
