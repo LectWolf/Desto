@@ -33,6 +33,7 @@ CardView MakeCardView(const domain::Card& card) {
         .showPinControl = chrome.showPinControl,
         .appearancePreset = appearance.preset,
         .opacity = appearance.opacity,
+        .cornerRadius = appearance.cornerRadius,
     };
 }
 

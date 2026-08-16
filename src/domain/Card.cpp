@@ -7,8 +7,10 @@ namespace desto::domain {
 namespace {
 
 void ValidateAppearance(const CardAppearancePreferences& appearance) {
-    if (appearance.opacity < 0 || appearance.opacity > 1) {
-        throw std::invalid_argument("Card opacity must be between 0 and 1.");
+    if (appearance.opacity < 0 || appearance.opacity > 1
+        || appearance.cornerRadius < 0 || appearance.cornerRadius > 128) {
+        throw std::invalid_argument(
+            "Card opacity must be between 0 and 1 and corner radius must be between 0 and 128.");
     }
 }
 

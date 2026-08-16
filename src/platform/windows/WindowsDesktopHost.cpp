@@ -163,7 +163,18 @@ struct WindowsDesktopHost::Impl {
         std::uint32_t red = 0x20;
         std::uint32_t green = 0x80;
         std::uint32_t blue = 0xD0;
-        if (card.appearancePreset == "compact") {
+        const auto lightSurface = card.appearancePreset == "white"
+            || card.appearancePreset == "pearl-pink"
+            || card.appearancePreset == "default";
+        if (lightSurface) {
+            red = 0xF6;
+            green = 0xF7;
+            blue = 0xFA;
+        } else if (card.appearancePreset == "pearl-pink") {
+            red = 0xF4;
+            green = 0xB0;
+            blue = 0xD8;
+        } else if (card.appearancePreset == "compact") {
             red = 0x30;
             green = 0xA0;
             blue = 0x90;
@@ -172,11 +183,34 @@ struct WindowsDesktopHost::Impl {
             green = 0x34;
             blue = 0x48;
         }
+        if (card.appearancePreset == "pearl-pink") {
+            red = 0xF2;
+            green = 0xAE;
+            blue = 0xD6;
+        }
         red = (red + (ordinal % 3) * 8) & 0xFF;
         const auto alpha = static_cast<std::uint32_t>(
             std::lround(std::clamp(card.opacity, 0.0, 1.0) * 255.0));
         const auto accent = (alpha << 24) | (red << 16) | (green << 8) | blue;
         const auto visibleBottom = card.expanded ? surface.height : std::min(surface.height, 52);
+        const auto radius = std::min(
+            static_cast<int>(std::lround(card.cornerRadius * display.effectiveDpi / 96.0)),
+            std::min(surface.width, visibleBottom) / 2);
+        const auto isInside = [&](int x, int y) {
+            if (radius <= 0) {
+                return true;
+            }
+            const auto cornerX = x < radius ? radius : x >= surface.width - radius
+                ? surface.width - radius - 1 : -1;
+            const auto cornerY = y < radius ? radius : y >= visibleBottom - radius
+                ? visibleBottom - radius - 1 : -1;
+            if (cornerX < 0 || cornerY < 0) {
+                return true;
+            }
+            const auto dx = static_cast<double>(x - cornerX);
+            const auto dy = static_cast<double>(y - cornerY);
+            return dx * dx + dy * dy <= static_cast<double>(radius * radius);
+        };
         std::fill(surface.pixels, surface.pixels + surface.width * surface.height, accent);
         if (visibleBottom < surface.height) {
             std::fill(surface.pixels + visibleBottom * surface.width,
@@ -185,15 +219,19 @@ struct WindowsDesktopHost::Impl {
         }
         for (int y = 0; y < surface.height; ++y) {
             for (int x = 0; x < surface.width; ++x) {
-                if (y < visibleBottom && (x < 2 || y < 2 || x >= surface.width - 2
-                                          || y >= visibleBottom - 2)) {
-                    surface.pixels[y * surface.width + x] = (alpha << 24) | 0x00FFFFFFu;
+                if (y >= visibleBottom || !isInside(x, y)) {
+                    surface.pixels[y * surface.width + x] = 0u;
+                } else if (x < 2 || y < 2 || x >= surface.width - 2
+                           || y >= visibleBottom - 2) {
+                    const auto borderColor = lightSurface ? 0x002B3948u : 0x00FFFFFFu;
+                    surface.pixels[y * surface.width + x] = (alpha << 24) | borderColor;
                 }
             }
         }
         const auto text = card.showTitle ? card.title : L"";
         SetBkMode(surface.memoryDc, TRANSPARENT);
-        SetTextColor(surface.memoryDc, RGB(255, 255, 255));
+        const auto foreground = lightSurface ? RGB(32, 42, 52) : RGB(255, 255, 255);
+        SetTextColor(surface.memoryDc, foreground);
         wchar_t iconGlyph = L'C';
         if (card.type == domain::CardType::Application) {
             iconGlyph = L'A';
@@ -203,13 +241,13 @@ struct WindowsDesktopHost::Impl {
             iconGlyph = L'T';
         }
         RECT iconRect{12, 12, 34, 34};
-        HBRUSH iconBrush = CreateSolidBrush(RGB(255, 255, 255));
+        HBRUSH iconBrush = CreateSolidBrush(lightSurface ? RGB(45, 55, 65) : RGB(255, 255, 255));
         FillRect(surface.memoryDc, &iconRect, iconBrush);
         DeleteObject(iconBrush);
-        SetTextColor(surface.memoryDc, RGB(20, 40, 60));
+        SetTextColor(surface.memoryDc, lightSurface ? RGB(245, 247, 250) : RGB(20, 40, 60));
         DrawTextW(surface.memoryDc, &iconGlyph, 1, &iconRect,
                   DT_CENTER | DT_SINGLELINE | DT_VCENTER);
-        SetTextColor(surface.memoryDc, RGB(255, 255, 255));
+        SetTextColor(surface.memoryDc, foreground);
         RECT textRect{42, 12, surface.width - 120, 42};
         DrawTextW(surface.memoryDc, text.c_str(), -1, &textRect, DT_LEFT | DT_SINGLELINE);
         int controlRight = surface.width - 12;
@@ -231,7 +269,7 @@ struct WindowsDesktopHost::Impl {
             const auto typeText = card.typeLabel + L"  "
                 + std::to_wstring(static_cast<int>(display.effectiveDpi)) + L" DPI";
             RECT typeRect{14, 58, surface.width - 14, 86};
-            SetTextColor(surface.memoryDc, RGB(230, 240, 250));
+            SetTextColor(surface.memoryDc, lightSurface ? RGB(70, 80, 90) : RGB(230, 240, 250));
             DrawTextW(surface.memoryDc, typeText.c_str(), -1, &typeRect,
                       DT_LEFT | DT_SINGLELINE);
         }

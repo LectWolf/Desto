@@ -19,6 +19,7 @@ struct CardView {
     bool showPinControl = true;
     std::string appearancePreset = "default";
     double opacity = 1.0;
+    double cornerRadius = 16.0;
 };
 
 [[nodiscard]] CardView MakeCardView(const domain::Card& card);

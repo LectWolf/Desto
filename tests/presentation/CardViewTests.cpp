@@ -27,7 +27,7 @@ void RunTests() {
     chrome.showPinControl = false;
     application.setChrome(chrome);
     application.setExpanded(false);
-    application.setAppearance({"dark", 0.75});
+    application.setAppearance({"dark", 0.75, 28.0});
     applicationView = MakeCardView(application);
     DESTO_CHECK(!applicationView.showTitle);
     DESTO_CHECK(!applicationView.showCollapseControl);
@@ -36,6 +36,7 @@ void RunTests() {
     DESTO_CHECK(!applicationView.expanded);
     DESTO_CHECK(applicationView.appearancePreset == "dark");
     DESTO_CHECK(applicationView.opacity == 0.75);
+    DESTO_CHECK(applicationView.cornerRadius == 28.0);
 }
 
 } // namespace

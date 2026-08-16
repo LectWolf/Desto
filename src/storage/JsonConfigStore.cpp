@@ -234,6 +234,7 @@ ApplicationConfig ParseDocument(const Json& document) {
                 }
                 card.appearance.preset = appearance.value("preset", std::string{"default"});
                 card.appearance.opacity = appearance.value("opacity", 1.0);
+                card.appearance.cornerRadius = appearance.value("cornerRadius", 16.0);
             }
             switch (card.type) {
             case domain::CardType::Application: {
@@ -391,8 +392,11 @@ void JsonConfigStore::save(const ApplicationConfig& config) const {
             throw std::invalid_argument("Configuration card ids must be unique and non-empty.");
         }
         if (!std::isfinite(card.appearance.opacity)
-            || card.appearance.opacity < 0 || card.appearance.opacity > 1) {
-            throw std::invalid_argument("Configuration card opacity must be between 0 and 1.");
+            || card.appearance.opacity < 0 || card.appearance.opacity > 1
+            || !std::isfinite(card.appearance.cornerRadius)
+            || card.appearance.cornerRadius < 0 || card.appearance.cornerRadius > 128) {
+            throw std::invalid_argument(
+                "Configuration card opacity or corner radius is outside the allowed range.");
         }
         switch (card.type) {
         case domain::CardType::Application:
@@ -477,6 +481,7 @@ void JsonConfigStore::save(const ApplicationConfig& config) const {
         value["appearance"] = {
             {"preset", card.appearance.preset},
             {"opacity", card.appearance.opacity},
+            {"cornerRadius", card.appearance.cornerRadius},
         };
         switch (card.type) {
         case domain::CardType::Application:

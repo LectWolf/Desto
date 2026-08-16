@@ -43,6 +43,7 @@ struct CardChromePreferences {
 struct CardAppearancePreferences {
     std::string preset = "default";
     double opacity = 1.0;
+    double cornerRadius = 16.0;
 };
 
 struct FileReference {
