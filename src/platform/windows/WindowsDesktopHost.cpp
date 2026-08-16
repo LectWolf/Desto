@@ -528,7 +528,8 @@ struct WindowsDesktopHost::Impl {
         (void)ordinal;
         const auto darkSurface = card.appearancePreset == "black"
             || card.appearancePreset == "dark";
-        const auto pearlSurface = card.appearancePreset == "pearl-pink";
+        const auto pearlSurface = card.appearancePreset == "pearl-pink"
+            || card.appearancePreset == "jewel";
         const auto visibleBottom = card.expanded
             ? surface.height
             : std::min(surface.height, dipToPixels(48.0, surface));
@@ -550,12 +551,32 @@ struct WindowsDesktopHost::Impl {
                         ? 0.0
                         : static_cast<double>(std::min(y, visibleBottom - 1))
                             / (visibleBottom - 1);
-                    red = static_cast<std::uint32_t>(std::lround(
-                        250.0 - 10.0 * horizontal + 4.0 * vertical));
-                    green = static_cast<std::uint32_t>(std::lround(
-                        244.0 + 8.0 * horizontal + 3.0 * vertical));
-                    blue = static_cast<std::uint32_t>(std::lround(
-                        250.0 + 4.0 * horizontal - 1.0 * vertical));
+                    const auto amethyst = std::exp(-(
+                        std::pow(horizontal - 0.12, 2.0) / 0.11
+                        + std::pow(vertical - 0.15, 2.0) / 0.32));
+                    const auto aquamarine = std::exp(-(
+                        std::pow(horizontal - 0.88, 2.0) / 0.16
+                        + std::pow(vertical - 0.28, 2.0) / 0.24));
+                    const auto tourmaline = std::exp(-(
+                        std::pow(horizontal - 0.22, 2.0) / 0.18
+                        + std::pow(vertical - 0.88, 2.0) / 0.20));
+                    const auto amber = std::exp(-(
+                        std::pow(horizontal - 0.78, 2.0) / 0.22
+                        + std::pow(vertical - 0.82, 2.0) / 0.18));
+                    const auto diagonalSheen = std::exp(-std::pow(
+                        horizontal * 0.82 + vertical * 0.58 - 0.72,
+                        2.0) / 0.012);
+                    const auto channel = [&](double base, double a, double q, double t, double g) {
+                        return static_cast<std::uint32_t>(std::lround(std::clamp(
+                            base + a * amethyst + q * aquamarine
+                                + t * tourmaline + g * amber
+                                + 13.0 * diagonalSheen,
+                            0.0,
+                            255.0)));
+                    };
+                    red = channel(226.0, 7.0, -28.0, 23.0, 24.0);
+                    green = channel(225.0, -28.0, 21.0, -22.0, 12.0);
+                    blue = channel(236.0, 17.0, 14.0, 10.0, -29.0);
                 }
                 surface.pixels[y * surface.width + x] = (red << 16) | (green << 8) | blue;
             }
