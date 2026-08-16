@@ -20,7 +20,7 @@ std::wstring TypeLabel(domain::CardType type) {
 CardView MakeCardView(const domain::Card& card) {
     const auto& chrome = card.chrome();
     const auto& appearance = card.appearance();
-    return {
+    CardView result{
         .id = card.id(),
         .type = card.type(),
         .title = TypeLabel(card.type()),
@@ -36,6 +36,12 @@ CardView MakeCardView(const domain::Card& card) {
         .cornerRadius = appearance.cornerRadius,
         .content = card.content(),
     };
+    if (card.type() == domain::CardType::Application) {
+        const auto& application = static_cast<const domain::ApplicationCard&>(card);
+        result.applicationSortMode = application.sortMode();
+        result.applicationItemPlacements = application.itemPlacements();
+    }
+    return result;
 }
 
 } // namespace desto::presentation

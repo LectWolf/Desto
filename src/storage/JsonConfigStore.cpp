@@ -64,6 +64,21 @@ domain::CardItemSize ParseCardItemSize(const std::string& value) {
     throw std::runtime_error("Configuration card item size is invalid.");
 }
 
+domain::CardSizeMode ParseCardSizeMode(const std::string& value) {
+    if (value == "adaptive") return domain::CardSizeMode::Adaptive;
+    if (value == "fixed") return domain::CardSizeMode::Fixed;
+    throw std::runtime_error("Configuration card size mode is invalid.");
+}
+
+domain::ApplicationItemSortMode ParseApplicationItemSortMode(const std::string& value) {
+    if (value == "custom") return domain::ApplicationItemSortMode::Custom;
+    if (value == "name") return domain::ApplicationItemSortMode::Name;
+    if (value == "size") return domain::ApplicationItemSortMode::Size;
+    if (value == "itemType") return domain::ApplicationItemSortMode::ItemType;
+    if (value == "modifiedDate") return domain::ApplicationItemSortMode::ModifiedDate;
+    throw std::runtime_error("Configuration application sort mode is invalid.");
+}
+
 Json ReadDocument(const std::filesystem::path& path) {
     if (!std::filesystem::exists(path)) {
         return Json::object();
@@ -107,6 +122,37 @@ Json MigrateDocument(Json document) {
             // Schema 3 adds optional per-Card content preferences and Application item order.
             document["schemaVersion"] = 3;
             version = 3;
+            continue;
+        }
+        if (version == 3) {
+            // Schema 4 preserves sparse custom slots separately from transient sorted projections.
+            if (document.contains("cards") && document["cards"].is_array()) {
+                for (auto& card : document["cards"]) {
+                    if (!card.is_object() || card.value("type", std::string{}) != "application"
+                        || !card.contains("application") || !card["application"].is_object()) {
+                        continue;
+                    }
+                    auto& application = card["application"];
+                    application["sortMode"] = "custom";
+                    application["itemPlacements"] = Json::array();
+                    if (application.contains("itemOrder") && application["itemOrder"].is_array()) {
+                        std::uint32_t index = 0;
+                        for (const auto& item : application["itemOrder"]) {
+                            if (item.is_string()) {
+                                application["itemPlacements"].push_back({
+                                    {"fileName", item},
+                                    {"column", index % 4},
+                                    {"row", index / 4},
+                                });
+                                ++index;
+                            }
+                        }
+                    }
+                    application.erase("itemOrder");
+                }
+            }
+            document["schemaVersion"] = 4;
+            version = 4;
             continue;
         }
         throw std::runtime_error("Configuration schema migration is unavailable.");
@@ -266,6 +312,10 @@ ApplicationConfig ParseDocument(const Json& document) {
                 card.content.itemSize = ParseCardItemSize(
                     content.value("itemSize", std::string{"medium"}));
                 card.content.showItemNames = content.value("showItemNames", true);
+                card.content.sizeMode = ParseCardSizeMode(
+                    content.value("sizeMode", std::string{"adaptive"}));
+                card.content.fixedColumns = content.value("fixedColumns", 4u);
+                card.content.fixedRows = content.value("fixedRows", 3u);
             }
             switch (card.type) {
             case domain::CardType::Application: {
@@ -275,15 +325,24 @@ ApplicationConfig ParseDocument(const Json& document) {
                     throw std::runtime_error("Configuration application card is invalid.");
                 }
                 card.applicationStoragePath = FromUtf8(application.at("storagePath").get<std::string>());
-                if (application.contains("itemOrder")) {
-                    if (!application.at("itemOrder").is_array()) {
-                        throw std::runtime_error("Configuration application item order is invalid.");
+                card.applicationSortMode = ParseApplicationItemSortMode(
+                    application.value("sortMode", std::string{"custom"}));
+                if (application.contains("itemPlacements")) {
+                    if (!application.at("itemPlacements").is_array()) {
+                        throw std::runtime_error("Configuration application item placements are invalid.");
                     }
-                    for (const auto& item : application.at("itemOrder")) {
-                        if (!item.is_string()) {
-                            throw std::runtime_error("Configuration application item order is invalid.");
+                    for (const auto& item : application.at("itemPlacements")) {
+                        if (!item.is_object() || !item.contains("fileName")
+                            || !item.at("fileName").is_string()
+                            || !item.contains("column") || !item.at("column").is_number_unsigned()
+                            || !item.contains("row") || !item.at("row").is_number_unsigned()) {
+                            throw std::runtime_error("Configuration application item placement is invalid.");
                         }
-                        card.applicationItemOrder.push_back(FromUtf8(item.get<std::string>()));
+                        card.applicationItemPlacements.push_back({
+                            .fileName = FromUtf8(item.at("fileName").get<std::string>()),
+                            .column = item.at("column").get<std::uint32_t>(),
+                            .row = item.at("row").get<std::uint32_t>(),
+                        });
                     }
                 }
                 break;
@@ -339,6 +398,12 @@ ApplicationConfig ParseDocument(const Json& document) {
                 }
                 break;
             }
+            }
+            if (card.type == domain::CardType::Application) {
+                domain::ApplicationCard validated(card.id, card.applicationStoragePath);
+                validated.setLayout(
+                    card.applicationSortMode, card.applicationItemPlacements);
+                validated.validateContentPreferences(card.content);
             }
             result.cards.push_back(std::move(card));
         }
@@ -440,6 +505,12 @@ void JsonConfigStore::save(const ApplicationConfig& config) const {
             throw std::invalid_argument(
                 "Configuration card opacity or corner radius is outside the allowed range.");
         }
+        domain::TodoCard contentValidator("configuration-content-validator");
+        contentValidator.setContent(card.content);
+        if (card.content.fixedColumns == 0 || card.content.fixedRows == 0
+            || card.content.fixedColumns > 64 || card.content.fixedRows > 64) {
+            throw std::invalid_argument("Configuration fixed Card grid must be between 1 and 64.");
+        }
         switch (card.type) {
         case domain::CardType::Application:
             if (card.applicationStoragePath.empty() || card.applicationStoragePath.is_absolute()) {
@@ -447,7 +518,10 @@ void JsonConfigStore::save(const ApplicationConfig& config) const {
             }
             {
                 domain::ApplicationCard validated(card.id, card.applicationStoragePath);
-                validated.setItemOrder(card.applicationItemOrder);
+                validated.setLayout(
+                    card.applicationSortMode,
+                    card.applicationItemPlacements);
+                validated.validateContentPreferences(card.content);
             }
             break;
         case domain::CardType::Mapping:
@@ -532,15 +606,24 @@ void JsonConfigStore::save(const ApplicationConfig& config) const {
         value["content"] = {
             {"itemSize", domain::ToString(card.content.itemSize)},
             {"showItemNames", card.content.showItemNames},
+            {"sizeMode", domain::ToString(card.content.sizeMode)},
+            {"fixedColumns", card.content.fixedColumns},
+            {"fixedRows", card.content.fixedRows},
         };
         switch (card.type) {
         case domain::CardType::Application:
             value.erase("mapping");
             value.erase("todo");
             value["application"]["storagePath"] = ToUtf8(card.applicationStoragePath);
-            value["application"]["itemOrder"] = Json::array();
-            for (const auto& item : card.applicationItemOrder) {
-                value["application"]["itemOrder"].push_back(ToUtf8(item));
+            value["application"]["sortMode"] = domain::ToString(card.applicationSortMode);
+            value["application"]["itemPlacements"] = Json::array();
+            value["application"].erase("itemOrder");
+            for (const auto& placement : card.applicationItemPlacements) {
+                value["application"]["itemPlacements"].push_back({
+                    {"fileName", ToUtf8(placement.fileName)},
+                    {"column", placement.column},
+                    {"row", placement.row},
+                });
             }
             break;
         case domain::CardType::Mapping: {

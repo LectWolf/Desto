@@ -22,6 +22,7 @@ public:
     using ApplicationItemsDroppedCallback = std::function<bool(
         const domain::CardId&,
         const std::vector<std::filesystem::path>&,
+        const std::optional<domain::CardId>& sourceCardId,
         std::size_t insertionIndex)>;
     using ApplicationItemDragCompletedCallback = std::function<void(
         const domain::CardId&)>;
@@ -52,6 +53,13 @@ public:
     void updateCardItems(
         const domain::CardId& cardId,
         std::vector<presentation::CardItemView> items);
+    struct CardItemsUpdate {
+        domain::CardId cardId;
+        std::vector<presentation::CardItemView> items;
+        domain::ApplicationItemSortMode sortMode = domain::ApplicationItemSortMode::Custom;
+        std::vector<domain::ApplicationItemPlacement> itemPlacements;
+    };
+    void updateCardItemsBatch(std::vector<CardItemsUpdate> updates);
     void updateCardContentPreferences(
         const domain::CardId& cardId,
         domain::CardContentPreferences preferences);

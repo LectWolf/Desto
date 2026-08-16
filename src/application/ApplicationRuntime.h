@@ -42,9 +42,10 @@ struct SetCardContentPreferences {
     domain::CardContentPreferences preferences;
 };
 
-struct SetApplicationCardItemOrder {
+struct SetApplicationCardLayout {
     domain::CardId cardId;
-    std::vector<std::filesystem::path> itemOrder;
+    domain::ApplicationItemSortMode sortMode = domain::ApplicationItemSortMode::Custom;
+    std::vector<domain::ApplicationItemPlacement> itemPlacements;
 };
 
 struct SetPlacement {
@@ -80,7 +81,7 @@ using ApplicationCommand = std::variant<
     SetCardVisibility,
     SetCardExpanded,
     SetCardContentPreferences,
-    SetApplicationCardItemOrder,
+    SetApplicationCardLayout,
     SetPlacement,
     RemovePlacement,
     UpdateDisplayTopology,
@@ -170,7 +171,7 @@ private:
     [[nodiscard]] CommandResult handle(const SetCardVisibility& command);
     [[nodiscard]] CommandResult handle(const SetCardExpanded& command);
     [[nodiscard]] CommandResult handle(const SetCardContentPreferences& command);
-    [[nodiscard]] CommandResult handle(const SetApplicationCardItemOrder& command);
+    [[nodiscard]] CommandResult handle(const SetApplicationCardLayout& command);
     [[nodiscard]] CommandResult handle(const SetPlacement& command);
     [[nodiscard]] CommandResult handle(const RemovePlacement& command);
     [[nodiscard]] CommandResult handle(const UpdateDisplayTopology& command);

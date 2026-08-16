@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -33,6 +34,27 @@ enum class CardItemSize {
     ExtraLarge,
 };
 
+enum class CardSizeMode {
+    Adaptive,
+    Fixed,
+};
+
+enum class ApplicationItemSortMode {
+    Custom,
+    Name,
+    Size,
+    ItemType,
+    ModifiedDate,
+};
+
+struct ApplicationItemPlacement {
+    std::filesystem::path fileName;
+    std::uint32_t column = 0;
+    std::uint32_t row = 0;
+
+    bool operator==(const ApplicationItemPlacement&) const = default;
+};
+
 struct CardDeletionPreview {
     CardId cardId;
     CardType cardType;
@@ -56,6 +78,9 @@ struct CardAppearancePreferences {
 struct CardContentPreferences {
     CardItemSize itemSize = CardItemSize::Medium;
     bool showItemNames = true;
+    CardSizeMode sizeMode = CardSizeMode::Adaptive;
+    std::uint32_t fixedColumns = 4;
+    std::uint32_t fixedRows = 3;
 
     bool operator==(const CardContentPreferences&) const = default;
 };
@@ -81,7 +106,8 @@ struct CardSnapshot {
     CardAppearancePreferences appearance;
     CardContentPreferences content;
     std::filesystem::path applicationStoragePath;
-    std::vector<std::filesystem::path> applicationItemOrder;
+    ApplicationItemSortMode applicationSortMode = ApplicationItemSortMode::Custom;
+    std::vector<ApplicationItemPlacement> applicationItemPlacements;
     std::filesystem::path mappingSourceRoot;
     std::vector<FileReference> mappingReferences;
     bool mappingAllowsSourceMutation = true;
@@ -107,7 +133,7 @@ public:
     void setExpanded(bool expanded) noexcept { expanded_ = expanded; }
     void setChrome(CardChromePreferences preferences);
     void setAppearance(CardAppearancePreferences preferences);
-    void setContent(CardContentPreferences preferences) noexcept { content_ = preferences; }
+    void setContent(CardContentPreferences preferences);
 
 protected:
     Card(CardId id, CardType type);
@@ -130,13 +156,22 @@ public:
         return CardDeletionEffect::ReturnManagedItemsToDesktop;
     }
     [[nodiscard]] const std::filesystem::path& relativeStoragePath() const noexcept { return relativeStoragePath_; }
-    [[nodiscard]] const std::vector<std::filesystem::path>& itemOrder() const noexcept { return itemOrder_; }
+    [[nodiscard]] ApplicationItemSortMode sortMode() const noexcept { return sortMode_; }
+    [[nodiscard]] const std::vector<ApplicationItemPlacement>& itemPlacements() const noexcept {
+        return itemPlacements_;
+    }
     void setRelativeStoragePath(std::filesystem::path relativeStoragePath);
-    void setItemOrder(std::vector<std::filesystem::path> itemOrder);
+    void setSortMode(ApplicationItemSortMode sortMode);
+    void setItemPlacements(std::vector<ApplicationItemPlacement> placements);
+    void setLayout(
+        ApplicationItemSortMode sortMode,
+        std::vector<ApplicationItemPlacement> placements);
+    void validateContentPreferences(const CardContentPreferences& preferences) const;
 
 private:
     std::filesystem::path relativeStoragePath_;
-    std::vector<std::filesystem::path> itemOrder_;
+    ApplicationItemSortMode sortMode_ = ApplicationItemSortMode::Custom;
+    std::vector<ApplicationItemPlacement> itemPlacements_;
 };
 
 class MappingCard final : public Card {
@@ -178,5 +213,7 @@ private:
 
 [[nodiscard]] std::string_view ToString(CardType type) noexcept;
 [[nodiscard]] std::string_view ToString(CardItemSize size) noexcept;
+[[nodiscard]] std::string_view ToString(CardSizeMode mode) noexcept;
+[[nodiscard]] std::string_view ToString(ApplicationItemSortMode mode) noexcept;
 
 } // namespace desto::domain

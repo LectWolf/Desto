@@ -35,6 +35,9 @@ struct CardItemView {
     std::filesystem::path sourcePath;
     std::filesystem::path resolvedTargetPath;
     std::wstring appUserModelId;
+    std::uintmax_t fileSize = 0;
+    std::wstring itemType;
+    std::int64_t modifiedTime = 0;
     CardItemState state = CardItemState::Ready;
     CardItemIcon icon;
 };
@@ -54,6 +57,9 @@ struct CardView {
     double opacity = 1.0;
     double cornerRadius = 16.0;
     domain::CardContentPreferences content;
+    domain::ApplicationItemSortMode applicationSortMode =
+        domain::ApplicationItemSortMode::Custom;
+    std::vector<domain::ApplicationItemPlacement> applicationItemPlacements;
     std::vector<CardItemView> items;
 };
 

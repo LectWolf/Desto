@@ -221,6 +221,23 @@ presentation::CardItemView WindowsShellItemCatalog::inspect(
         return result;
     }
 
+    if (std::filesystem::is_regular_file(normalized, error) && !error) {
+        result.fileSize = std::filesystem::file_size(normalized, error);
+        if (error) result.fileSize = 0;
+    }
+    error.clear();
+    const auto modified = std::filesystem::last_write_time(normalized, error);
+    if (!error) result.modifiedTime = modified.time_since_epoch().count();
+    SHFILEINFOW fileInfo{};
+    if (SHGetFileInfoW(
+            normalized.c_str(),
+            0,
+            &fileInfo,
+            sizeof(fileInfo),
+            SHGFI_TYPENAME) != 0) {
+        result.itemType = fileInfo.szTypeName;
+    }
+
     ComApartment apartment;
     if (!apartment.available()) {
         result.state = presentation::CardItemState::IconUnavailable;

@@ -36,11 +36,13 @@ void RunTests() {
     DESTO_CHECK(application.appearance().preset == "compact");
     DESTO_CHECK(application.appearance().opacity == 0.8);
     application.setContent({.itemSize = CardItemSize::Large, .showItemNames = false});
-    application.setItemOrder({"Browser.lnk", "Editor.exe"});
+    application.setSortMode(ApplicationItemSortMode::ModifiedDate);
+    application.setItemPlacements({{"Browser.lnk", 0, 0}, {"Editor.exe", 2, 0}});
     DESTO_CHECK(application.content().itemSize == CardItemSize::Large);
     DESTO_CHECK(!application.content().showItemNames);
-    DESTO_CHECK(application.itemOrder()
-                == std::vector<std::filesystem::path>({"Browser.lnk", "Editor.exe"}));
+    DESTO_CHECK(application.sortMode() == ApplicationItemSortMode::ModifiedDate);
+    DESTO_CHECK(application.itemPlacements().size() == 2);
+    DESTO_CHECK(application.itemPlacements()[1].column == 2);
 
     mapping.setFolderSource("C:/Projects");
     DESTO_CHECK(mapping.mode() == MappingMode::Folder);
@@ -66,7 +68,21 @@ void RunTests() {
 
     rejected = false;
     try {
-        application.setItemOrder({"nested/Editor.exe"});
+        application.setContent({
+            .itemSize = CardItemSize::Medium,
+            .showItemNames = true,
+            .sizeMode = CardSizeMode::Fixed,
+            .fixedColumns = 0,
+            .fixedRows = 3,
+        });
+    } catch (const std::invalid_argument&) {
+        rejected = true;
+    }
+    DESTO_CHECK(rejected);
+
+    rejected = false;
+    try {
+        application.setItemPlacements({{"nested/Editor.exe", 0, 0}});
     } catch (const std::invalid_argument&) {
         rejected = true;
     }
@@ -74,6 +90,8 @@ void RunTests() {
 
     DESTO_CHECK(ToString(CardType::Mapping) == "mapping");
     DESTO_CHECK(ToString(CardItemSize::ExtraLarge) == "extraLarge");
+    DESTO_CHECK(ToString(CardSizeMode::Fixed) == "fixed");
+    DESTO_CHECK(ToString(ApplicationItemSortMode::ItemType) == "itemType");
 }
 
 } // namespace

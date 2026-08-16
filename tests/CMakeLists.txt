@@ -109,6 +109,32 @@ target_link_libraries(desto_application_runtime_tests
 
 add_test(NAME desto_application_runtime_tests COMMAND desto_application_runtime_tests)
 
+add_executable(desto_application_card_transfer_tests
+    application/ApplicationCardTransferTests.cpp
+)
+
+target_include_directories(desto_application_card_transfer_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+target_link_libraries(desto_application_card_transfer_tests
+    PRIVATE
+        desto_application
+)
+
+add_test(NAME desto_application_card_transfer_tests COMMAND desto_application_card_transfer_tests)
+
+add_executable(desto_application_card_ordering_tests
+    application/ApplicationCardOrderingTests.cpp
+)
+
+target_include_directories(desto_application_card_ordering_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+target_link_libraries(desto_application_card_ordering_tests
+    PRIVATE
+        desto_application
+)
+
+add_test(NAME desto_application_card_ordering_tests COMMAND desto_application_card_ordering_tests)
+
 add_executable(desto_application_lifecycle_tests
     application/ApplicationLifecycleTests.cpp
 )

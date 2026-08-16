@@ -16,7 +16,7 @@ void RunTests() {
         L"C:\\Desto Drag Test\\First.lnk",
         L"C:\\Desto Drag Test\\Second.txt",
     };
-    auto* data = CreateFileDataObject(paths);
+    auto* data = CreateFileDataObject(paths, "application-1");
     DESTO_CHECK(data != nullptr);
 
     bool entered = false;
@@ -31,8 +31,12 @@ void RunTests() {
             return static_cast<DWORD>(DROPEFFECT_MOVE);
         },
         .dragLeave = [&] { left = true; },
-        .drop = [&](std::vector<std::filesystem::path> received, POINTL, DWORD) {
+        .drop = [&](std::vector<std::filesystem::path> received,
+                    std::optional<std::string> sourceCardId,
+                    POINTL,
+                    DWORD) {
             DESTO_CHECK(received == paths);
+            DESTO_CHECK(sourceCardId == "application-1");
             dropped = true;
             return static_cast<DWORD>(DROPEFFECT_MOVE);
         },

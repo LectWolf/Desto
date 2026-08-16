@@ -100,4 +100,28 @@ std::size_t ResolveCardInsertionIndex(
     return std::min(itemCount, row * layout.columns + column);
 }
 
+std::optional<std::size_t> ResolveCardSlotIndex(
+    double availableWidth,
+    double pointerX,
+    double pointerY,
+    CardContentLayoutSettings settings,
+    std::optional<std::size_t> maximumRows) {
+    const auto layout = ResolveCardContentLayout(0, availableWidth, settings);
+    const auto contentLeft = (availableWidth - layout.contentWidth) / 2.0;
+    const auto localX = pointerX - contentLeft;
+    const auto localY = pointerY - settings.headerHeight - settings.verticalPadding;
+    if (localX < 0 || localY < 0) return std::nullopt;
+    const auto pitchX = settings.itemWidth + settings.horizontalGap;
+    const auto pitchY = settings.itemHeight + settings.verticalGap;
+    const auto column = static_cast<std::size_t>(std::floor(localX / pitchX));
+    const auto row = static_cast<std::size_t>(std::floor(localY / pitchY));
+    if (column >= layout.columns
+        || (maximumRows.has_value() && row >= *maximumRows)
+        || std::fmod(localX, pitchX) >= settings.itemWidth
+        || std::fmod(localY, pitchY) >= settings.itemHeight) {
+        return std::nullopt;
+    }
+    return row * layout.columns + column;
+}
+
 } // namespace desto::presentation

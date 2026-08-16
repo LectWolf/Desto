@@ -117,6 +117,28 @@ void RunTests() {
         DESTO_CHECK(loadedConfig.schemaVersion == ApplicationConfig::CurrentSchemaVersion);
         DESTO_CHECK(loadedConfig.storageRoot == std::filesystem::path("C:\\OldDesto"));
         DESTO_CHECK(loadedConfig.workspace.placements().size() == 1);
+
+        const auto schemaThreePath = testRoot / "schema-3" / "settings.json";
+        std::filesystem::create_directories(schemaThreePath.parent_path());
+        std::ofstream(schemaThreePath) << R"({
+  "schemaVersion": 3,
+  "storage": {"root": "C:\\Desto"},
+  "cards": [{
+    "id": "legacy-application",
+    "type": "application",
+    "application": {
+      "storagePath": "cards/legacy-application",
+      "itemOrder": ["One.lnk", "Two.lnk", "Five.lnk"]
+    }
+  }]
+})";
+        const auto migratedThree = JsonConfigStore(schemaThreePath).load();
+        DESTO_CHECK(migratedThree.schemaVersion == 4);
+        DESTO_CHECK(migratedThree.cards.front().applicationSortMode
+                    == ApplicationItemSortMode::Custom);
+        DESTO_CHECK(migratedThree.cards.front().applicationItemPlacements.size() == 3);
+        DESTO_CHECK(migratedThree.cards.front().applicationItemPlacements[2].column == 2);
+        DESTO_CHECK(migratedThree.cards.front().applicationItemPlacements[2].row == 0);
         loadedConfig.cards = {
             {
                 .id = "card-1",
@@ -127,7 +149,8 @@ void RunTests() {
                 .appearance = {.preset = "compact", .opacity = 0.8},
                 .content = {.itemSize = CardItemSize::Large, .showItemNames = false},
                 .applicationStoragePath = "cards/application-1",
-                .applicationItemOrder = {"Editor.lnk", "Browser.lnk"},
+                .applicationSortMode = ApplicationItemSortMode::Size,
+                .applicationItemPlacements = {{"Editor.lnk", 0, 0}, {"Browser.lnk", 2, 0}},
             },
             {
                 .id = "mapping-1",
@@ -167,8 +190,10 @@ void RunTests() {
         DESTO_CHECK(!reloadedConfig.cards[0].content.showItemNames);
         DESTO_CHECK(reloadedConfig.cards[0].applicationStoragePath
                     == std::filesystem::path("cards/application-1"));
-        DESTO_CHECK(reloadedConfig.cards[0].applicationItemOrder
-                    == std::vector<std::filesystem::path>({"Editor.lnk", "Browser.lnk"}));
+        DESTO_CHECK(reloadedConfig.cards[0].applicationSortMode
+                    == ApplicationItemSortMode::Size);
+        DESTO_CHECK(reloadedConfig.cards[0].applicationItemPlacements.size() == 2);
+        DESTO_CHECK(reloadedConfig.cards[0].applicationItemPlacements[1].column == 2);
         DESTO_CHECK(reloadedConfig.cards[1].mappingSourceRoot
                     == testRoot / "external-projects");
         DESTO_CHECK(!reloadedConfig.cards[1].mappingAllowsSourceMutation);

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <optional>
 
 #include "Card.h"
 
@@ -41,5 +42,12 @@ struct CardContentLayout {
     double pointerX,
     double pointerY,
     CardContentLayoutSettings settings = {});
+
+[[nodiscard]] std::optional<std::size_t> ResolveCardSlotIndex(
+    double availableWidth,
+    double pointerX,
+    double pointerY,
+    CardContentLayoutSettings settings = {},
+    std::optional<std::size_t> maximumRows = std::nullopt);
 
 } // namespace desto::presentation

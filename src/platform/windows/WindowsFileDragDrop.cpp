@@ -33,6 +33,18 @@ FORMATETC PreferredEffectFormat() noexcept {
     };
 }
 
+FORMATETC DestoSourceCardFormat() noexcept {
+    static const auto format = static_cast<CLIPFORMAT>(RegisterClipboardFormatW(
+        L"Desto.ApplicationCardId"));
+    return {
+        .cfFormat = format,
+        .ptd = nullptr,
+        .dwAspect = DVASPECT_CONTENT,
+        .lindex = -1,
+        .tymed = TYMED_HGLOBAL,
+    };
+}
+
 bool SupportsFormat(IDataObject* data, const FORMATETC& format) noexcept {
     auto copy = format;
     return data != nullptr && SUCCEEDED(data->QueryGetData(&copy));
@@ -55,6 +67,27 @@ std::vector<std::filesystem::path> ReadFileDrop(IDataObject* data) {
             if (DragQueryFileW(drop, index, path.data(), length + 1) != 0) {
                 path.resize(length);
                 result.emplace_back(std::move(path));
+            }
+        }
+        GlobalUnlock(medium.hGlobal);
+    }
+    ReleaseStgMedium(&medium);
+    return result;
+}
+
+std::optional<std::string> ReadSourceCardId(IDataObject* data) {
+    auto format = DestoSourceCardFormat();
+    STGMEDIUM medium{};
+    if (data == nullptr || FAILED(data->GetData(&format, &medium))) return std::nullopt;
+    std::optional<std::string> result;
+    const auto size = GlobalSize(medium.hGlobal);
+    const auto* value = static_cast<const char*>(GlobalLock(medium.hGlobal));
+    if (value != nullptr) {
+        if (size > 1) {
+            const auto* terminator = static_cast<const char*>(std::memchr(value, '\0', size));
+            if (terminator != nullptr && terminator != value
+                && static_cast<std::size_t>(terminator - value) <= 256) {
+                result = std::string(value, terminator);
             }
         }
         GlobalUnlock(medium.hGlobal);
@@ -109,10 +142,25 @@ HGLOBAL CreateEffectMemory(DWORD effect) {
     return memory;
 }
 
+HGLOBAL CreateStringMemory(const std::string& value) {
+    auto memory = GlobalAlloc(GMEM_MOVEABLE, value.size() + 1);
+    if (memory == nullptr) return nullptr;
+    auto* destination = static_cast<char*>(GlobalLock(memory));
+    if (destination == nullptr) {
+        GlobalFree(memory);
+        return nullptr;
+    }
+    std::memcpy(destination, value.c_str(), value.size() + 1);
+    GlobalUnlock(memory);
+    return memory;
+}
+
 class FileDataObject final : public IDataObject {
 public:
-    explicit FileDataObject(std::vector<std::filesystem::path> paths)
-        : paths_(std::move(paths)) {
+    FileDataObject(
+        std::vector<std::filesystem::path> paths,
+        std::optional<std::string> sourceCardId)
+        : paths_(std::move(paths)), sourceCardId_(std::move(sourceCardId)) {
     }
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void** result) override {
@@ -145,6 +193,7 @@ public:
         try {
             const auto fileFormat = FileDropFormat();
             const auto effectFormat = PreferredEffectFormat();
+            const auto sourceFormat = DestoSourceCardFormat();
             HGLOBAL memory = nullptr;
             if (format->cfFormat == fileFormat.cfFormat
                 && (format->tymed & TYMED_HGLOBAL) != 0) {
@@ -152,6 +201,10 @@ public:
             } else if (format->cfFormat == effectFormat.cfFormat
                        && (format->tymed & TYMED_HGLOBAL) != 0) {
                 memory = CreateEffectMemory(DROPEFFECT_MOVE);
+            } else if (sourceCardId_.has_value()
+                       && format->cfFormat == sourceFormat.cfFormat
+                       && (format->tymed & TYMED_HGLOBAL) != 0) {
+                memory = CreateStringMemory(*sourceCardId_);
             } else {
                 return DV_E_FORMATETC;
             }
@@ -175,11 +228,14 @@ public:
         }
         const auto fileFormat = FileDropFormat();
         const auto effectFormat = PreferredEffectFormat();
+        const auto sourceFormat = DestoSourceCardFormat();
         return (format->dwAspect == DVASPECT_CONTENT
                 && format->lindex == -1
                 && (format->tymed & TYMED_HGLOBAL) != 0
                 && (format->cfFormat == fileFormat.cfFormat
-                    || format->cfFormat == effectFormat.cfFormat))
+                    || format->cfFormat == effectFormat.cfFormat
+                    || (sourceCardId_.has_value()
+                        && format->cfFormat == sourceFormat.cfFormat)))
             ? S_OK
             : DV_E_FORMATETC;
     }
@@ -200,8 +256,8 @@ public:
         if (direction != DATADIR_GET) {
             return E_NOTIMPL;
         }
-        FORMATETC formats[]{FileDropFormat(), PreferredEffectFormat()};
-        return SHCreateStdEnumFmtEtc(2, formats, output);
+        FORMATETC formats[]{FileDropFormat(), PreferredEffectFormat(), DestoSourceCardFormat()};
+        return SHCreateStdEnumFmtEtc(sourceCardId_.has_value() ? 3 : 2, formats, output);
     }
     HRESULT STDMETHODCALLTYPE DAdvise(FORMATETC*, DWORD, IAdviseSink*, DWORD*) override {
         return OLE_E_ADVISENOTSUPPORTED;
@@ -214,6 +270,7 @@ public:
 private:
     std::atomic<ULONG> references_{1};
     std::vector<std::filesystem::path> paths_;
+    std::optional<std::string> sourceCardId_;
 };
 
 class FileDropSource final : public IDropSource {
@@ -324,8 +381,9 @@ public:
             const auto allowed = *effect;
             auto paths = acceptsFiles_ ? ReadFileDrop(data) : std::vector<std::filesystem::path>{};
             acceptsFiles_ = false;
+            auto sourceCardId = ReadSourceCardId(data);
             *effect = !paths.empty() && callbacks_.drop
-                ? callbacks_.drop(std::move(paths), point, allowed)
+                ? callbacks_.drop(std::move(paths), std::move(sourceCardId), point, allowed)
                 : DROPEFFECT_NONE;
             return S_OK;
         } catch (...) {
@@ -358,22 +416,26 @@ IDropTarget* CreateFileDropTarget(FileDropTargetCallbacks callbacks) {
     return new (std::nothrow) FileDropTarget(std::move(callbacks));
 }
 
-IDataObject* CreateFileDataObject(const std::vector<std::filesystem::path>& paths) {
+IDataObject* CreateFileDataObject(
+    const std::vector<std::filesystem::path>& paths,
+    std::optional<std::string> sourceCardId) {
     if (paths.empty()) {
         return nullptr;
     }
     try {
-        return new (std::nothrow) FileDataObject(paths);
+        return new (std::nothrow) FileDataObject(paths, std::move(sourceCardId));
     } catch (...) {
         return nullptr;
     }
 }
 
-FileDragResult BeginFileDrag(const std::vector<std::filesystem::path>& paths) {
+FileDragResult BeginFileDrag(
+    const std::vector<std::filesystem::path>& paths,
+    std::optional<std::string> sourceCardId) {
     if (paths.empty()) {
         return {.status = E_INVALIDARG};
     }
-    auto* data = CreateFileDataObject(paths);
+    auto* data = CreateFileDataObject(paths, std::move(sourceCardId));
     auto* source = new (std::nothrow) FileDropSource();
     if (data == nullptr || source == nullptr) {
         if (data != nullptr) data->Release();

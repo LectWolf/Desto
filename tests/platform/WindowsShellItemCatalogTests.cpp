@@ -57,6 +57,10 @@ void RunTests() {
     CreateShortcut(root / "Alpha.lnk", target, L"Desto.Test.Application!App");
 
     WindowsShellItemCatalog catalog;
+    const auto textFile = catalog.inspect(root / "zeta.txt");
+    DESTO_CHECK(textFile.fileSize == 7);
+    DESTO_CHECK(!textFile.itemType.empty());
+    DESTO_CHECK(textFile.modifiedTime != 0);
     const auto shortcut = catalog.inspect(root / "Alpha.lnk");
     DESTO_CHECK(shortcut.displayName == L"Alpha");
     DESTO_CHECK(shortcut.sourcePath.extension() == L".lnk");
