@@ -155,22 +155,86 @@ struct WindowsDesktopHost::Impl {
         }
     }
 
-    void render(Surface& surface, const domain::DisplaySnapshot& display, std::size_t ordinal) {
-        const auto accent = 0xFF2080D0u + static_cast<std::uint32_t>(ordinal % 4) * 0x000C0C00u;
+    void render(
+        Surface& surface,
+        const domain::DisplaySnapshot& display,
+        const presentation::CardView& card,
+        std::size_t ordinal) {
+        std::uint32_t red = 0x20;
+        std::uint32_t green = 0x80;
+        std::uint32_t blue = 0xD0;
+        if (card.appearancePreset == "compact") {
+            red = 0x30;
+            green = 0xA0;
+            blue = 0x90;
+        } else if (card.appearancePreset == "dark") {
+            red = 0x28;
+            green = 0x34;
+            blue = 0x48;
+        }
+        red = (red + (ordinal % 3) * 8) & 0xFF;
+        const auto alpha = static_cast<std::uint32_t>(
+            std::lround(std::clamp(card.opacity, 0.0, 1.0) * 255.0));
+        const auto accent = (alpha << 24) | (red << 16) | (green << 8) | blue;
+        const auto visibleBottom = card.expanded ? surface.height : std::min(surface.height, 52);
         std::fill(surface.pixels, surface.pixels + surface.width * surface.height, accent);
+        if (visibleBottom < surface.height) {
+            std::fill(surface.pixels + visibleBottom * surface.width,
+                      surface.pixels + surface.width * surface.height,
+                      0u);
+        }
         for (int y = 0; y < surface.height; ++y) {
             for (int x = 0; x < surface.width; ++x) {
-                if (x < 2 || y < 2 || x >= surface.width - 2 || y >= surface.height - 2) {
-                    surface.pixels[y * surface.width + x] = 0xEEFFFFFFu;
+                if (y < visibleBottom && (x < 2 || y < 2 || x >= surface.width - 2
+                                          || y >= visibleBottom - 2)) {
+                    surface.pixels[y * surface.width + x] = (alpha << 24) | 0x00FFFFFFu;
                 }
             }
         }
-        const auto text = L"Card " + std::to_wstring(ordinal)
-            + L"  " + std::to_wstring(static_cast<int>(display.effectiveDpi)) + L" DPI";
+        const auto text = card.showTitle ? card.title : L"";
         SetBkMode(surface.memoryDc, TRANSPARENT);
         SetTextColor(surface.memoryDc, RGB(255, 255, 255));
-        RECT textRect{14, 12, surface.width - 14, 42};
+        wchar_t iconGlyph = L'C';
+        if (card.type == domain::CardType::Application) {
+            iconGlyph = L'A';
+        } else if (card.type == domain::CardType::Mapping) {
+            iconGlyph = L'M';
+        } else if (card.type == domain::CardType::Todo) {
+            iconGlyph = L'T';
+        }
+        RECT iconRect{12, 12, 34, 34};
+        HBRUSH iconBrush = CreateSolidBrush(RGB(255, 255, 255));
+        FillRect(surface.memoryDc, &iconRect, iconBrush);
+        DeleteObject(iconBrush);
+        SetTextColor(surface.memoryDc, RGB(20, 40, 60));
+        DrawTextW(surface.memoryDc, &iconGlyph, 1, &iconRect,
+                  DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+        SetTextColor(surface.memoryDc, RGB(255, 255, 255));
+        RECT textRect{42, 12, surface.width - 120, 42};
         DrawTextW(surface.memoryDc, text.c_str(), -1, &textRect, DT_LEFT | DT_SINGLELINE);
+        int controlRight = surface.width - 12;
+        const auto drawControl = [&](wchar_t glyph, bool enabled) {
+            if (!enabled) {
+                return;
+            }
+            RECT controlRect{controlRight - 20, 12, controlRight, 42};
+            const std::wstring label(1, glyph);
+            DrawTextW(surface.memoryDc, label.c_str(), -1, &controlRect,
+                      DT_CENTER | DT_SINGLELINE);
+            controlRight -= 24;
+        };
+        drawControl(L'X', card.showCloseControl);
+        drawControl(L'P', card.showPinControl);
+        drawControl(card.expanded ? L'-' : L'+', card.showCollapseControl);
+
+        if (card.expanded) {
+            const auto typeText = card.typeLabel + L"  "
+                + std::to_wstring(static_cast<int>(display.effectiveDpi)) + L" DPI";
+            RECT typeRect{14, 58, surface.width - 14, 86};
+            SetTextColor(surface.memoryDc, RGB(230, 240, 250));
+            DrawTextW(surface.memoryDc, typeText.c_str(), -1, &typeRect,
+                      DT_LEFT | DT_SINGLELINE);
+        }
 
         HDC screen = GetDC(nullptr);
         if (screen == nullptr) {
@@ -197,13 +261,24 @@ struct WindowsDesktopHost::Impl {
 
     void present(
         std::span<const domain::PlacementProjection> projections,
-        std::span<const domain::DisplaySnapshot> displays) {
+        std::span<const domain::DisplaySnapshot> displays,
+        std::span<const presentation::CardView> cards) {
         if (!windowClassRegistered) {
             initialize();
         }
         destroySurfaces();
         surfaces.reserve(projections.size());
         for (const auto& projection : projections) {
+            const auto card = std::find_if(
+                cards.begin(), cards.end(), [&](const presentation::CardView& candidate) {
+                    return candidate.id == projection.cardId;
+                });
+            if (card == cards.end()) {
+                throw std::invalid_argument("Projection references an unknown Card view.");
+            }
+            if (!card->visible) {
+                continue;
+            }
             const auto display = std::find_if(
                 displays.begin(), displays.end(), [&](const domain::DisplaySnapshot& candidate) {
                     return candidate.id == projection.displayId;
@@ -219,7 +294,7 @@ struct WindowsDesktopHost::Impl {
             };
             try {
                 createSurface(surface);
-                render(surface, *display, surfaces.size() + 1);
+                render(surface, *display, *card, surfaces.size() + 1);
                 surfaces.push_back(std::move(surface));
             } catch (...) {
                 destroySurface(surface);
@@ -291,8 +366,9 @@ WindowsDesktopHost::~WindowsDesktopHost() = default;
 
 void WindowsDesktopHost::present(
     std::span<const domain::PlacementProjection> projections,
-    std::span<const domain::DisplaySnapshot> displays) {
-    impl_->present(projections, displays);
+    std::span<const domain::DisplaySnapshot> displays,
+    std::span<const presentation::CardView> cards) {
+    impl_->present(projections, displays, cards);
 }
 
 int WindowsDesktopHost::run(int durationMilliseconds) {

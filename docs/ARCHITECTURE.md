@@ -80,6 +80,8 @@ application default
 
 正式 Presentation 宿主的边界已确定：Win32 窗口生命周期、输入和桌面层级属于 Platform/Presentation 宿主；Card 不持有 HWND。卡片渲染器输出预乘 Alpha 位图，由宿主通过 `UpdateLayeredWindow` 批量提交。DirectComposition 和 Direct2D 原型仅用于比较，不作为常驻卡片窗口的默认合成路径。
 
+`presentation::CardView` 是 Domain Card 到宿主渲染之间的不可变视图。它只包含标题、类型标识、可见/展开状态、入口可见性和外观值；宿主不读取 Card 子类或持久化路径。关闭某个入口只改变 Card 实例偏好，不会改变 Card 的能力或生命周期。
+
 Windows 平台当前提供 `DisplayTopologyProvider` 的两个 Adapter：生产环境的 `WindowsDisplayTopology` 和测试使用的 `MemoryDisplayTopologyProvider`。`DisplayTopologyMonitor` 负责快照差异和防抖，`WindowsDisplayChangeSource` 负责系统消息输入。接口只暴露 `DisplaySnapshot`，不暴露 Win32 句柄、RECT 或 DPI API。
 
 事项 14 的原生原型位于 `prototypes/`，仅作为 Presentation/Platform 宿主验证，不属于正式产品 UI。它消费 `ApplicationRuntime::projections()`，为每个 `PlacementProjection` 创建一个 `WS_EX_LAYERED`、`WS_EX_NOACTIVATE`、点击穿透的 Win32 工具窗口；所有窗口通过 `BeginDeferWindowPos`/`EndDeferWindowPos` 批量定位和显示。进程使用 Per-Monitor-V2 DPI 感知，显示器工作区原点和 Placement 坐标在 DIP 与像素之间集中转换。原型不持有 Card 业务状态，也不把 HWND 泄漏到 Domain/Application 接口。

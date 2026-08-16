@@ -96,3 +96,16 @@ target_link_libraries(desto_storage_tests
 )
 
 add_test(NAME desto_storage_tests COMMAND desto_storage_tests)
+
+add_executable(desto_card_view_tests
+    presentation/CardViewTests.cpp
+)
+
+target_include_directories(desto_card_view_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+target_link_libraries(desto_card_view_tests
+    PRIVATE
+        desto_presentation
+)
+
+add_test(NAME desto_card_view_tests COMMAND desto_card_view_tests)

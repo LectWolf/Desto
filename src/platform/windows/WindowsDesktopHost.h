@@ -4,6 +4,7 @@
 #include <span>
 #include <string>
 
+#include "CardView.h"
 #include "WorkspaceLayout.h"
 
 namespace desto::platform::windows {
@@ -19,7 +20,8 @@ public:
     // Creates or updates all Projection windows in one position/visibility commit.
     void present(
         std::span<const domain::PlacementProjection> projections,
-        std::span<const domain::DisplaySnapshot> displays);
+        std::span<const domain::DisplaySnapshot> displays,
+        std::span<const presentation::CardView> cards);
 
     // Runs the host message loop until requestClose() or the optional timeout.
     int run(int durationMilliseconds = 0);

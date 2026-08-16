@@ -1,6 +1,7 @@
 #include "ApplicationLifecycle.h"
 #include "ApplicationRuntime.h"
 #include "Diagnostics.h"
+#include "CardView.h"
 #include "WindowsDesktopHost.h"
 #include "WindowsDisplayTopology.h"
 #include "WindowsSingleInstanceGate.h"
@@ -81,8 +82,12 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
         const auto displays = topology.snapshot();
         ApplicationRuntime runtime;
         SeedPreview(runtime, displays);
+        std::vector<desto::presentation::CardView> cardViews;
+        for (const auto* card : runtime.cards()) {
+            cardViews.push_back(desto::presentation::MakeCardView(*card));
+        }
         WindowsDesktopHost host;
-        host.present(runtime.projections(), displays);
+        host.present(runtime.projections(), displays, cardViews);
         if (!lifecycle.runtimeReady().applied) {
             throw std::runtime_error("Runtime lifecycle transition failed.");
         }

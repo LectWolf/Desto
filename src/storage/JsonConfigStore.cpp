@@ -224,6 +224,7 @@ ApplicationConfig ParseDocument(const Json& document) {
                 }
                 card.chrome.showCollapseControl = chrome.value("showCollapseControl", true);
                 card.chrome.showCloseControl = chrome.value("showCloseControl", true);
+                card.chrome.showPinControl = chrome.value("showPinControl", true);
                 card.chrome.showTitle = chrome.value("showTitle", true);
             }
             if (value.contains("appearance")) {
@@ -470,6 +471,7 @@ void JsonConfigStore::save(const ApplicationConfig& config) const {
         value["chrome"] = {
             {"showCollapseControl", card.chrome.showCollapseControl},
             {"showCloseControl", card.chrome.showCloseControl},
+            {"showPinControl", card.chrome.showPinControl},
             {"showTitle", card.chrome.showTitle},
         };
         value["appearance"] = {
