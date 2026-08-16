@@ -115,7 +115,7 @@ void RunTests() {
     RECT windowRect{};
     DESTO_CHECK(GetWindowRect(window, &windowRect));
     DESTO_CHECK(windowRect.right - windowRect.left == 256);
-    DESTO_CHECK(windowRect.bottom - windowRect.top == 120);
+    DESTO_CHECK(windowRect.bottom - windowRect.top == 127);
     const auto captionHit = SendMessageW(
         window,
         WM_NCHITTEST,
@@ -129,21 +129,21 @@ void RunTests() {
         MAKELPARAM(windowRect.left + 2, windowRect.top + 2));
     DESTO_CHECK(cornerHit == HTCAPTION);
 
-    RECT movingRect{7, 9, 263, 129};
+    RECT movingRect{7, 9, 263, 136};
     SendMessageW(window, WM_MOVING, 0, reinterpret_cast<LPARAM>(&movingRect));
     const auto guide = FindWindowW(L"DestoAlignmentGuide", nullptr);
     DESTO_CHECK(guide != nullptr);
     DESTO_CHECK(IsWindowVisible(guide));
     DESTO_CHECK((GetWindowLongPtrW(guide, GWL_EXSTYLE) & WS_EX_TRANSPARENT) != 0);
 
-    DESTO_CHECK(SetWindowPos(window, nullptr, 7, 9, 256, 120, SWP_NOACTIVATE | SWP_NOZORDER));
+    DESTO_CHECK(SetWindowPos(window, nullptr, 7, 9, 256, 127, SWP_NOACTIVATE | SWP_NOZORDER));
     SendMessageW(window, WM_EXITSIZEMOVE, 0, 0);
     DESTO_CHECK(!IsWindowVisible(guide));
     DESTO_CHECK(callbackCalled);
     DESTO_CHECK(changed.left == 8);
     DESTO_CHECK(changed.top == 8);
     DESTO_CHECK(changed.width == 256);
-    DESTO_CHECK(changed.height == 120);
+    DESTO_CHECK(changed.height == 127);
     DESTO_CHECK(horizontalAnchor == PlacementHorizontalAnchor::Left);
     DESTO_CHECK(verticalAnchor == PlacementVerticalAnchor::Top);
     DESTO_CHECK(referenceWorkAreaWidth == 1920);
@@ -184,9 +184,33 @@ void RunTests() {
     }
     host.updateCardItems("card-test", adaptiveItems);
     DESTO_CHECK(GetWindowRect(window, &windowRect));
+    DESTO_CHECK(windowRect.right - windowRect.left == 256);
+    host.updateCardItemsBatch({{
+        "card-test",
+        adaptiveItems,
+        ApplicationItemSortMode::Custom,
+        {
+            {"Item0.lnk", 0, 0},
+            {"Item1.lnk", 1, 0},
+            {"Item2.lnk", 2, 0},
+            {"Item3.lnk", 3, 0},
+            {"Item4.lnk", 4, 0},
+        },
+    }});
+    DESTO_CHECK(GetWindowRect(window, &windowRect));
     DESTO_CHECK(windowRect.right - windowRect.left == 315);
     adaptiveItems.pop_back();
-    host.updateCardItems("card-test", adaptiveItems);
+    host.updateCardItemsBatch({{
+        "card-test",
+        adaptiveItems,
+        ApplicationItemSortMode::Custom,
+        {
+            {"Item0.lnk", 0, 0},
+            {"Item1.lnk", 1, 0},
+            {"Item2.lnk", 2, 0},
+            {"Item3.lnk", 3, 0},
+        },
+    }});
     DESTO_CHECK(GetWindowRect(window, &windowRect));
     DESTO_CHECK(windowRect.right - windowRect.left == 256);
 
@@ -234,6 +258,13 @@ void RunTests() {
 
     DESTO_CHECK(SetWindowPos(
         window, nullptr, 2050, 120, 256, 127, SWP_NOACTIVATE | SWP_NOZORDER));
+    RECT crossDisplayMovingRect{2050, 120, 2306, 247};
+    SendMessageW(
+        window,
+        WM_MOVING,
+        0,
+        reinterpret_cast<LPARAM>(&crossDisplayMovingRect));
+    DESTO_CHECK(crossDisplayMovingRect.right - crossDisplayMovingRect.left == 384);
     SendMessageW(window, WM_EXITSIZEMOVE, 0, 0);
     DESTO_CHECK(changedDisplayId == "display-high-dpi");
     DESTO_CHECK(changed.width == 256);

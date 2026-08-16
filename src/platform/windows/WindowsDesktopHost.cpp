@@ -49,6 +49,7 @@ struct Surface {
     std::wstring tooltipText;
     IDropTarget* dropTarget = nullptr;
     std::optional<std::size_t> dropInsertionIndex;
+    std::optional<std::size_t> dropPreviewColumns;
     std::optional<std::size_t> pressedItem;
     POINT itemDragStart{};
     bool itemDragActive = false;
@@ -150,7 +151,7 @@ struct WindowsDesktopHost::Impl {
                 try {
                     instance->updateInteractionGuides(
                         window,
-                        *reinterpret_cast<const RECT*>(lParam));
+                        *reinterpret_cast<RECT*>(lParam));
                 } catch (...) {
                     instance->hideGuides();
                 }
@@ -354,7 +355,7 @@ struct WindowsDesktopHost::Impl {
         return x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
     }
 
-    static presentation::CardContentLayoutSettings itemLayoutSettings(
+    static presentation::CardContentLayoutSettings baseItemLayoutSettings(
         const Surface& surface) noexcept {
         auto settings = presentation::ResolveCardContentLayoutSettings(surface.card.content);
         if (surface.card.content.sizeMode == domain::CardSizeMode::Fixed) {
@@ -369,10 +370,29 @@ struct WindowsDesktopHost::Impl {
                         requiredColumns, placement.column + 1);
                 }
             }
-            const auto previewCount = surface.card.items.size()
-                + (surface.dropInsertionIndex.has_value() ? 1 : 0);
             settings.preferredColumns = presentation::ResolveAdaptiveCardColumns(
-                previewCount, requiredColumns, settings);
+                surface.card.applicationSortMode == domain::ApplicationItemSortMode::Custom
+                    ? std::size_t{0}
+                    : surface.card.items.size(),
+                requiredColumns,
+                settings);
+        }
+        return settings;
+    }
+
+    static presentation::CardContentLayoutSettings itemLayoutSettings(
+        const Surface& surface) noexcept {
+        auto settings = baseItemLayoutSettings(surface);
+        if (surface.card.content.sizeMode != domain::CardSizeMode::Fixed) {
+            if (surface.dropPreviewColumns.has_value()) {
+                settings.preferredColumns = std::max(
+                    settings.preferredColumns, *surface.dropPreviewColumns);
+            } else if (surface.dropInsertionIndex.has_value()) {
+                settings.preferredColumns = presentation::ResolveAdaptiveCardColumns(
+                    std::max(surface.card.items.size(), *surface.dropInsertionIndex + 1),
+                    settings.preferredColumns,
+                    settings);
+            }
             settings.minimumColumns = settings.preferredColumns;
             settings.maximumColumns = settings.preferredColumns;
         }
@@ -394,6 +414,9 @@ struct WindowsDesktopHost::Impl {
                         + placement.column + 1);
             }
         }
+        if (surface.dropInsertionIndex.has_value()) {
+            result = std::max(result, *surface.dropInsertionIndex + 1);
+        }
         return result;
     }
 
@@ -405,8 +428,13 @@ struct WindowsDesktopHost::Impl {
             settings.horizontalPadding * 2.0
                 + columns * settings.itemWidth
                 + (columns - 1) * settings.horizontalGap);
+        const auto slotCount = contentSlotCount(surface);
+        const auto layoutItemCount = surface.card.type == domain::CardType::Application
+                && slotCount == 0
+            ? std::size_t{1}
+            : slotCount;
         const auto layout = presentation::ResolveCardContentLayout(
-            contentSlotCount(surface), width, settings);
+            layoutItemCount, width, settings);
         auto rect = surface.projection.rect;
         const auto right = rect.left + rect.width;
         const auto horizontalCenter = rect.left + rect.width / 2.0;
@@ -611,9 +639,9 @@ struct WindowsDesktopHost::Impl {
         }
     }
 
-    void updateInteractionGuides(HWND window, const RECT& windowRect) {
+    void updateInteractionGuides(HWND window, RECT& windowRect) {
         auto* moved = findSurface(window);
-        if (moved == nullptr || (GetKeyState(VK_CONTROL) & 0x8000) != 0) {
+        if (moved == nullptr) {
             hideGuides();
             return;
         }
@@ -622,38 +650,56 @@ struct WindowsDesktopHost::Impl {
             hideGuides();
             return;
         }
-        const auto scale = targetDisplay->effectiveDpi / 96.0;
+        const auto target = *targetDisplay;
+        const auto scale = target.effectiveDpi / 96.0;
+        if (moved->display.id != target.id) {
+            moved->display = target;
+            moved->projection.displayId = target.id;
+            const auto width = std::max(1, static_cast<int>(std::lround(
+                moved->projection.rect.width * scale)));
+            const auto height = std::max(1, static_cast<int>(std::lround(
+                moved->projection.rect.height * scale)));
+            replaceBitmap(*moved, width, height);
+            render(*moved, moved->display, moved->card, moved->ordinal, false);
+            windowRect.right = windowRect.left + width;
+            windowRect.bottom = windowRect.top + height;
+            commitSurfaceAt(*moved, {windowRect.left, windowRect.top});
+        }
+        if ((GetKeyState(VK_CONTROL) & 0x8000) != 0) {
+            hideGuides();
+            return;
+        }
         const domain::PlacementRect proposed{
-            .left = windowRect.left / scale - targetDisplay->workAreaLeft,
-            .top = windowRect.top / scale - targetDisplay->workAreaTop,
+            .left = windowRect.left / scale - target.workAreaLeft,
+            .top = windowRect.top / scale - target.workAreaTop,
             .width = moved->projection.rect.width,
             .height = moved->projection.rect.height,
         };
         std::vector<domain::PlacementRect> otherCards;
         for (const auto& surface : surfaces) {
             if (surface.window != window
-                && surface.projection.displayId == targetDisplay->id
+                && surface.projection.displayId == target.id
                 && surface.projection.placementId != moved->projection.placementId) {
                 otherCards.push_back(surface.projection.rect);
             }
         }
         const auto result = presentation::ResolvePlacementInteractionDetailed(
             proposed,
-            targetDisplay->workAreaWidth,
-            targetDisplay->workAreaHeight,
+            target.workAreaWidth,
+            target.workAreaHeight,
             otherCards,
             false);
         ensureGuides();
         constexpr int guideThickness = 2;
-        const auto workLeft = static_cast<int>(std::lround(targetDisplay->workAreaLeft * scale));
-        const auto workTop = static_cast<int>(std::lround(targetDisplay->workAreaTop * scale));
+        const auto workLeft = static_cast<int>(std::lround(target.workAreaLeft * scale));
+        const auto workTop = static_cast<int>(std::lround(target.workAreaTop * scale));
         const auto workWidth = std::max(1, static_cast<int>(std::lround(
-            targetDisplay->workAreaWidth * scale)));
+            target.workAreaWidth * scale)));
         const auto workHeight = std::max(1, static_cast<int>(std::lround(
-            targetDisplay->workAreaHeight * scale)));
+            target.workAreaHeight * scale)));
         if (result.verticalGuide.has_value()) {
             const auto x = static_cast<int>(std::lround(
-                (targetDisplay->workAreaLeft + *result.verticalGuide) * scale));
+                (target.workAreaLeft + *result.verticalGuide) * scale));
             SetWindowPos(
                 verticalGuide,
                 HWND_TOPMOST,
@@ -667,7 +713,7 @@ struct WindowsDesktopHost::Impl {
         }
         if (result.horizontalGuide.has_value()) {
             const auto y = static_cast<int>(std::lround(
-                (targetDisplay->workAreaTop + *result.horizontalGuide) * scale));
+                (target.workAreaTop + *result.horizontalGuide) * scale));
             SetWindowPos(
                 horizontalGuide,
                 HWND_TOPMOST,
@@ -949,25 +995,43 @@ struct WindowsDesktopHost::Impl {
             return DROPEFFECT_NONE;
         }
         const auto scale = surface->display.effectiveDpi / 96.0;
-        const auto insertion = presentation::ResolveCardSlotIndex(
-            surface->width / scale,
-            point.x / scale,
-            point.y / scale,
-            itemLayoutSettings(*surface),
-            surface->card.content.sizeMode == domain::CardSizeMode::Fixed
-                ? std::optional<std::size_t>(surface->card.content.fixedRows)
-                : std::nullopt);
+        const auto widthDip = surface->width / scale;
+        const auto pointerXDip = point.x / scale;
+        const auto pointerYDip = point.y / scale;
+        std::optional<std::size_t> insertion;
+        std::optional<std::size_t> previewColumns;
+        if (surface->card.content.sizeMode == domain::CardSizeMode::Fixed) {
+            insertion = presentation::ResolveCardSlotIndex(
+                widthDip,
+                pointerXDip,
+                pointerYDip,
+                baseItemLayoutSettings(*surface),
+                surface->card.content.fixedRows);
+        } else {
+            const auto settings = baseItemLayoutSettings(*surface);
+            const auto preview = presentation::ResolveAdaptiveCardDropPreview(
+                surface->card.items.size(),
+                widthDip,
+                pointerXDip,
+                pointerYDip,
+                settings);
+            insertion = preview.insertionIndex;
+            previewColumns = preview.columns;
+        }
         if (!insertion.has_value()) {
             clearDropPreview(window);
             return DROPEFFECT_NONE;
         }
-        if (surface->dropInsertionIndex != *insertion) {
+        if (surface->dropInsertionIndex != *insertion
+            || surface->dropPreviewColumns != previewColumns) {
             surface->dropInsertionIndex = *insertion;
+            surface->dropPreviewColumns = previewColumns;
             try {
                 resizeSurfaceForContent(*surface, true);
                 render(*surface, surface->display, surface->card, surface->ordinal);
             } catch (...) {
                 surface->dropInsertionIndex.reset();
+                surface->dropPreviewColumns.reset();
                 return DROPEFFECT_NONE;
             }
         }
@@ -981,6 +1045,7 @@ struct WindowsDesktopHost::Impl {
             return;
         }
         surface->dropInsertionIndex.reset();
+        surface->dropPreviewColumns.reset();
         try {
             resizeSurfaceForContent(*surface, true);
             render(*surface, surface->display, surface->card, surface->ordinal);
@@ -1012,8 +1077,10 @@ struct WindowsDesktopHost::Impl {
         }
         const auto cardId = surface->card.id;
         const auto insertion = surface->dropInsertionIndex.value_or(surface->card.items.size());
+        const auto layoutColumns = itemLayout(*surface, 0).columns;
         KillTimer(window, DropPreviewResetTimerId);
         surface->dropInsertionIndex.reset();
+        surface->dropPreviewColumns.reset();
         if (!applicationItemsDropped) {
             try {
                 resizeSurfaceForContent(*surface, true);
@@ -1023,7 +1090,8 @@ struct WindowsDesktopHost::Impl {
             return DROPEFFECT_NONE;
         }
         try {
-            if (applicationItemsDropped(cardId, paths, sourceCardId, insertion)) {
+            if (applicationItemsDropped(
+                    cardId, paths, sourceCardId, insertion, layoutColumns)) {
                 return DROPEFFECT_MOVE;
             }
         } catch (...) {
@@ -1670,18 +1738,11 @@ struct WindowsDesktopHost::Impl {
         if (commit) commitSurface(surface);
     }
 
-    void commitSurface(Surface& surface) {
+    void commitSurfaceAt(Surface& surface, POINT destination) {
         HDC screen = GetDC(nullptr);
         if (screen == nullptr) {
             throw std::runtime_error("GetDC failed for desktop host.");
         }
-        const auto scale = surface.display.effectiveDpi / 96.0;
-        POINT destination{
-            static_cast<LONG>(std::lround(
-                (surface.display.workAreaLeft + surface.projection.rect.left) * scale)),
-            static_cast<LONG>(std::lround(
-                (surface.display.workAreaTop + surface.projection.rect.top) * scale)),
-        };
         POINT source{0, 0};
         SIZE size{surface.width, surface.height};
         BLENDFUNCTION blend{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
@@ -1699,6 +1760,16 @@ struct WindowsDesktopHost::Impl {
         if (!updated) {
             throw std::runtime_error("UpdateLayeredWindow failed for desktop host.");
         }
+    }
+
+    void commitSurface(Surface& surface) {
+        const auto scale = surface.display.effectiveDpi / 96.0;
+        commitSurfaceAt(surface, {
+            static_cast<LONG>(std::lround(
+                (surface.display.workAreaLeft + surface.projection.rect.left) * scale)),
+            static_cast<LONG>(std::lround(
+                (surface.display.workAreaTop + surface.projection.rect.top) * scale)),
+        });
     }
 
     void commitInteraction(HWND window) {

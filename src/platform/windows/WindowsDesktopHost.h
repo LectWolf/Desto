@@ -28,7 +28,8 @@ public:
         const domain::CardId&,
         const std::vector<std::filesystem::path>&,
         const std::optional<domain::CardId>& sourceCardId,
-        std::size_t insertionIndex)>;
+        std::size_t insertionIndex,
+        std::size_t layoutColumns)>;
     using ApplicationItemDragCompletedCallback = std::function<void(
         const domain::CardId&)>;
     using CardItemActivatedCallback = std::function<void(

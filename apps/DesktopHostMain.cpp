@@ -137,7 +137,9 @@ std::uint32_t CardColumns(
         }
     }
     return static_cast<std::uint32_t>(desto::presentation::ResolveAdaptiveCardColumns(
-        projectedItemCount.value_or(card.itemPlacements().size()),
+        card.sortMode() == ApplicationItemSortMode::Custom
+            ? std::size_t{0}
+            : projectedItemCount.value_or(card.itemPlacements().size()),
         requiredColumns,
         settings));
 }
@@ -352,7 +354,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
             [&](const CardId& cardId,
                 const std::vector<std::filesystem::path>& paths,
                 const std::optional<CardId>& sourceCardId,
-                std::size_t insertionIndex) {
+                std::size_t insertionIndex,
+                std::size_t layoutColumns) {
                 const auto* card = FindApplicationCard(runtime, cardId);
                 if (card == nullptr) {
                     diagnostics.record(DiagnosticLevel::Warning, "desktop.import_card_missing");
@@ -487,7 +490,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                         const auto* affected = FindApplicationCard(runtime, affectedCardId);
                         if (affected == nullptr) continue;
                         auto items = nextItemsByCard[affectedCardId];
-                        const auto affectedColumns = CardColumns(runtime, *affected, items.size());
+                        const auto affectedColumns = static_cast<std::uint32_t>((std::max)(
+                            static_cast<std::size_t>(CardColumns(
+                                runtime, *affected, items.size())),
+                            affectedCardId == cardId ? layoutColumns : std::size_t{1}));
                         auto placements = ReconcileApplicationItemPlacements(
                             affected->itemPlacements(),
                             ItemFileNames(items),

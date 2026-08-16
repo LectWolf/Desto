@@ -49,7 +49,7 @@ WorkspaceLayout
 
 Card 外观当前保存 `preset`、`opacity` 和 DIP 单位的 `cornerRadius`。预设至少包含纯白、透明黑和珠宝炫彩；`jewel` 是珠宝炫彩的稳定名称，旧的 `pearl-pink` 作为兼容别名使用同一渲染。设置界面必须用可见色块展示预设，文字只作为辅助名称或无障碍标签，不能用文本列表代替色块选择。圆角半径按 Card 实例保存，并限制在 0-128 DIP。
 
-Card 内容偏好按实例保存 `itemSize`、`showItemNames`、`sizeMode`、`fixedColumns` 和 `fixedRows`。图标规格使用 `small`、`medium`、`large`、`extraLarge` 四个稳定值，默认 `large`；显示尺寸分别为 20、26、34、44 DIP，正方形槽位分别为 37、44、55、74 DIP，建议列数分别为 6、5、4、3。隐藏名称时槽位是正方形，显示名称时在正方形图标区下增加 24 DIP 文字区。`adaptive` 以建议列数为下限，按内容数量和自定义最右槽位扩张，并在内容减少后缩回；`fixed` 使用明确的列数、行数和容量边界。两种模式都由配置决定尺寸，不提供鼠标自由缩放。
+Card 内容偏好按实例保存 `itemSize`、`showItemNames`、`sizeMode`、`fixedColumns` 和 `fixedRows`。图标规格使用 `small`、`medium`、`large`、`extraLarge` 四个稳定值，默认 `large`；显示尺寸分别为 20、26、34、44 DIP，正方形槽位分别为 37、44、55、74 DIP，建议列数分别为 6、5、4、3。隐藏名称时槽位是正方形，显示名称时在正方形图标区下增加 24 DIP 文字区。`adaptive` 以建议列数为下限，自定义模式按最右占用槽位扩列、按最下占用槽位扩行，并在外缘内容移除后缩回；`fixed` 使用明确的列数、行数和容量边界。两种模式都由配置决定尺寸，不提供鼠标自由缩放。
 
 Application Card 保存 `sortMode` 和 `itemPlacements`。`custom` 使用相对文件名及从零开始的 `column`、`row` 稀疏槽位；名称、大小和项目类型使用升序，修改日期使用降序，名称作为稳定兜底。自动排序只按当前列数生成临时投影，绝不覆盖自定义槽位，因此切回 `custom` 会恢复原位置。
 

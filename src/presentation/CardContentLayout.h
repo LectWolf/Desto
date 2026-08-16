@@ -49,6 +49,18 @@ struct CardContentLayout {
     double pointerY,
     CardContentLayoutSettings settings = {});
 
+struct CardDropPreview {
+    std::size_t insertionIndex = 0;
+    std::size_t columns = 1;
+};
+
+[[nodiscard]] CardDropPreview ResolveAdaptiveCardDropPreview(
+    std::size_t itemCount,
+    double availableWidth,
+    double pointerX,
+    double pointerY,
+    CardContentLayoutSettings settings = {});
+
 [[nodiscard]] std::optional<std::size_t> ResolveCardSlotIndex(
     double availableWidth,
     double pointerX,

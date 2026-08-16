@@ -105,6 +105,12 @@ std::size_t ResolveCardInsertionIndex(
     if (localY <= 0) {
         return 0;
     }
+    if (localX >= layout.contentWidth) {
+        return itemCount;
+    }
+    if (localY >= layout.contentHeight + settings.verticalGap) {
+        return itemCount;
+    }
 
     const auto pitchX = settings.itemWidth + settings.horizontalGap;
     const auto pitchY = settings.itemHeight + settings.verticalGap;
@@ -114,6 +120,38 @@ std::size_t ResolveCardInsertionIndex(
         0.0,
         static_cast<double>(layout.columns - 1)));
     return std::min(itemCount, row * layout.columns + column);
+}
+
+CardDropPreview ResolveAdaptiveCardDropPreview(
+    std::size_t itemCount,
+    double availableWidth,
+    double pointerX,
+    double pointerY,
+    CardContentLayoutSettings settings) {
+    const auto insertion = ResolveCardInsertionIndex(
+        itemCount, availableWidth, pointerX, pointerY, settings);
+    const auto layout = ResolveCardContentLayout(
+        std::max<std::size_t>(1, itemCount), availableWidth, settings);
+    const auto contentLeft = (availableWidth - layout.contentWidth) / 2.0;
+    const auto localX = pointerX - contentLeft;
+    const auto localY = pointerY - settings.headerHeight - settings.verticalPadding;
+    const auto belowContent = localY >= layout.contentHeight;
+    if (belowContent) {
+        return {insertion, settings.preferredColumns};
+    }
+
+    const auto pitchX = settings.itemWidth + settings.horizontalGap;
+    const auto pointerColumn = localX >= layout.contentWidth
+        ? layout.columns
+        : static_cast<std::size_t>(std::clamp(
+            std::floor((localX + settings.horizontalGap * 0.5) / pitchX),
+            0.0,
+            static_cast<double>(layout.columns - 1)));
+    const auto maximumColumns = std::max(settings.maximumColumns, settings.preferredColumns);
+    const auto columns = std::max(
+        settings.preferredColumns,
+        std::min(pointerColumn + 1, maximumColumns));
+    return {insertion, columns};
 }
 
 std::optional<std::size_t> ResolveCardSlotIndex(

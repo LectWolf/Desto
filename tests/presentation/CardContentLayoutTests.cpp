@@ -80,7 +80,19 @@ void RunTests() {
 
     DESTO_CHECK(ResolveCardInsertionIndex(7, 320.0, 36.0, 64.0) == 0);
     DESTO_CHECK(ResolveCardInsertionIndex(7, 320.0, 110.0, 64.0) == 1);
+    DESTO_CHECK(ResolveCardInsertionIndex(4, 256.0, 250.0, 80.0) == 4);
     DESTO_CHECK(ResolveCardInsertionIndex(7, 320.0, 1000.0, 1000.0) == 7);
+    const auto rightExpansion = ResolveAdaptiveCardDropPreview(
+        4, 256.0, 250.0, 80.0, large);
+    DESTO_CHECK(rightExpansion.insertionIndex == 4);
+    DESTO_CHECK(rightExpansion.columns == 5);
+    const auto downwardExpansion = ResolveAdaptiveCardDropPreview(
+        4, 256.0, 100.0, 120.0, large);
+    DESTO_CHECK(downwardExpansion.insertionIndex == 4);
+    DESTO_CHECK(downwardExpansion.columns == 4);
+    const auto shrinkInside = ResolveAdaptiveCardDropPreview(
+        4, 315.0, 190.0, 80.0, large);
+    DESTO_CHECK(shrinkInside.columns == 4);
     DESTO_CHECK(ResolveCardSlotIndex(320.0, 190.0, 148.0).value() == 7);
     DESTO_CHECK(ResolveCardSlotIndex(320.0, 190.0, 400.0, {}, 2).value() == 7);
     DESTO_CHECK(ResolveCardSlotIndex(320.0, 0.0, 64.0).value() == 0);
