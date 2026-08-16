@@ -24,6 +24,11 @@ struct CardContentLayoutSettings {
 [[nodiscard]] CardContentLayoutSettings ResolveCardContentLayoutSettings(
     const domain::CardContentPreferences& preferences) noexcept;
 
+[[nodiscard]] std::size_t ResolveAdaptiveCardColumns(
+    std::size_t itemCount,
+    std::size_t requiredColumns,
+    CardContentLayoutSettings settings = {}) noexcept;
+
 struct CardContentLayout {
     std::size_t columns = 1;
     std::size_t rows = 0;

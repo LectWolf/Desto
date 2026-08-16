@@ -121,18 +121,25 @@ std::vector<std::filesystem::path> PlacementOrder(const ApplicationCard& card) {
     return result;
 }
 
-std::uint32_t CardColumns(const ApplicationRuntime&, const ApplicationCard& card) {
+std::uint32_t CardColumns(
+    const ApplicationRuntime&,
+    const ApplicationCard& card,
+    std::optional<std::size_t> projectedItemCount = std::nullopt) {
     if (card.content().sizeMode == CardSizeMode::Fixed) {
         return card.content().fixedColumns;
     }
     const auto settings = desto::presentation::ResolveCardContentLayoutSettings(card.content());
-    auto columns = static_cast<std::uint32_t>(settings.preferredColumns);
+    std::size_t requiredColumns = 1;
     if (card.sortMode() == ApplicationItemSortMode::Custom) {
         for (const auto& placement : card.itemPlacements()) {
-            columns = (std::max)(columns, placement.column + 1);
+            requiredColumns = (std::max)(
+                requiredColumns, static_cast<std::size_t>(placement.column) + 1);
         }
     }
-    return columns;
+    return static_cast<std::uint32_t>(desto::presentation::ResolveAdaptiveCardColumns(
+        projectedItemCount.value_or(card.itemPlacements().size()),
+        requiredColumns,
+        settings));
 }
 
 std::optional<std::uint32_t> CardMaximumRows(const ApplicationCard& card) {
@@ -285,7 +292,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                 const auto reconciled = ReconcileApplicationItemPlacements(
                     applicationCard->itemPlacements(),
                     ItemFileNames(items),
-                    CardColumns(runtime, *applicationCard),
+                    CardColumns(runtime, *applicationCard, items.size()),
                     CardMaximumRows(*applicationCard));
                 if (!reconciled.fits) {
                     throw std::runtime_error("Application Card fixed grid is smaller than its content.");
@@ -307,6 +314,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
         host.setPlacementChangedCallback(
             [&](const PlacementId& placementId,
                 const CardId& cardId,
+                const DisplayId& displayId,
                 const PlacementRect& rect,
                 PlacementHorizontalAnchor horizontalAnchor,
                 PlacementVerticalAnchor verticalAnchor,
@@ -322,6 +330,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                     return;
                 }
                 auto updated = *found;
+                updated.target = DisplayTarget::specific(displayId);
                 updated.rect = rect;
                 updated.horizontalAnchor = horizontalAnchor;
                 updated.verticalAnchor = verticalAnchor;
@@ -478,7 +487,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                         const auto* affected = FindApplicationCard(runtime, affectedCardId);
                         if (affected == nullptr) continue;
                         auto items = nextItemsByCard[affectedCardId];
-                        const auto affectedColumns = CardColumns(runtime, *affected);
+                        const auto affectedColumns = CardColumns(runtime, *affected, items.size());
                         auto placements = ReconcileApplicationItemPlacements(
                             affected->itemPlacements(),
                             ItemFileNames(items),
@@ -598,7 +607,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
             auto placements = ReconcileApplicationItemPlacements(
                 card->itemPlacements(),
                 ItemFileNames(items),
-                CardColumns(runtime, *card),
+                CardColumns(runtime, *card, items.size()),
                 CardMaximumRows(*card));
             if (!placements.fits
                 || runtime.execute(SetApplicationCardLayout{
@@ -617,6 +626,17 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                 if (!shellItems.launch(item)) {
                     diagnostics.record(DiagnosticLevel::Warning, "desktop.item_launch_failed");
                 }
+            });
+        host.setCardItemsRefreshCallback(
+            [&](const CardId& cardId, CardItemSize itemSize) {
+                const auto* card = FindApplicationCard(runtime, cardId);
+                if (card == nullptr) {
+                    return std::vector<desto::presentation::CardItemView>{};
+                }
+                return shellItems.enumerate(
+                    storageRoot.resolveCardPath(card->relativeStoragePath()),
+                    PlacementOrder(*card),
+                    ResolveShellIconSourceSize(itemSize));
             });
         host.present(runtime.projections(), displays, cardViews);
         if (!lifecycle.runtimeReady().applied) {

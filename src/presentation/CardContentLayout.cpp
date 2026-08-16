@@ -37,6 +37,16 @@ CardContentLayoutSettings ResolveCardContentLayoutSettings(
     return result;
 }
 
+std::size_t ResolveAdaptiveCardColumns(
+    std::size_t itemCount,
+    std::size_t requiredColumns,
+    CardContentLayoutSettings settings) noexcept {
+    const auto contentColumns = std::max(settings.preferredColumns, itemCount);
+    return std::max(
+        requiredColumns,
+        std::clamp(contentColumns, settings.minimumColumns, settings.maximumColumns));
+}
+
 CardContentLayout ResolveCardContentLayout(
     std::size_t itemCount,
     double availableWidth,

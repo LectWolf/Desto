@@ -33,13 +33,22 @@ HWND FindOwnedTooltip(HWND owner) {
 
 void RunTests() {
     WindowsDesktopHost host(L"Desto Host Test");
-    const std::vector<DisplaySnapshot> displays{{
-        .id = "display-test",
-        .workAreaWidth = 1920,
-        .workAreaHeight = 1040,
-        .effectiveDpi = 96,
-        .primary = true,
-    }};
+    const std::vector<DisplaySnapshot> displays{
+        {
+            .id = "display-test",
+            .workAreaWidth = 1920,
+            .workAreaHeight = 1040,
+            .effectiveDpi = 96,
+            .primary = true,
+        },
+        {
+            .id = "display-high-dpi",
+            .workAreaLeft = 1280,
+            .workAreaWidth = 1280,
+            .workAreaHeight = 720,
+            .effectiveDpi = 144,
+        },
+    };
     const std::vector<PlacementProjection> projections{{
         .placementId = "placement-test",
         .cardId = "card-test",
@@ -53,6 +62,7 @@ void RunTests() {
         .typeLabel = L"Application",
     }};
     PlacementRect changed{};
+    DisplayId changedDisplayId;
     auto horizontalAnchor = PlacementHorizontalAnchor::Free;
     auto verticalAnchor = PlacementVerticalAnchor::Free;
     double referenceWorkAreaWidth = 0;
@@ -64,6 +74,7 @@ void RunTests() {
     host.setPlacementChangedCallback(
         [&](const PlacementId& placementId,
             const CardId& cardId,
+            const DisplayId& displayId,
             const PlacementRect& rect,
             PlacementHorizontalAnchor horizontal,
             PlacementVerticalAnchor vertical,
@@ -71,6 +82,7 @@ void RunTests() {
             double referenceHeight) {
             DESTO_CHECK(placementId == "placement-test");
             DESTO_CHECK(cardId == "card-test");
+            changedDisplayId = displayId;
             changed = rect;
             horizontalAnchor = horizontal;
             verticalAnchor = vertical;
@@ -136,6 +148,7 @@ void RunTests() {
     DESTO_CHECK(verticalAnchor == PlacementVerticalAnchor::Top);
     DESTO_CHECK(referenceWorkAreaWidth == 1920);
     DESTO_CHECK(referenceWorkAreaHeight == 1040);
+    DESTO_CHECK(changedDisplayId == "display-test");
 
     host.updateCardItems("card-test", {{
         .id = L"example",
@@ -149,6 +162,7 @@ void RunTests() {
     DESTO_CHECK(GetWindowRect(window, &windowRect));
     DESTO_CHECK(windowRect.right - windowRect.left == 256);
     DESTO_CHECK(windowRect.bottom - windowRect.top == 127);
+
     const auto tooltip = FindOwnedTooltip(window);
     DESTO_CHECK(tooltip != nullptr);
     SendMessageW(window, WM_MOUSEMOVE, 0, MAKELPARAM(56, 82));
@@ -158,6 +172,32 @@ void RunTests() {
     DESTO_CHECK(!IsWindowVisible(tooltip));
     SendMessageW(window, WM_LBUTTONDBLCLK, MK_LBUTTON, MAKELPARAM(56, 82));
     DESTO_CHECK(itemActivated);
+
+    std::vector<CardItemView> adaptiveItems;
+    for (int index = 0; index < 5; ++index) {
+        adaptiveItems.push_back({
+            .id = std::to_wstring(index),
+            .displayName = std::to_wstring(index),
+            .sourcePath = L"C:\\Item" + std::to_wstring(index) + L".lnk",
+            .state = CardItemState::IconUnavailable,
+        });
+    }
+    host.updateCardItems("card-test", adaptiveItems);
+    DESTO_CHECK(GetWindowRect(window, &windowRect));
+    DESTO_CHECK(windowRect.right - windowRect.left == 315);
+    adaptiveItems.pop_back();
+    host.updateCardItems("card-test", adaptiveItems);
+    DESTO_CHECK(GetWindowRect(window, &windowRect));
+    DESTO_CHECK(windowRect.right - windowRect.left == 256);
+
+    int refreshCount = 0;
+    host.setCardItemsRefreshCallback(
+        [&](const CardId& cardId, CardItemSize itemSize) {
+            DESTO_CHECK(cardId == "card-test");
+            DESTO_CHECK(itemSize == CardItemSize::Medium || itemSize == CardItemSize::Large);
+            ++refreshCount;
+            return adaptiveItems;
+        });
 
     host.updateCardContentPreferences(
         "card-test",
@@ -171,6 +211,7 @@ void RunTests() {
     DESTO_CHECK(GetWindowRect(window, &windowRect));
     DESTO_CHECK(windowRect.right - windowRect.left == 180);
     DESTO_CHECK(windowRect.bottom - windowRect.top == 212);
+    DESTO_CHECK(refreshCount == 1);
 
     host.updateCardContentPreferences(
         "card-test",
@@ -178,6 +219,7 @@ void RunTests() {
     DESTO_CHECK(GetWindowRect(window, &windowRect));
     DESTO_CHECK(windowRect.right - windowRect.left == 256);
     DESTO_CHECK(windowRect.bottom - windowRect.top == 127);
+    DESTO_CHECK(refreshCount == 2);
 
     SendMessageW(window, WM_MOUSEMOVE, 0, MAKELPARAM(232, 24));
     SendMessageW(window, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(232, 24));
@@ -189,6 +231,14 @@ void RunTests() {
         WM_NCHITTEST,
         0,
         MAKELPARAM(windowRect.left + 100, windowRect.top + 100)) == HTTRANSPARENT);
+
+    DESTO_CHECK(SetWindowPos(
+        window, nullptr, 2050, 120, 256, 127, SWP_NOACTIVATE | SWP_NOZORDER));
+    SendMessageW(window, WM_EXITSIZEMOVE, 0, 0);
+    DESTO_CHECK(changedDisplayId == "display-high-dpi");
+    DESTO_CHECK(changed.width == 256);
+    DESTO_CHECK(GetWindowRect(window, &windowRect));
+    DESTO_CHECK(windowRect.right - windowRect.left == 384);
 }
 
 } // namespace

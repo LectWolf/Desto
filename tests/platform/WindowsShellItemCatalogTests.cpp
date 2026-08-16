@@ -74,6 +74,20 @@ void RunTests() {
         root / "zeta.txt", ShellIconSourceSize::Small);
     DESTO_CHECK(smallTextFile.icon.empty() || smallTextFile.icon.width == 16);
     DESTO_CHECK(textFile.icon.empty() || textFile.icon.width == 32);
+    const auto refreshedSmall = catalog.refreshIcons(
+        std::vector<CardItemView>{textFile}, ShellIconSourceSize::Small);
+    DESTO_CHECK(refreshedSmall.size() == 1);
+    DESTO_CHECK(refreshedSmall.front().icon.empty()
+        || refreshedSmall.front().icon.width == 16);
+    const auto reusedSmall = catalog.refreshIcons(
+        refreshedSmall, ShellIconSourceSize::Small);
+    DESTO_CHECK(reusedSmall.front().icon.empty()
+        || reusedSmall.front().icon.premultipliedPixels
+            == refreshedSmall.front().icon.premultipliedPixels);
+    const auto refreshedMedium = catalog.refreshIcons(
+        refreshedSmall, ShellIconSourceSize::Medium);
+    DESTO_CHECK(refreshedMedium.front().icon.empty()
+        || refreshedMedium.front().icon.width == 32);
     const auto retargeted = catalog.retarget(textFile, root / "renamed.txt");
     DESTO_CHECK(retargeted.sourcePath == root / "renamed.txt");
     DESTO_CHECK(retargeted.displayName == L"renamed.txt");

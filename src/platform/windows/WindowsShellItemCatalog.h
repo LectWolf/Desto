@@ -27,6 +27,10 @@ public:
         std::span<const std::filesystem::path> preferredOrder = {},
         ShellIconSourceSize iconSize = ShellIconSourceSize::Medium) const;
 
+    [[nodiscard]] std::vector<presentation::CardItemView> refreshIcons(
+        std::span<const presentation::CardItemView> items,
+        ShellIconSourceSize iconSize) const;
+
     [[nodiscard]] presentation::CardItemView retarget(
         presentation::CardItemView preparedItem,
         const std::filesystem::path& destinationPath) const;

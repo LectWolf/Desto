@@ -321,6 +321,23 @@ std::vector<presentation::CardItemView> WindowsShellItemCatalog::enumerate(
     return result;
 }
 
+std::vector<presentation::CardItemView> WindowsShellItemCatalog::refreshIcons(
+    std::span<const presentation::CardItemView> items,
+    ShellIconSourceSize iconSize) const {
+    std::vector<presentation::CardItemView> result;
+    result.reserve(items.size());
+    const auto expectedWidth = static_cast<int>(iconSize);
+    for (const auto& item : items) {
+        if (!item.icon.empty() && item.icon.width == expectedWidth
+            && item.icon.height == expectedWidth) {
+            result.push_back(item);
+        } else {
+            result.push_back(inspect(item.sourcePath, iconSize));
+        }
+    }
+    return result;
+}
+
 presentation::CardItemView WindowsShellItemCatalog::retarget(
     presentation::CardItemView preparedItem,
     const std::filesystem::path& destinationPath) const {

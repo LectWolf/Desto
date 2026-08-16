@@ -1,7 +1,9 @@
 #include "CardContentLayout.h"
+#include "PremultipliedImageResampler.h"
 #include "TestSupport.h"
 
 #include <stdexcept>
+#include <array>
 
 using namespace desto::presentation;
 using namespace desto::domain;
@@ -60,6 +62,21 @@ void RunTests() {
     DESTO_CHECK(extraLarge.itemWidth == 74.0);
     DESTO_CHECK(extraLarge.itemHeight == extraLarge.itemWidth + 24.0);
     DESTO_CHECK(extraLarge.preferredColumns == 3);
+    DESTO_CHECK(ResolveAdaptiveCardColumns(4, 1, large) == 4);
+    DESTO_CHECK(ResolveAdaptiveCardColumns(5, 1, large) == 5);
+    DESTO_CHECK(ResolveAdaptiveCardColumns(4, 1, large) == 4);
+    DESTO_CHECK(ResolveAdaptiveCardColumns(2, 6, large) == 6);
+    DESTO_CHECK(ResolveAdaptiveCardColumns(2, 9, large) == 9);
+    DESTO_CHECK(ResolveAdaptiveCardColumns(20, 1, large) == 8);
+
+    constexpr std::array<std::uint32_t, 4> image{
+        0xFFFF0000u,
+        0x00000000u,
+        0xFF00FF00u,
+        0xFF0000FFu,
+    };
+    DESTO_CHECK(SamplePremultipliedBilinear(image, 2, 2, 3, 3, 0, 0) == image[0]);
+    DESTO_CHECK(SamplePremultipliedBilinear(image, 2, 2, 3, 3, 1, 1) == 0xBF404040u);
 
     DESTO_CHECK(ResolveCardInsertionIndex(7, 320.0, 36.0, 64.0) == 0);
     DESTO_CHECK(ResolveCardInsertionIndex(7, 320.0, 110.0, 64.0) == 1);

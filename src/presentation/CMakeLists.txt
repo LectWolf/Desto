@@ -5,6 +5,8 @@ add_library(desto_presentation STATIC
     CardView.h
     PlacementInteraction.cpp
     PlacementInteraction.h
+    PremultipliedImageResampler.cpp
+    PremultipliedImageResampler.h
 )
 
 target_compile_features(desto_presentation PUBLIC cxx_std_20)

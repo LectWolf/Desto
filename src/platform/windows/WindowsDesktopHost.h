@@ -17,6 +17,7 @@ public:
     using PlacementChangedCallback = std::function<void(
         const domain::PlacementId&,
         const domain::CardId&,
+        const domain::DisplayId&,
         const domain::PlacementRect&,
         domain::PlacementHorizontalAnchor,
         domain::PlacementVerticalAnchor,
@@ -33,6 +34,9 @@ public:
     using CardItemActivatedCallback = std::function<void(
         const domain::CardId&,
         const presentation::CardItemView&)>;
+    using CardItemsRefreshCallback = std::function<std::vector<presentation::CardItemView>(
+        const domain::CardId&,
+        domain::CardItemSize)>;
 
     explicit WindowsDesktopHost(std::wstring title = L"Desto");
     ~WindowsDesktopHost();
@@ -54,6 +58,7 @@ public:
     void setApplicationItemsDroppedCallback(ApplicationItemsDroppedCallback callback);
     void setApplicationItemDragCompletedCallback(ApplicationItemDragCompletedCallback callback);
     void setCardItemActivatedCallback(CardItemActivatedCallback callback);
+    void setCardItemsRefreshCallback(CardItemsRefreshCallback callback);
     void updateCardItems(
         const domain::CardId& cardId,
         std::vector<presentation::CardItemView> items);

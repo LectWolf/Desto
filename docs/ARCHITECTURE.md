@@ -83,11 +83,11 @@ application default
 
 `presentation::CardView` 是 Domain Card 到宿主渲染之间的不可变视图。它包含标题、类型标识、可见/展开状态、入口可见性、外观值和平台 Adapter 已解析的内容项目；宿主不读取 Card 子类或自行枚举持久化路径。内容图标以共享的预乘 Alpha 像素视图跨 Projection 复用。关闭某个入口只改变 Card 实例偏好，不会改变 Card 的能力或生命周期。
 
-Application Card 的目录所有权、Shell 解析和失败语义记录在 [APPLICATION_CARD.md](APPLICATION_CARD.md)。Explorer 文件交换由独立 OLE Adapter 处理 `CF_HDROP`、`IDataObject` 与 `IDropTarget`；宿主只计算插入槽位和发出命令。Storage Adapter 先完成可回滚移动，再重新生成项目视图；窗口消息过程不直接修改领域状态或执行零散文件操作。
+Application Card 的目录所有权、Shell 解析和失败语义记录在 [APPLICATION_CARD.md](APPLICATION_CARD.md)。Explorer 文件交换由独立 OLE Adapter 处理 `CF_HDROP`、`IDataObject` 与 `IDropTarget`；宿主只计算插入槽位和发出命令。Storage Adapter 先完成可回滚移动，再以源/目标内存快照生成同一批项目视图；窗口消息过程不直接修改领域状态或执行零散文件操作。
 
-拖动由 Win32 标题区命中测试发起，窗口边缘始终返回内容命中，不提供鼠标自由缩放。Card 尺寸由实例内容偏好计算：自适应模式使用图标规格对应的建议列数和实际内容行数，固定模式使用明确格数；尺寸变化先在离屏位图完成，再以一次 Layered Window 提交更新。`presentation::ResolvePlacementInteraction` 在不依赖 HWND 的情况下完成屏幕边缘、中心和 Card 等距吸附；Ctrl 只绕过吸附，8 DIP 安全间隔和工作区夹取仍保留。操作结束后，宿主把最终矩形、横纵锚点和参考工作区提交给 `ApplicationRuntime::SetPlacement`。
+拖动由 Win32 标题区命中测试发起，窗口边缘始终返回内容命中，不提供鼠标自由缩放。Card 尺寸由实例内容偏好计算：自适应模式从图标规格的建议列数开始，按内容数量、稀疏槽位和拖放预览扩缩；固定模式使用明确格数。尺寸变化先在离屏位图完成，再以一次 Layered Window 提交更新。`presentation::ResolvePlacementInteraction` 在不依赖 HWND 的情况下完成屏幕边缘、中心和 Card 等距吸附；Ctrl 只绕过吸附，8 DIP 安全间隔和工作区夹取仍保留。操作结束后，宿主按窗口最大重叠确定目标显示器，保持逻辑 DIP 尺寸，并把 Display ID、最终矩形、横纵锚点和参考工作区提交给 `ApplicationRuntime::SetPlacement`。
 
-`WindowsShellItemCatalog` 根据 Card 的四档内容偏好选择两级 Shell 图标源：小/中使用 16 px，大/特大使用 32 px。CardItem 只携带当前所需的预乘 Alpha 位图；跨 Card 移动时，若源 Card 与目标 Card 的 Shell 源档位不同，移动前重新解析目标档位，避免长期放大低分辨率图标，也不为尚未选择的档位增加常驻内存。
+`WindowsShellItemCatalog` 根据 Card 的四档内容偏好选择两级 Shell 图标源：小/中使用 16 px，大/特大使用 32 px。CardItem 只携带当前所需的预乘 Alpha 位图；跨 Card 移动或实例偏好跨源档位切换时重新解析目标档位，避免长期放大低分辨率图标，也不为尚未选择的档位增加常驻内存。宿主使用预乘 Alpha 双线性采样生成目标 DPI 下的显示像素。
 
 Windows 平台当前提供 `DisplayTopologyProvider` 的两个 Adapter：生产环境的 `WindowsDisplayTopology` 和测试使用的 `MemoryDisplayTopologyProvider`。`DisplayTopologyMonitor` 负责快照差异和防抖，`WindowsDisplayChangeSource` 负责系统消息输入。接口只暴露 `DisplaySnapshot`，不暴露 Win32 句柄、RECT 或 DPI API。
 
