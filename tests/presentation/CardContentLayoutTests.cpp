@@ -122,8 +122,8 @@ void RunTests() {
     DESTO_CHECK(IsAdaptiveDropExpansionReady(CardDropOrigin::External, 0));
     DESTO_CHECK(IsAdaptiveDropExpansionReady(CardDropOrigin::OtherCard, 0));
     DESTO_CHECK(!IsAdaptiveDropExpansionReady(CardDropOrigin::SameCard, 0));
-    DESTO_CHECK(!IsAdaptiveDropExpansionReady(CardDropOrigin::SameCard, 359));
-    DESTO_CHECK(IsAdaptiveDropExpansionReady(CardDropOrigin::SameCard, 360));
+    DESTO_CHECK(!IsAdaptiveDropExpansionReady(CardDropOrigin::SameCard, 279));
+    DESTO_CHECK(IsAdaptiveDropExpansionReady(CardDropOrigin::SameCard, 280));
 
     DESTO_CHECK(ResolveCardInsertionIndex(7, 320.0, 36.0, 64.0) == 0);
     DESTO_CHECK(ResolveCardInsertionIndex(7, 320.0, 110.0, 64.0) == 1);

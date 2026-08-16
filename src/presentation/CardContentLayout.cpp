@@ -9,7 +9,7 @@ namespace desto::presentation {
 bool IsAdaptiveDropExpansionReady(
     CardDropOrigin origin,
     std::uint64_t edgeHoverMilliseconds) noexcept {
-    constexpr std::uint64_t sameCardExpansionDelayMilliseconds = 360;
+    constexpr std::uint64_t sameCardExpansionDelayMilliseconds = 280;
     return origin != CardDropOrigin::SameCard
         || edgeHoverMilliseconds >= sameCardExpansionDelayMilliseconds;
 }

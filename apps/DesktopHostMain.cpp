@@ -6,6 +6,7 @@
 #include "Diagnostics.h"
 #include "CardContentLayout.h"
 #include "FileMoveTransaction.h"
+#include "JsonConfigStore.h"
 #include "MappingCardImport.h"
 #include "CardView.h"
 #include "StorageRoot.h"
@@ -307,6 +308,18 @@ void SeedPreview(
     }
 }
 
+void SaveRuntimeConfiguration(
+    const JsonConfigStore& store,
+    const StorageRoot& storageRoot,
+    const ApplicationRuntime& runtime) {
+    store.save({
+        .schemaVersion = ApplicationConfig::CurrentSchemaVersion,
+        .storageRoot = storageRoot.path(),
+        .cards = runtime.cardSnapshots(),
+        .workspace = runtime.workspace(),
+    });
+}
+
 } // namespace
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
@@ -325,11 +338,31 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
         WindowsDisplayTopology topology;
         const auto displays = topology.snapshot();
         ApplicationRuntime runtime;
-        StorageRoot storageRoot(DefaultStorageRoot());
+        const auto defaultStorageRoot = DefaultStorageRoot();
+        const auto configPath = defaultStorageRoot.parent_path() / "settings.json";
+        const auto backupPath = configPath.parent_path()
+            / (configPath.filename().wstring() + L".bak");
+        JsonConfigStore configStore(configPath);
+        const auto hasSavedConfiguration = std::filesystem::exists(configPath)
+            || std::filesystem::exists(backupPath);
+        std::optional<ApplicationConfig> restoredConfiguration;
+        if (hasSavedConfiguration) restoredConfiguration = configStore.load();
+        StorageRoot storageRoot(
+            restoredConfiguration.has_value() && !restoredConfiguration->storageRoot.empty()
+                ? restoredConfiguration->storageRoot : defaultStorageRoot);
         storageRoot.ensureExists();
         const auto mappingPreviewRoot = storageRoot.path() / "mapping-preview";
         std::filesystem::create_directories(mappingPreviewRoot);
-        SeedPreview(runtime, displays, mappingPreviewRoot);
+        if (restoredConfiguration.has_value()) {
+            runtime.restore(restoredConfiguration->cards, restoredConfiguration->workspace);
+            if (runtime.execute(UpdateDisplayTopology{displays}).status
+                == CommandStatus::Rejected) {
+                throw std::runtime_error("Unable to restore display topology.");
+            }
+        } else {
+            SeedPreview(runtime, displays, mappingPreviewRoot);
+            SaveRuntimeConfiguration(configStore, storageRoot, runtime);
+        }
         ApplicationCardImportService importService(storageRoot);
         MappingCardImportService mappingImportService;
         WindowsShellItemCatalog shellItems;
@@ -407,6 +440,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                 if (runtime.execute(SetPlacement{std::move(updated)}).status
                     == CommandStatus::Rejected) {
                     diagnostics.record(DiagnosticLevel::Warning, "desktop.placement_rejected");
+                } else {
+                    SaveRuntimeConfiguration(configStore, storageRoot, runtime);
                 }
             });
         host.setCardExpandedChangedCallback(
@@ -414,6 +449,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                 if (runtime.execute(SetCardExpanded{cardId, expanded}).status
                     == CommandStatus::Rejected) {
                     diagnostics.record(DiagnosticLevel::Warning, "desktop.expansion_rejected");
+                } else {
+                    SaveRuntimeConfiguration(configStore, storageRoot, runtime);
                 }
             });
         std::uint64_t nextTodoItemSequence = 1;
@@ -432,33 +469,50 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                 const auto result = runtime.execute(
                     AddTodoItem{cardId, itemId, title, 0, scheduledDate});
                 if (result.status != CommandStatus::Applied) return std::nullopt;
+                SaveRuntimeConfiguration(configStore, storageRoot, runtime);
                 const auto* updated = static_cast<const TodoCard*>(runtime.findCard(cardId));
                 const auto item = std::ranges::find(updated->items(), itemId, &TodoItem::id);
                 return item == updated->items().end() ? std::nullopt : std::optional<TodoItem>(*item);
             });
         host.setTodoItemRenamedCallback(
             [&](const CardId& cardId, const std::string& itemId, const std::string& title) {
-                return runtime.execute(RenameTodoItem{cardId, itemId, title}).status
-                    != CommandStatus::Rejected;
+                const auto result = runtime.execute(RenameTodoItem{cardId, itemId, title});
+                if (result.status == CommandStatus::Applied) {
+                    SaveRuntimeConfiguration(configStore, storageRoot, runtime);
+                }
+                return result.status != CommandStatus::Rejected;
             });
         host.setTodoItemCompletedChangedCallback(
             [&](const CardId& cardId, const std::string& itemId, bool completed) {
-                return runtime.execute(SetTodoItemCompleted{cardId, itemId, completed}).status
-                    != CommandStatus::Rejected;
+                const auto result = runtime.execute(
+                    SetTodoItemCompleted{cardId, itemId, completed});
+                if (result.status == CommandStatus::Applied) {
+                    SaveRuntimeConfiguration(configStore, storageRoot, runtime);
+                }
+                return result.status != CommandStatus::Rejected;
             });
         host.setTodoItemRemovedCallback(
             [&](const CardId& cardId, const std::string& itemId) {
-                return runtime.execute(RemoveTodoItem{cardId, itemId}).status
-                    != CommandStatus::Rejected;
+                const auto result = runtime.execute(RemoveTodoItem{cardId, itemId});
+                if (result.status == CommandStatus::Applied) {
+                    SaveRuntimeConfiguration(configStore, storageRoot, runtime);
+                }
+                return result.status != CommandStatus::Rejected;
             });
         host.setTodoItemsReorderedCallback(
             [&](const CardId& cardId, const std::vector<std::string>& order) {
-                return runtime.execute(ReorderTodoItems{cardId, order}).status
-                    != CommandStatus::Rejected;
+                const auto result = runtime.execute(ReorderTodoItems{cardId, order});
+                if (result.status == CommandStatus::Applied) {
+                    SaveRuntimeConfiguration(configStore, storageRoot, runtime);
+                }
+                return result.status != CommandStatus::Rejected;
             });
         host.setTodoItemsArchivedCallback([&](const CardId& cardId) {
-            return runtime.execute(ArchiveCompletedTodoItems{cardId}).status
-                != CommandStatus::Rejected;
+            const auto result = runtime.execute(ArchiveCompletedTodoItems{cardId});
+            if (result.status == CommandStatus::Applied) {
+                SaveRuntimeConfiguration(configStore, storageRoot, runtime);
+            }
+            return result.status != CommandStatus::Rejected;
         });
         host.setApplicationItemsDroppedCallback(
             [&](const CardId& cardId,
@@ -902,6 +956,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
             throw std::runtime_error("Runtime lifecycle transition failed.");
         }
         host.run(DurationMilliseconds(commandLine));
+        SaveRuntimeConfiguration(configStore, storageRoot, runtime);
         if (!lifecycle.requestShutdown(ShutdownReason::User).applied) {
             throw std::runtime_error("Shutdown request transition failed.");
         }

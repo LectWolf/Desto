@@ -72,6 +72,7 @@ struct Surface {
     domain::PlacementProjection projection;
     domain::DisplaySnapshot display;
     presentation::CardView card;
+    std::optional<domain::PlacementId> verticalLeaderPlacementId;
     std::size_t ordinal = 0;
     int width = 0;
     int height = 0;
@@ -79,6 +80,7 @@ struct Surface {
     bool collapseHovered = false;
     bool collapsePressed = false;
     bool todoAddHovered = false;
+    bool todoViewHovered = false;
     bool todoArchiveHovered = false;
     bool todoArchivePressed = false;
     int todoAddDateOffset = 0;
@@ -561,44 +563,59 @@ struct WindowsDesktopHost::Impl {
 
     static RECT todoAddControlRect(const Surface& surface) noexcept {
         const auto inset = dipToPixels(10.0, surface);
-        const auto top = dipToPixels(52.0, surface);
-        return {inset, top, surface.width - inset, top + dipToPixels(36.0, surface)};
+        const auto top = dipToPixels(80.0, surface);
+        return {inset, top, surface.width - inset, top + dipToPixels(42.0, surface)};
     }
 
     static RECT todoArchiveControlRect(const Surface& surface) noexcept {
-        const auto size = dipToPixels(30.0, surface);
-        const auto inset = dipToPixels(8.0, surface);
-        const auto right = surface.card.showCollapseControl
-            ? collapseControlRect(surface).left - dipToPixels(4.0, surface)
-            : surface.width - inset;
-        return {right - size, inset + dipToPixels(3.0, surface), right, inset + dipToPixels(3.0, surface) + size};
+        const auto right = surface.width - dipToPixels(78.0, surface);
+        return {right - dipToPixels(48.0, surface), dipToPixels(46.0, surface),
+            right, dipToPixels(74.0, surface)};
+    }
+
+    static RECT todoViewControlRect(const Surface& surface) noexcept {
+        return {dipToPixels(10.0, surface), dipToPixels(46.0, surface),
+            dipToPixels(76.0, surface), dipToPixels(74.0, surface)};
+    }
+
+    static RECT todoRemainingRect(const Surface& surface) noexcept {
+        return {surface.width - dipToPixels(78.0, surface), dipToPixels(46.0, surface),
+            surface.width - dipToPixels(10.0, surface), dipToPixels(74.0, surface)};
     }
 
     static std::vector<TodoDisplayEntry> todoDisplayEntries(const Surface& surface) {
         const auto today = domain::CurrentSystemTodoDate();
-        std::vector<std::size_t> indices;
-        indices.reserve(surface.card.todoItems.size());
+        const auto selectedDate = domain::AddTodoDays(today, surface.todoAddDateOffset);
+        std::vector<std::size_t> overdue;
+        std::vector<std::size_t> selected;
         for (std::size_t index = 0; index < surface.card.todoItems.size(); ++index) {
-            if (!surface.card.todoItems[index].archived) indices.push_back(index);
+            const auto& item = surface.card.todoItems[index];
+            if (item.archived) continue;
+            const auto date = item.scheduledDate.value_or(today);
+            if (surface.todoAddDateOffset == 0
+                && !item.completed && domain::CompareTodoDates(date, today) < 0) {
+                overdue.push_back(index);
+            } else if (date == selectedDate) {
+                selected.push_back(index);
+            }
         }
-        std::ranges::stable_sort(indices, [&](std::size_t left, std::size_t right) {
+        std::ranges::stable_sort(overdue, [&](std::size_t left, std::size_t right) {
             const auto leftDate = surface.card.todoItems[left].scheduledDate.value_or(today);
             const auto rightDate = surface.card.todoItems[right].scheduledDate.value_or(today);
-            const auto rank = [&](domain::TodoDate date) {
-                const auto delta = domain::CompareTodoDates(date, today);
-                return delta == 0 ? 0 : (delta > 0 ? delta : 100 + (-delta));
-            };
-            return std::pair{rank(leftDate), left} < std::pair{rank(rightDate), right};
+            return leftDate == rightDate ? left < right : leftDate < rightDate;
         });
         std::vector<TodoDisplayEntry> result;
         std::optional<domain::TodoDate> lastDate;
-        for (const auto itemIndex : indices) {
+        for (const auto itemIndex : overdue) {
             const auto date = surface.card.todoItems[itemIndex].scheduledDate.value_or(today);
             if (!lastDate.has_value() || *lastDate != date) {
                 result.push_back({true, 0, date});
                 lastDate = date;
             }
             result.push_back({false, itemIndex, date});
+        }
+        for (const auto itemIndex : selected) {
+            result.push_back({false, itemIndex, selectedDate});
         }
         return result;
     }
@@ -607,13 +624,23 @@ struct WindowsDesktopHost::Impl {
         if (itemIndex >= surface.card.todoItems.size()) return 42.0;
         try {
             const auto title = Utf8ToWide(surface.card.todoItems[itemIndex].title);
-            const auto availableDip = std::max(
-                88.0, surface.projection.rect.width - 76.0);
-            const auto charactersPerLine = std::max<std::size_t>(
-                8, static_cast<std::size_t>(availableDip / 11.0));
-            const auto lines = std::max<std::size_t>(
-                1, (title.size() + charactersPerLine - 1) / charactersPerLine);
-            return std::max(42.0, 10.0 + lines * 17.0
+            const auto scale = surface.display.effectiveDpi / 96.0;
+            const auto dc = GetDC(nullptr);
+            if (dc == nullptr) return 42.0;
+            const auto font = CreateFontW(
+                -std::max(1, static_cast<int>(std::lround(12.0 * scale))), 0, 0, 0,
+                FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
+                L"Microsoft YaHei UI");
+            const auto previous = font == nullptr ? nullptr : SelectObject(dc, font);
+            RECT measured{0, 0, std::max(1, static_cast<int>(std::lround(
+                std::max(88.0, surface.projection.rect.width - 76.0) * scale))), 0};
+            DrawTextW(dc, title.c_str(), -1, &measured,
+                DT_CALCRECT | DT_WORDBREAK | DT_EDITCONTROL | DT_NOPREFIX);
+            if (previous != nullptr) SelectObject(dc, previous);
+            if (font != nullptr) DeleteObject(font);
+            ReleaseDC(nullptr, dc);
+            return std::max(42.0, measured.bottom / scale + 12.0
                 + (surface.card.todoPreferences.showCreatedTime ? 14.0 : 0.0));
         } catch (...) {
             return 42.0;
@@ -622,7 +649,7 @@ struct WindowsDesktopHost::Impl {
 
     static RECT todoEntryRect(const Surface& surface, std::size_t entryIndex) noexcept {
         const auto inset = dipToPixels(10.0, surface);
-        LONG top = dipToPixels(88.0, surface);
+        LONG top = dipToPixels(128.0, surface);
         const auto entries = todoDisplayEntries(surface);
         for (std::size_t index = 0; index < entryIndex && index < entries.size(); ++index) {
             top += dipToPixels(entries[index].header
@@ -633,6 +660,22 @@ struct WindowsDesktopHost::Impl {
             : dipToPixels(entries.size() > entryIndex
                 ? todoRowHeightDip(surface, entries[entryIndex].itemIndex) : 42.0, surface);
         return {inset, top, surface.width - inset, top + height};
+    }
+
+    static std::vector<RECT> todoEntryRects(
+        const Surface& surface,
+        std::span<const TodoDisplayEntry> entries) {
+        std::vector<RECT> result;
+        result.reserve(entries.size());
+        const auto inset = dipToPixels(10.0, surface);
+        LONG top = dipToPixels(128.0, surface);
+        for (const auto& entry : entries) {
+            const auto height = dipToPixels(entry.header
+                ? 22.0 : todoRowHeightDip(surface, entry.itemIndex), surface);
+            result.push_back({inset, top, surface.width - inset, top + height});
+            top += height;
+        }
+        return result;
     }
 
     static RECT todoRowRect(const Surface& surface, std::size_t itemIndex) noexcept {
@@ -648,6 +691,14 @@ struct WindowsDesktopHost::Impl {
 
     static RECT todoCheckboxRect(const Surface& surface, std::size_t index) noexcept {
         const auto row = todoRowRect(surface, index);
+        const auto size = dipToPixels(18.0, surface);
+        const auto left = row.left + dipToPixels(8.0, surface);
+        const auto top = row.top + ((row.bottom - row.top) - size) / 2;
+        return {left, top, left + size, top + size};
+    }
+
+
+    static RECT todoCheckboxRect(const Surface& surface, const RECT& row) noexcept {
         const auto size = dipToPixels(18.0, surface);
         const auto left = row.left + dipToPixels(8.0, surface);
         const auto top = row.top + ((row.bottom - row.top) - size) / 2;
@@ -753,10 +804,11 @@ struct WindowsDesktopHost::Impl {
             const auto verticalCenter = rect.top + rect.height / 2.0;
             rect.width = std::min(std::max(240.0, rect.width), surface.display.workAreaWidth);
             const auto entries = todoDisplayEntries(surface);
-            double contentHeight = 58.0 + 36.0;
+            double contentHeight = 136.0;
             for (const auto& entry : entries) contentHeight += entry.header
                 ? 22.0 : todoRowHeightDip(surface, entry.itemIndex);
-            rect.height = std::min(std::max(112.0, contentHeight), surface.display.workAreaHeight);
+            if (entries.empty()) contentHeight = 206.0;
+            rect.height = std::min(std::max(178.0, contentHeight), surface.display.workAreaHeight);
             if (surface.projection.horizontalAnchor == domain::PlacementHorizontalAnchor::Right) {
                 rect.left = right - rect.width;
             } else if (surface.projection.horizontalAnchor
@@ -924,9 +976,10 @@ struct WindowsDesktopHost::Impl {
             return std::nullopt;
         }
         const auto entries = todoDisplayEntries(surface);
-        for (const auto& entry : entries) {
-            if (!entry.header && pointInside(todoRowRect(surface, entry.itemIndex), x, y)) {
-                return entry.itemIndex;
+        const auto rects = todoEntryRects(surface, entries);
+        for (std::size_t index = 0; index < entries.size(); ++index) {
+            if (!entries[index].header && pointInside(rects[index], x, y)) {
+                return entries[index].itemIndex;
             }
         }
         return std::nullopt;
@@ -940,6 +993,11 @@ struct WindowsDesktopHost::Impl {
     static bool isTodoArchiveControlHit(const Surface& surface, int x, int y) noexcept {
         return surface.card.type == domain::CardType::Todo
             && pointInside(todoArchiveControlRect(surface), x, y);
+    }
+
+    static bool isTodoViewControlHit(const Surface& surface, int x, int y) noexcept {
+        return surface.card.type == domain::CardType::Todo
+            && pointInside(todoViewControlRect(surface), x, y);
     }
 
     bool isCollapseControlHit(const Surface& surface, int x, int y) const noexcept {
@@ -962,6 +1020,7 @@ struct WindowsDesktopHost::Impl {
         if (y < dipToPixels(48.0, *surface)
             && !isCollapseControlHit(*surface, x, y)
             && !isTodoArchiveControlHit(*surface, x, y)
+            && !isTodoViewControlHit(*surface, x, y)
             && !isTodoAddControlHit(*surface, x, y)) {
             return HTCAPTION;
         }
@@ -1112,6 +1171,80 @@ struct WindowsDesktopHost::Impl {
         return found == surfaces.end() ? nullptr : &*found;
     }
 
+    static double visibleHeightDip(const Surface& surface) noexcept {
+        return surface.card.expanded ? surface.projection.rect.height : 48.0;
+    }
+
+    static bool horizontallyAligned(
+        const domain::PlacementRect& left,
+        const domain::PlacementRect& right) noexcept {
+        constexpr double tolerance = 1.5;
+        return std::abs(left.left - right.left) <= tolerance
+            || std::abs((left.left + left.width) - (right.left + right.width)) <= tolerance
+            || std::abs((left.left + left.width / 2.0)
+                - (right.left + right.width / 2.0)) <= tolerance;
+    }
+
+    void inferVerticalLeader(Surface& follower) noexcept {
+        follower.verticalLeaderPlacementId.reset();
+        constexpr double visualGap = 8.0;
+        constexpr double tolerance = 1.5;
+        for (const auto& candidate : surfaces) {
+            if (&candidate == &follower
+                || candidate.projection.displayId != follower.projection.displayId
+                || !horizontallyAligned(candidate.projection.rect, follower.projection.rect)) {
+                continue;
+            }
+            const auto expandedTop = candidate.projection.rect.top
+                + candidate.projection.rect.height + visualGap;
+            const auto visibleTop = candidate.projection.rect.top
+                + visibleHeightDip(candidate) + visualGap;
+            if (std::abs(follower.projection.rect.top - expandedTop) <= tolerance
+                || std::abs(follower.projection.rect.top - visibleTop) <= tolerance) {
+                follower.verticalLeaderPlacementId = candidate.projection.placementId;
+                return;
+            }
+        }
+    }
+
+    void inferVerticalLeaders() noexcept {
+        for (auto& surface : surfaces) inferVerticalLeader(surface);
+    }
+
+    void reflowVerticalFollowers(Surface& leader, bool commit) noexcept {
+        std::unordered_set<domain::PlacementId> visited;
+        const auto reflow = [&](auto&& self, Surface& current) -> void {
+            if (!visited.insert(current.projection.placementId).second) return;
+            for (auto& follower : surfaces) {
+                if (!follower.verticalLeaderPlacementId.has_value()
+                    || *follower.verticalLeaderPlacementId != current.projection.placementId
+                    || follower.projection.displayId != current.projection.displayId) {
+                    continue;
+                }
+                follower.projection.rect.top = current.projection.rect.top
+                    + visibleHeightDip(current) + 8.0;
+                if (commit && follower.window != nullptr) {
+                    try {
+                        commitSurface(follower);
+                        if (placementChanged) {
+                            placementChanged(
+                                follower.projection.placementId,
+                                follower.projection.cardId,
+                                follower.projection.displayId,
+                                follower.projection.rect,
+                                follower.projection.horizontalAnchor,
+                                follower.projection.verticalAnchor,
+                                follower.display.workAreaWidth,
+                                follower.display.workAreaHeight);
+                        }
+                    } catch (...) {}
+                }
+                self(self, follower);
+            }
+        };
+        reflow(reflow, leader);
+    }
+
     void repaintTodoCard(const domain::CardId& cardId) noexcept {
         const auto* source = findSurfaceByCard(cardId);
         if (source == nullptr) return;
@@ -1124,6 +1257,9 @@ struct WindowsDesktopHost::Impl {
                 render(surface, surface.display, surface.card, surface.ordinal);
             } catch (...) {
             }
+        }
+        for (auto& surface : surfaces) {
+            if (surface.card.id == cardId) reflowVerticalFollowers(surface, true);
         }
     }
 
@@ -1228,6 +1364,12 @@ struct WindowsDesktopHost::Impl {
     bool beginTodoPress(HWND window, int x, int y) noexcept {
         auto* surface = findSurface(window);
         if (surface == nullptr || surface->card.type != domain::CardType::Todo) return false;
+        if (isTodoViewControlHit(*surface, x, y)) {
+            surface->todoAddDateOffset = surface->todoAddDateOffset == 0 ? 1 : 0;
+            resizeSurfaceForContent(*surface, true);
+            try { render(*surface, surface->display, surface->card, surface->ordinal); } catch (...) {}
+            return true;
+        }
         if (isTodoArchiveControlHit(*surface, x, y)) {
             if (todoItemsArchived && todoItemsArchived(surface->card.id)) {
                 for (auto& item : surface->card.todoItems) {
@@ -1238,12 +1380,6 @@ struct WindowsDesktopHost::Impl {
             return true;
         }
         if (isTodoAddControlHit(*surface, x, y)) {
-            const auto toggleLeft = todoAddControlRect(*surface).right - dipToPixels(108.0, *surface);
-            if (x >= toggleLeft) {
-                surface->todoAddDateOffset = surface->todoAddDateOffset == 0 ? 1 : 0;
-                try { render(*surface, surface->display, surface->card, surface->ordinal); } catch (...) {}
-                return true;
-            }
             beginTodoEdit(window, std::nullopt);
             return true;
         }
@@ -1290,9 +1426,16 @@ struct WindowsDesktopHost::Impl {
                 && std::abs(y - surface->todoDragStart.y) < thresholdY) return true;
         }
         auto target = todoRowAt(*surface, x, y);
-        if (!target.has_value() && !surface->card.todoItems.empty()) {
-            target = y < todoRowRect(*surface, 0).top
-                ? 0 : surface->card.todoItems.size() - 1;
+        if (!target.has_value()) {
+            const auto entries = todoDisplayEntries(*surface);
+            std::vector<std::size_t> visibleItems;
+            for (const auto& entry : entries) {
+                if (!entry.header) visibleItems.push_back(entry.itemIndex);
+            }
+            if (!visibleItems.empty()) {
+                target = y < todoRowRect(*surface, visibleItems.front()).top
+                    ? visibleItems.front() : visibleItems.back();
+            }
         }
         if (target != surface->todoDragTarget) {
             surface->todoDragTarget = target;
@@ -1377,6 +1520,11 @@ struct WindowsDesktopHost::Impl {
             try {
                 render(other, other.display, other.card, other.ordinal);
             } catch (...) {
+            }
+        }
+        for (auto& changed : surfaces) {
+            if (changed.card.id == surface->card.id) {
+                reflowVerticalFollowers(changed, true);
             }
         }
         if (cardExpandedChanged) {
@@ -1541,11 +1689,13 @@ struct WindowsDesktopHost::Impl {
         }
         const auto changed = surface->hoveredItem.has_value()
             || surface->hoveredTodoRow.has_value() || surface->collapseHovered
-            || surface->todoAddHovered || surface->todoArchiveHovered;
+            || surface->todoAddHovered || surface->todoViewHovered
+            || surface->todoArchiveHovered;
         surface->hoveredItem.reset();
         surface->hoveredTodoRow.reset();
         surface->collapseHovered = false;
         surface->todoAddHovered = false;
+        surface->todoViewHovered = false;
         surface->todoArchiveHovered = false;
         if (changed && repaint) {
             try {
@@ -1613,21 +1763,28 @@ struct WindowsDesktopHost::Impl {
         };
         TrackMouseEvent(&tracking);
         const auto collapseHovered = isCollapseControlHit(*surface, x, y);
-        const auto todoArchiveHovered = !collapseHovered && isTodoArchiveControlHit(*surface, x, y);
-        const auto todoAddHovered = !collapseHovered && !todoArchiveHovered && isTodoAddControlHit(*surface, x, y);
-        const auto todoRow = collapseHovered || todoArchiveHovered || todoAddHovered ? std::optional<std::size_t>{}
+        const auto todoViewHovered = !collapseHovered && isTodoViewControlHit(*surface, x, y);
+        const auto todoArchiveHovered = !collapseHovered && !todoViewHovered
+            && isTodoArchiveControlHit(*surface, x, y);
+        const auto todoAddHovered = !collapseHovered && !todoViewHovered
+            && !todoArchiveHovered && isTodoAddControlHit(*surface, x, y);
+        const auto todoRow = collapseHovered || todoViewHovered
+            || todoArchiveHovered || todoAddHovered ? std::optional<std::size_t>{}
             : todoRowAt(*surface, x, y);
-        const auto index = collapseHovered || todoArchiveHovered || todoAddHovered || todoRow.has_value()
+        const auto index = collapseHovered || todoViewHovered
+            || todoArchiveHovered || todoAddHovered || todoRow.has_value()
             ? std::optional<std::size_t>{}
             : itemAt(*surface, x, y);
         if (index == surface->hoveredItem && todoRow == surface->hoveredTodoRow
             && collapseHovered == surface->collapseHovered
             && todoAddHovered == surface->todoAddHovered
+            && todoViewHovered == surface->todoViewHovered
             && todoArchiveHovered == surface->todoArchiveHovered) {
             return;
         }
         clearPointerHover(window, false);
         surface->collapseHovered = collapseHovered;
+        surface->todoViewHovered = todoViewHovered;
         surface->todoArchiveHovered = todoArchiveHovered;
         surface->todoAddHovered = todoAddHovered;
         surface->hoveredTodoRow = todoRow;
@@ -2063,10 +2220,7 @@ struct WindowsDesktopHost::Impl {
 
         std::wstring titleText = card.title;
         if (card.type == domain::CardType::Todo) {
-            const auto visibleCount = std::ranges::count_if(card.todoItems, [](const auto& item) {
-                return !item.archived;
-            });
-            titleText = L"待办（" + std::to_wstring(visibleCount) + L"）";
+            titleText = L"待办";
         }
         const auto text = card.showTitle ? titleText : L"";
         SetBkMode(surface.memoryDc, TRANSPARENT);
@@ -2086,7 +2240,8 @@ struct WindowsDesktopHost::Impl {
             CLIP_DEFAULT_PRECIS,
             CLEARTYPE_QUALITY,
             DEFAULT_PITCH | FF_DONTCARE,
-            L"Segoe UI Variable Text");
+            card.type == domain::CardType::Todo
+                ? L"Microsoft YaHei UI" : L"Segoe UI Variable Text");
         const auto previousFont = font == nullptr
             ? nullptr
             : SelectObject(surface.memoryDc, font);
@@ -2095,12 +2250,8 @@ struct WindowsDesktopHost::Impl {
         RECT textRect{
             textLeft,
             0,
-            std::min(
-                card.showCollapseControl ? control.left - dipToPixels(4.0, surface)
-                                         : surface.width - textLeft,
-                card.type == domain::CardType::Todo
-                    ? todoArchiveControlRect(surface).left - dipToPixels(4.0, surface)
-                    : surface.width - textLeft),
+            card.showCollapseControl ? control.left - dipToPixels(4.0, surface)
+                                     : surface.width - textLeft,
             std::min(visibleBottom, dipToPixels(48.0, surface)),
         };
         DrawTextW(
@@ -2153,6 +2304,49 @@ struct WindowsDesktopHost::Impl {
             }
         };
         if (card.expanded && card.type == domain::CardType::Todo) {
+            const auto entries = todoDisplayEntries(surface);
+            const auto remaining = std::ranges::count_if(entries, [&](const auto& entry) {
+                return !entry.header && !card.todoItems[entry.itemIndex].completed;
+            });
+            const auto actionFont = CreateFontW(
+                -dipToPixels(11.0, surface), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+                DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei UI");
+            const auto previousActionFont = actionFont == nullptr
+                ? nullptr : SelectObject(surface.memoryDc, actionFont);
+            auto viewRect = todoViewControlRect(surface);
+            SetTextColor(surface.memoryDc, darkSurface ? RGB(225, 228, 235) : RGB(55, 59, 67));
+            DrawTextW(surface.memoryDc,
+                surface.todoAddDateOffset == 0 ? L"今天" : L"明天", -1, &viewRect,
+                DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+            auto archiveRect = todoArchiveControlRect(surface);
+            const auto hasCompleted = std::ranges::any_of(entries, [&](const auto& entry) {
+                return !entry.header && card.todoItems[entry.itemIndex].completed;
+            });
+            SetTextColor(surface.memoryDc, hasCompleted
+                ? (darkSurface ? RGB(180, 186, 198) : RGB(126, 132, 143))
+                : (darkSurface ? RGB(112, 118, 129) : RGB(181, 185, 192)));
+            DrawTextW(surface.memoryDc, L"归档", -1, &archiveRect,
+                DT_CENTER | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+            auto remainingRect = todoRemainingRect(surface);
+            const auto remainingBrush = CreateSolidBrush(
+                darkSurface ? RGB(47, 76, 112) : RGB(229, 240, 255));
+            const auto previousBrush = remainingBrush == nullptr
+                ? nullptr : SelectObject(surface.memoryDc, remainingBrush);
+            const auto previousPen = SelectObject(surface.memoryDc, GetStockObject(NULL_PEN));
+            RoundRect(surface.memoryDc, remainingRect.left, remainingRect.top,
+                remainingRect.right, remainingRect.bottom,
+                dipToPixels(14.0, surface), dipToPixels(14.0, surface));
+            if (previousPen != nullptr) SelectObject(surface.memoryDc, previousPen);
+            if (previousBrush != nullptr) SelectObject(surface.memoryDc, previousBrush);
+            if (remainingBrush != nullptr) DeleteObject(remainingBrush);
+            SetTextColor(surface.memoryDc, darkSurface ? RGB(144, 198, 255) : RGB(28, 111, 220));
+            const auto remainingText = L"剩余 " + std::to_wstring(remaining);
+            DrawTextW(surface.memoryDc, remainingText.c_str(), -1, &remainingRect,
+                DT_CENTER | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+            if (previousActionFont != nullptr) SelectObject(surface.memoryDc, previousActionFont);
+            if (actionFont != nullptr) DeleteObject(actionFont);
+
             const auto rowFill = darkSurface ? 0x00FFFFFFu : 0x00111827u;
             if (surface.hoveredTodoRow.has_value()
                 && *surface.hoveredTodoRow < card.todoItems.size()) {
@@ -2166,13 +2360,13 @@ struct WindowsDesktopHost::Impl {
             const auto todoFont = CreateFontW(
                 -dipToPixels(12.0, surface), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                 DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Variable Text");
+                DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei UI");
             const auto previousTodoFont = todoFont == nullptr
                 ? nullptr : SelectObject(surface.memoryDc, todoFont);
-            const auto entries = todoDisplayEntries(surface);
+            const auto entryRects = todoEntryRects(surface, entries);
             for (std::size_t entryIndex = 0; entryIndex < entries.size(); ++entryIndex) {
                 const auto& entry = entries[entryIndex];
-                auto row = todoEntryRect(surface, entryIndex);
+                auto row = entryRects[entryIndex];
                 if (entry.header) {
                     SetTextColor(surface.memoryDc, darkSurface ? RGB(170, 177, 190) : RGB(103, 109, 121));
                     DrawTextW(surface.memoryDc, TodoDateLabel(entry.date).c_str(), -1, &row,
@@ -2180,7 +2374,7 @@ struct WindowsDesktopHost::Impl {
                     continue;
                 }
                 const auto& item = card.todoItems[entry.itemIndex];
-                const auto checkbox = todoCheckboxRect(surface, entry.itemIndex);
+                const auto checkbox = todoCheckboxRect(surface, row);
                 const auto checkboxColor = item.completed
                     ? (darkSurface ? 0x0087BEFFu : 0x003774DCu)
                     : (darkSurface ? 0x00BEC4CFu : 0x008E95A2u);
@@ -2273,18 +2467,49 @@ struct WindowsDesktopHost::Impl {
             if (previousTodoFont != nullptr) SelectObject(surface.memoryDc, previousTodoFont);
             if (todoFont != nullptr) DeleteObject(todoFont);
             const auto addRect = todoAddControlRect(surface);
-            drawDashedRoundedBorder(addRect,
-                static_cast<double>(dipToPixels(9.0, surface)),
-                darkSurface ? 0x009AA0AAu : 0x00848A94u, 0.72);
+            const auto addBrush = CreateSolidBrush(
+                darkSurface ? RGB(48, 51, 58) : RGB(241, 243, 246));
+            const auto previousAddBrush = addBrush == nullptr
+                ? nullptr : SelectObject(surface.memoryDc, addBrush);
+            const auto previousAddPen = SelectObject(surface.memoryDc, GetStockObject(NULL_PEN));
+            RoundRect(surface.memoryDc, addRect.left, addRect.top, addRect.right, addRect.bottom,
+                dipToPixels(12.0, surface), dipToPixels(12.0, surface));
+            if (previousAddPen != nullptr) SelectObject(surface.memoryDc, previousAddPen);
+            if (previousAddBrush != nullptr) SelectObject(surface.memoryDc, previousAddBrush);
+            if (addBrush != nullptr) DeleteObject(addBrush);
             SetTextColor(surface.memoryDc, darkSurface ? RGB(177, 182, 191) : RGB(124, 131, 142));
             RECT addText{addRect.left + dipToPixels(12.0, surface), addRect.top,
-                addRect.right - dipToPixels(108.0, surface), addRect.bottom};
-            DrawTextW(surface.memoryDc, L"添加待办", -1, &addText,
+                addRect.right - dipToPixels(42.0, surface), addRect.bottom};
+            DrawTextW(surface.memoryDc, L"添加待办...", -1, &addText,
                 DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-            RECT dateToggle{addRect.right - dipToPixels(100.0, surface), addRect.top,
-                addRect.right - dipToPixels(10.0, surface), addRect.bottom};
-            DrawTextW(surface.memoryDc, surface.todoAddDateOffset == 0 ? L"今日" : L"明日", -1,
-                &dateToggle, DT_RIGHT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+            const auto plusX = addRect.right - dipToPixels(20.0, surface);
+            const auto plusY = (addRect.top + addRect.bottom) / 2;
+            const auto plusPen = CreatePen(PS_SOLID, std::max(1, dipToPixels(1.0, surface)),
+                darkSurface ? RGB(177, 182, 191) : RGB(113, 118, 128));
+            const auto previousPlusPen = plusPen == nullptr
+                ? nullptr : SelectObject(surface.memoryDc, plusPen);
+            MoveToEx(surface.memoryDc, plusX - dipToPixels(4.0, surface), plusY, nullptr);
+            LineTo(surface.memoryDc, plusX + dipToPixels(4.0, surface), plusY);
+            MoveToEx(surface.memoryDc, plusX, plusY - dipToPixels(4.0, surface), nullptr);
+            LineTo(surface.memoryDc, plusX, plusY + dipToPixels(4.0, surface));
+            if (previousPlusPen != nullptr) SelectObject(surface.memoryDc, previousPlusPen);
+            if (plusPen != nullptr) DeleteObject(plusPen);
+            if (entries.empty()) {
+                RECT emptyRect{dipToPixels(16.0, surface), dipToPixels(138.0, surface),
+                    surface.width - dipToPixels(16.0, surface), visibleBottom - dipToPixels(12.0, surface)};
+                const auto emptyFont = CreateFontW(
+                    -dipToPixels(11.0, surface), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                    DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei UI");
+                const auto previousEmptyFont = emptyFont == nullptr
+                    ? nullptr : SelectObject(surface.memoryDc, emptyFont);
+                SetTextColor(surface.memoryDc,
+                    darkSurface ? RGB(159, 165, 176) : RGB(112, 117, 127));
+                DrawTextW(surface.memoryDc, L"暂无待办", -1, &emptyRect,
+                    DT_CENTER | DT_SINGLELINE | DT_BOTTOM | DT_NOPREFIX);
+                if (previousEmptyFont != nullptr) SelectObject(surface.memoryDc, previousEmptyFont);
+                if (emptyFont != nullptr) DeleteObject(emptyFont);
+            }
         }
         if (card.expanded
             && (card.type == domain::CardType::Application
@@ -2525,43 +2750,6 @@ struct WindowsDesktopHost::Impl {
             }
             SetTextColor(surface.memoryDc, foreground);
         }
-        if (card.type == domain::CardType::Todo) {
-            const auto archiveControl = todoArchiveControlRect(surface);
-            const auto centerX = (archiveControl.left + archiveControl.right) / 2;
-            const auto centerY = (archiveControl.top + archiveControl.bottom) / 2;
-            const auto color = darkSurface ? 0x00E5E8EDu : 0x005B6069u;
-            if (surface.todoArchiveHovered) {
-                const auto hoverRadius = 13.0 * display.effectiveDpi / 96.0;
-                for (int y = archiveControl.top; y < archiveControl.bottom; ++y) {
-                    for (int x = archiveControl.left; x < archiveControl.right; ++x) {
-                        const auto dx = x + 0.5 - centerX;
-                        const auto dy = y + 0.5 - centerY;
-                        const auto coverage = std::clamp(
-                            hoverRadius + 0.5 - std::sqrt(dx * dx + dy * dy), 0.0, 1.0);
-                        blendRgb(
-                            x, y, darkSurface ? 0x00FFFFFFu : 0x00000000u,
-                            coverage * (darkSurface ? 0.10 : 0.06));
-                    }
-                }
-            }
-            const auto pen = CreatePen(PS_SOLID, std::max(1, dipToPixels(1.0, surface)),
-                RGB((color >> 16) & 0xFFu, (color >> 8) & 0xFFu, color & 0xFFu));
-            const auto oldPen = pen == nullptr ? nullptr : SelectObject(surface.memoryDc, pen);
-            const auto oldBrush = SelectObject(surface.memoryDc, GetStockObject(NULL_BRUSH));
-            const auto left = centerX - dipToPixels(6.0, surface);
-            const auto right = centerX + dipToPixels(6.0, surface);
-            const auto top = centerY - dipToPixels(4.0, surface);
-            const auto bottom = centerY + dipToPixels(6.0, surface);
-            RoundRect(surface.memoryDc, left, top, right, bottom,
-                dipToPixels(3.0, surface), dipToPixels(3.0, surface));
-            MoveToEx(surface.memoryDc, left - dipToPixels(1.0, surface), top - dipToPixels(3.0, surface), nullptr);
-            LineTo(surface.memoryDc, right + dipToPixels(1.0, surface), top - dipToPixels(3.0, surface));
-            MoveToEx(surface.memoryDc, centerX - dipToPixels(2.0, surface), centerY, nullptr);
-            LineTo(surface.memoryDc, centerX + dipToPixels(2.0, surface), centerY);
-            SelectObject(surface.memoryDc, oldBrush);
-            if (oldPen != nullptr) SelectObject(surface.memoryDc, oldPen);
-            if (pen != nullptr) DeleteObject(pen);
-        }
         if (card.showCollapseControl) {
             const auto centerX = (control.left + control.right) / 2.0;
             const auto centerY = (control.top + control.bottom) / 2.0;
@@ -2764,6 +2952,8 @@ struct WindowsDesktopHost::Impl {
         if (!EndDeferWindowPos(deferred)) {
             throw std::runtime_error("EndDeferWindowPos failed after Card interaction.");
         }
+        inferVerticalLeader(*moved);
+        reflowVerticalFollowers(*moved, true);
         if (placementChanged) {
             placementChanged(
                 moved->projection.placementId,
@@ -2825,6 +3015,13 @@ struct WindowsDesktopHost::Impl {
             }
         }
 
+        inferVerticalLeaders();
+        for (auto& surface : surfaces) {
+            if (!surface.verticalLeaderPlacementId.has_value()) {
+                reflowVerticalFollowers(surface, false);
+            }
+        }
+
         auto deferred = BeginDeferWindowPos(static_cast<int>(surfaces.size()));
         if (deferred == nullptr && !surfaces.empty()) {
             throw std::runtime_error("BeginDeferWindowPos failed for desktop host.");
@@ -2876,7 +3073,10 @@ struct WindowsDesktopHost::Impl {
             render(surface, surface.display, surface.card, surface.ordinal, false);
             affected.push_back(&surface);
         }
-        for (auto* surface : affected) commitSurface(*surface);
+        for (auto* surface : affected) {
+            commitSurface(*surface);
+            reflowVerticalFollowers(*surface, true);
+        }
     }
 
     void updateCardItemsBatch(
@@ -2900,7 +3100,10 @@ struct WindowsDesktopHost::Impl {
             render(surface, surface.display, surface.card, surface.ordinal, false);
             affected.push_back(&surface);
         }
-        for (auto* surface : affected) commitSurface(*surface);
+        for (auto* surface : affected) {
+            commitSurface(*surface);
+            reflowVerticalFollowers(*surface, true);
+        }
     }
 
     void updateTodoItems(
@@ -2915,7 +3118,10 @@ struct WindowsDesktopHost::Impl {
             render(surface, surface.display, surface.card, surface.ordinal, false);
             affected.push_back(&surface);
         }
-        for (auto* surface : affected) commitSurface(*surface);
+        for (auto* surface : affected) {
+            commitSurface(*surface);
+            reflowVerticalFollowers(*surface, true);
+        }
     }
 
     void queueCardItemsRefresh(const domain::CardId& cardId) noexcept {

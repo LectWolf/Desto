@@ -5,6 +5,7 @@
 #include <CommCtrl.h>
 
 #include <thread>
+#include <algorithm>
 #include <vector>
 
 using namespace desto::domain;
@@ -30,6 +31,33 @@ HWND FindOwnedTooltip(HWND owner) {
         return TRUE;
     }, reinterpret_cast<LPARAM>(&search));
     return search.result;
+}
+
+std::vector<HWND> FindHostWindows(const wchar_t* title) {
+    struct Search {
+        const wchar_t* title;
+        std::vector<HWND> windows;
+    } search{title};
+    EnumWindows([](HWND candidate, LPARAM parameter) {
+        auto& value = *reinterpret_cast<Search*>(parameter);
+        wchar_t className[64]{};
+        wchar_t windowTitle[128]{};
+        if (GetClassNameW(candidate, className, 64) > 0
+            && GetWindowTextW(candidate, windowTitle, 128) > 0
+            && _wcsicmp(className, L"DestoDesktopHostSurface") == 0
+            && _wcsicmp(windowTitle, value.title) == 0) {
+            value.windows.push_back(candidate);
+        }
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&search));
+    std::ranges::sort(search.windows, [](HWND left, HWND right) {
+        RECT leftRect{};
+        RECT rightRect{};
+        GetWindowRect(left, &leftRect);
+        GetWindowRect(right, &rightRect);
+        return leftRect.top < rightRect.top;
+    });
+    return search.windows;
 }
 
 void RunTests() {
@@ -403,18 +431,18 @@ void RunTests() {
         DESTO_CHECK(todoWindow != nullptr);
         RECT todoRect{};
         DESTO_CHECK(GetWindowRect(todoWindow, &todoRect));
-        DESTO_CHECK(todoRect.bottom - todoRect.top == 200);
+        DESTO_CHECK(todoRect.bottom - todoRect.top == 220);
 
-        SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(26, 131));
+        SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(26, 149));
         DESTO_CHECK(completedChanged);
 
-        SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(100, 131));
-        SendMessageW(todoWindow, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(100, 173));
-        SendMessageW(todoWindow, WM_LBUTTONUP, 0, MAKELPARAM(100, 173));
+        SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(100, 149));
+        SendMessageW(todoWindow, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(100, 191));
+        SendMessageW(todoWindow, WM_LBUTTONUP, 0, MAKELPARAM(100, 191));
         DESTO_CHECK(reordered == std::vector<std::string>({"todo-second", "todo-first"}));
 
-        SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(100, 131));
-        SendMessageW(todoWindow, WM_LBUTTONUP, 0, MAKELPARAM(100, 131));
+        SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(100, 149));
+        SendMessageW(todoWindow, WM_LBUTTONUP, 0, MAKELPARAM(100, 149));
         const auto editor = FindWindowW(L"Edit", L"Second task");
         DESTO_CHECK(editor != nullptr);
         SetWindowTextW(editor, L"Renamed task");
@@ -425,17 +453,80 @@ void RunTests() {
         todoCards.front().todoItems.push_back({"todo-third", "Third task", false});
         todoHost.updateTodoItems("todo-card", todoCards.front().todoItems);
         DESTO_CHECK(GetWindowRect(todoWindow, &todoRect));
-        DESTO_CHECK(todoRect.bottom - todoRect.top == 242);
+        DESTO_CHECK(todoRect.bottom - todoRect.top == 262);
 
-        SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(259, 24));
+        SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(218, 60));
         DESTO_CHECK(archived);
-        SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(250, 70));
-        SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(40, 70));
+        SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(30, 60));
+        SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(40, 100));
         const auto addEditor = FindWindowW(L"Edit", L"");
         DESTO_CHECK(addEditor != nullptr);
         SetWindowTextW(addEditor, L"Scheduled task");
         SendMessageW(addEditor, WM_KEYDOWN, VK_RETURN, 0);
         DESTO_CHECK(addedDate == AddTodoDays(CurrentSystemTodoDate(), 1));
+    }
+
+    {
+        const auto today = CurrentSystemTodoDate();
+        auto datedCards = todoCards;
+        datedCards.front().todoItems = {
+            {.id = "today-item", .title = "Today", .scheduledDate = today},
+            {.id = "tomorrow-item", .title = "Tomorrow",
+             .scheduledDate = AddTodoDays(today, 1)},
+        };
+        WindowsDesktopHost datedHost(L"Desto Dated Todo Host Test");
+        datedHost.present(todoProjections, displays, datedCards);
+        const auto window = FindWindowW(
+            L"DestoDesktopHostSurface", L"Desto Dated Todo Host Test");
+        DESTO_CHECK(window != nullptr);
+        RECT rect{};
+        DESTO_CHECK(GetWindowRect(window, &rect));
+        DESTO_CHECK(rect.bottom - rect.top == 178);
+        SendMessageW(window, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(30, 60));
+        DESTO_CHECK(GetWindowRect(window, &rect));
+        DESTO_CHECK(rect.bottom - rect.top == 178);
+    }
+
+    {
+        auto longTitleCards = todoCards;
+        longTitleCards.front().todoItems = {{
+            .id = "long-item",
+            .title = "这是一条用于验证待办内容完整换行的长标题这是一条用于验证待办内容完整换行的长标题这是一条用于验证待办内容完整换行的长标题",
+            .scheduledDate = CurrentSystemTodoDate(),
+        }};
+        WindowsDesktopHost longTitleHost(L"Desto Long Todo Host Test");
+        longTitleHost.present(todoProjections, displays, longTitleCards);
+        const auto window = FindWindowW(
+            L"DestoDesktopHostSurface", L"Desto Long Todo Host Test");
+        DESTO_CHECK(window != nullptr);
+        RECT rect{};
+        DESTO_CHECK(GetWindowRect(window, &rect));
+        DESTO_CHECK(rect.bottom - rect.top >= 198);
+    }
+
+    {
+        const std::vector<PlacementProjection> stackedProjections{
+            {.placementId = "stack-top", .cardId = "stack-top-card",
+             .displayId = "display-test", .rect = {80, 48, 320, 220}},
+            {.placementId = "stack-bottom", .cardId = "stack-bottom-card",
+             .displayId = "display-test", .rect = {80, 262, 320, 220}},
+        };
+        const std::vector<CardView> stackedCards{
+            {.id = "stack-top-card", .type = CardType::Todo, .title = L"Top"},
+            {.id = "stack-bottom-card", .type = CardType::Todo, .title = L"Bottom"},
+        };
+        WindowsDesktopHost stackedHost(L"Desto Stacked Host Test");
+        stackedHost.present(stackedProjections, displays, stackedCards);
+        const auto windows = FindHostWindows(L"Desto Stacked Host Test");
+        DESTO_CHECK(windows.size() == 2);
+        RECT topRect{};
+        RECT bottomRect{};
+        DESTO_CHECK(GetWindowRect(windows[0], &topRect));
+        DESTO_CHECK(GetWindowRect(windows[1], &bottomRect));
+        DESTO_CHECK(bottomRect.top - topRect.bottom == 8);
+        SendMessageW(windows[0], WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(296, 24));
+        DESTO_CHECK(GetWindowRect(windows[1], &bottomRect));
+        DESTO_CHECK(bottomRect.top == topRect.top + 48 + 8);
     }
 }
 
