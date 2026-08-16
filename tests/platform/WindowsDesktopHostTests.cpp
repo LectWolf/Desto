@@ -285,20 +285,26 @@ void RunTests() {
 
     SendMessageW(window, WM_MOUSEMOVE, 0, MAKELPARAM(232, 24));
     SendMessageW(window, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(232, 24));
+    DESTO_CHECK(!expansionCallbackCalled);
+    DESTO_CHECK(expanded);
+    SendMessageW(window, WM_LBUTTONUP, 0, MAKELPARAM(232, 24));
     DESTO_CHECK(expansionCallbackCalled);
     DESTO_CHECK(!expanded);
-    SendMessageW(window, WM_LBUTTONUP, 0, MAKELPARAM(232, 24));
     expansionCallbackCalled = false;
-    SendMessageW(window, WM_LBUTTONDBLCLK, MK_LBUTTON, MAKELPARAM(232, 24));
-    DESTO_CHECK(expansionCallbackCalled);
-    DESTO_CHECK(expanded);
     SendMessageW(window, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(232, 24));
+    SendMessageW(window, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(120, 24));
+    SendMessageW(window, WM_LBUTTONUP, 0, MAKELPARAM(120, 24));
+    DESTO_CHECK(!expansionCallbackCalled);
     DESTO_CHECK(!expanded);
     DESTO_CHECK(SendMessageW(
         window,
         WM_NCHITTEST,
         0,
         MAKELPARAM(windowRect.left + 100, windowRect.top + 100)) == HTTRANSPARENT);
+    SendMessageW(window, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(232, 24));
+    SendMessageW(window, WM_LBUTTONUP, 0, MAKELPARAM(232, 24));
+    DESTO_CHECK(expansionCallbackCalled);
+    DESTO_CHECK(expanded);
 
     DESTO_CHECK(SetWindowPos(
         window, nullptr, 2050, 120, 244, 127, SWP_NOACTIVATE | SWP_NOZORDER));
@@ -434,6 +440,8 @@ void RunTests() {
         DESTO_CHECK(todoRect.bottom - todoRect.top == 220);
 
         SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(26, 149));
+        DESTO_CHECK(!completedChanged);
+        SendMessageW(todoWindow, WM_LBUTTONUP, 0, MAKELPARAM(26, 149));
         DESTO_CHECK(completedChanged);
 
         SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(100, 149));
@@ -455,10 +463,33 @@ void RunTests() {
         DESTO_CHECK(GetWindowRect(todoWindow, &todoRect));
         DESTO_CHECK(todoRect.bottom - todoRect.top == 262);
 
+        SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(276, 60));
+        DESTO_CHECK(GetWindowRect(todoWindow, &todoRect));
+        DESTO_CHECK(todoRect.bottom - todoRect.top == 262);
+        SendMessageW(todoWindow, WM_LBUTTONUP, 0, MAKELPARAM(276, 60));
+        DESTO_CHECK(GetWindowRect(todoWindow, &todoRect));
+        DESTO_CHECK(todoRect.bottom - todoRect.top == 220);
+        SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(276, 60));
+        SendMessageW(todoWindow, WM_LBUTTONUP, 0, MAKELPARAM(276, 60));
+        DESTO_CHECK(GetWindowRect(todoWindow, &todoRect));
+        DESTO_CHECK(todoRect.bottom - todoRect.top == 262);
+
         SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(218, 60));
+        DESTO_CHECK(!archived);
+        SendMessageW(todoWindow, WM_LBUTTONUP, 0, MAKELPARAM(218, 60));
         DESTO_CHECK(archived);
         SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(30, 60));
+        SendMessageW(todoWindow, WM_LBUTTONUP, 0, MAKELPARAM(30, 60));
         SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(40, 100));
+        SendMessageW(todoWindow, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(40, 132));
+        SendMessageW(todoWindow, WM_LBUTTONUP, 0, MAKELPARAM(40, 132));
+        HWND ownedEditor = nullptr;
+        while ((ownedEditor = FindWindowExW(nullptr, ownedEditor, L"Edit", nullptr)) != nullptr
+               && GetWindow(ownedEditor, GW_OWNER) != todoWindow) {
+        }
+        DESTO_CHECK(ownedEditor == nullptr);
+        SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(40, 100));
+        SendMessageW(todoWindow, WM_LBUTTONUP, 0, MAKELPARAM(40, 100));
         const auto addEditor = FindWindowW(L"Edit", L"");
         DESTO_CHECK(addEditor != nullptr);
         SetWindowTextW(addEditor, L"Scheduled task");
@@ -483,6 +514,7 @@ void RunTests() {
         DESTO_CHECK(GetWindowRect(window, &rect));
         DESTO_CHECK(rect.bottom - rect.top == 178);
         SendMessageW(window, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(30, 60));
+        SendMessageW(window, WM_LBUTTONUP, 0, MAKELPARAM(30, 60));
         DESTO_CHECK(GetWindowRect(window, &rect));
         DESTO_CHECK(rect.bottom - rect.top == 178);
     }
@@ -525,6 +557,7 @@ void RunTests() {
         DESTO_CHECK(GetWindowRect(windows[1], &bottomRect));
         DESTO_CHECK(bottomRect.top - topRect.bottom == 8);
         SendMessageW(windows[0], WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(296, 24));
+        SendMessageW(windows[0], WM_LBUTTONUP, 0, MAKELPARAM(296, 24));
         DESTO_CHECK(GetWindowRect(windows[1], &bottomRect));
         DESTO_CHECK(bottomRect.top == topRect.top + 48 + 8);
     }

@@ -14,6 +14,7 @@
 #include "WindowsDirectoryChangeSource.h"
 #include "WindowsDisplayTopology.h"
 #include "WindowsShellItemCatalog.h"
+#include "WindowsSettingsHost.h"
 #include "WindowsSingleInstanceGate.h"
 
 #include <Windows.h>
@@ -412,6 +413,80 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
             cardViews.push_back(desto::presentation::MakeCardView(*card));
         }
         WindowsDesktopHost host;
+        WindowsSettingsHost settingsHost;
+        settingsHost.setAppearanceChangedCallback(
+            [&](const CardId& cardId, const CardAppearancePreferences& preferences) {
+                const auto* card = runtime.findCard(cardId);
+                if (card == nullptr) return false;
+                const auto previous = card->appearance();
+                const auto result = runtime.execute(SetCardAppearancePreferences{cardId, preferences});
+                if (result.status == CommandStatus::Rejected) return false;
+                try {
+                    host.updateCardAppearancePreferences(cardId, preferences);
+                    SaveRuntimeConfiguration(configStore, storageRoot, runtime);
+                    return true;
+                } catch (...) {
+                    (void)runtime.execute(SetCardAppearancePreferences{cardId, previous});
+                    return false;
+                }
+            });
+        settingsHost.setContentChangedCallback(
+            [&](const CardId& cardId, const CardContentPreferences& preferences) {
+                const auto* card = runtime.findCard(cardId);
+                if (card == nullptr) return false;
+                const auto previous = card->content();
+                const auto result = runtime.execute(SetCardContentPreferences{cardId, preferences});
+                if (result.status == CommandStatus::Rejected) return false;
+                try {
+                    host.updateCardContentPreferences(cardId, preferences);
+                    SaveRuntimeConfiguration(configStore, storageRoot, runtime);
+                    return true;
+                } catch (...) {
+                    (void)runtime.execute(SetCardContentPreferences{cardId, previous});
+                    return false;
+                }
+            });
+        settingsHost.setChromeChangedCallback(
+            [&](const CardId& cardId, const CardChromePreferences& preferences) {
+                const auto* card = runtime.findCard(cardId);
+                if (card == nullptr) return false;
+                const auto previous = card->chrome();
+                const auto result = runtime.execute(SetCardChromePreferences{cardId, preferences});
+                if (result.status == CommandStatus::Rejected) return false;
+                try {
+                    host.updateCardChromePreferences(cardId, preferences);
+                    SaveRuntimeConfiguration(configStore, storageRoot, runtime);
+                    return true;
+                } catch (...) {
+                    (void)runtime.execute(SetCardChromePreferences{cardId, previous});
+                    return false;
+                }
+            });
+        settingsHost.setTodoPreferencesChangedCallback(
+            [&](const CardId& cardId, const TodoCardPreferences& preferences) {
+                const auto* card = runtime.findCard(cardId);
+                if (card == nullptr || card->type() != CardType::Todo) return false;
+                const auto previous = static_cast<const TodoCard*>(card)->preferences();
+                const auto result = runtime.execute(SetTodoCardPreferences{cardId, preferences});
+                if (result.status == CommandStatus::Rejected) return false;
+                try {
+                    host.updateTodoPreferences(cardId, preferences);
+                    SaveRuntimeConfiguration(configStore, storageRoot, runtime);
+                    return true;
+                } catch (...) {
+                    (void)runtime.execute(SetTodoCardPreferences{cardId, previous});
+                    return false;
+                }
+            });
+        settingsHost.setRestoreArchivedCallback([&](const CardId& cardId) {
+            const auto result = runtime.execute(RestoreArchivedTodoItems{cardId});
+            if (result.status == CommandStatus::Rejected) return false;
+            const auto* card = runtime.findCard(cardId);
+            if (card == nullptr || card->type() != CardType::Todo) return false;
+            host.updateTodoItems(cardId, static_cast<const TodoCard*>(card)->items());
+            SaveRuntimeConfiguration(configStore, storageRoot, runtime);
+            return true;
+        });
         host.setPlacementChangedCallback(
             [&](const PlacementId& placementId,
                 const CardId& cardId,
@@ -934,6 +1009,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                     ResolveShellIconSourceSize(itemSize));
             });
         host.present(runtime.projections(), displays, cardViews);
+        settingsHost.present(cardViews);
+        if (std::wstring_view(commandLine).find(L"--settings") != std::wstring_view::npos) {
+            settingsHost.show();
+        }
         std::vector<DirectoryMappingWatch> mappingWatches;
         for (const auto* card : runtime.cards()) {
             if (card->type() != CardType::Mapping) {

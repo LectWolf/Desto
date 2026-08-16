@@ -9,6 +9,8 @@ add_library(desto_platform_windows STATIC
     WindowsDirectoryChangeSource.h
     WindowsDesktopHost.cpp
     WindowsDesktopHost.h
+    WindowsSettingsHost.cpp
+    WindowsSettingsHost.h
     WindowsFileDragDrop.cpp
     WindowsFileDragDrop.h
     WindowsDisplayTopology.cpp

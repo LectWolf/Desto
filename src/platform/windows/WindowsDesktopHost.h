@@ -107,6 +107,15 @@ public:
     void updateCardContentPreferences(
         const domain::CardId& cardId,
         domain::CardContentPreferences preferences);
+    void updateCardChromePreferences(
+        const domain::CardId& cardId,
+        domain::CardChromePreferences preferences);
+    void updateCardAppearancePreferences(
+        const domain::CardId& cardId,
+        domain::CardAppearancePreferences preferences);
+    void updateTodoPreferences(
+        const domain::CardId& cardId,
+        domain::TodoCardPreferences preferences);
 
 private:
     struct Impl;

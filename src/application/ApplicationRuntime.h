@@ -81,6 +81,16 @@ struct SetCardExpanded {
     bool expanded;
 };
 
+struct SetCardChromePreferences {
+    domain::CardId cardId;
+    domain::CardChromePreferences preferences;
+};
+
+struct SetCardAppearancePreferences {
+    domain::CardId cardId;
+    domain::CardAppearancePreferences preferences;
+};
+
 struct SetCardContentPreferences {
     domain::CardId cardId;
     domain::CardContentPreferences preferences;
@@ -151,6 +161,8 @@ using ApplicationCommand = std::variant<
     SetTodoCardPreferences,
     SetCardVisibility,
     SetCardExpanded,
+    SetCardChromePreferences,
+    SetCardAppearancePreferences,
     SetCardContentPreferences,
     SetApplicationCardLayout,
     SetMappingFolderSource,
@@ -256,6 +268,8 @@ private:
     [[nodiscard]] CommandResult handle(const SetTodoCardPreferences& command);
     [[nodiscard]] CommandResult handle(const SetCardVisibility& command);
     [[nodiscard]] CommandResult handle(const SetCardExpanded& command);
+    [[nodiscard]] CommandResult handle(const SetCardChromePreferences& command);
+    [[nodiscard]] CommandResult handle(const SetCardAppearancePreferences& command);
     [[nodiscard]] CommandResult handle(const SetCardContentPreferences& command);
     [[nodiscard]] CommandResult handle(const SetApplicationCardLayout& command);
     [[nodiscard]] CommandResult handle(const SetMappingFolderSource& command);

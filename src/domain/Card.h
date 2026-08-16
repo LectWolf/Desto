@@ -69,12 +69,16 @@ struct CardChromePreferences {
     bool showCloseControl = false;
     bool showPinControl = false;
     bool showTitle = true;
+
+    bool operator==(const CardChromePreferences&) const = default;
 };
 
 struct CardAppearancePreferences {
     std::string preset = "default";
     double opacity = 1.0;
     double cornerRadius = 16.0;
+
+    bool operator==(const CardAppearancePreferences&) const = default;
 };
 
 struct CardContentPreferences {

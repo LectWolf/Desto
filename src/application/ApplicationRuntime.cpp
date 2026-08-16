@@ -493,6 +493,32 @@ CommandResult ApplicationRuntime::handle(const SetCardExpanded& command) {
     });
 }
 
+CommandResult ApplicationRuntime::handle(const SetCardChromePreferences& command) {
+    auto card = cards_.find(command.cardId);
+    if (card == cards_.end()) return rejected(CommandError::CardNotFound);
+    if (card->second->chrome() == command.preferences) return noChange();
+    card->second->setChrome(command.preferences);
+    return applied({
+        .changedCards = {command.cardId},
+        .persistence = PersistenceUrgency::Deferred,
+    });
+}
+
+CommandResult ApplicationRuntime::handle(const SetCardAppearancePreferences& command) {
+    auto card = cards_.find(command.cardId);
+    if (card == cards_.end()) return rejected(CommandError::CardNotFound);
+    if (card->second->appearance() == command.preferences) return noChange();
+    try {
+        card->second->setAppearance(command.preferences);
+    } catch (const std::invalid_argument& error) {
+        return rejected(CommandError::InvalidCommand, error.what());
+    }
+    return applied({
+        .changedCards = {command.cardId},
+        .persistence = PersistenceUrgency::Deferred,
+    });
+}
+
 CommandResult ApplicationRuntime::handle(const SetCardContentPreferences& command) {
     auto card = cards_.find(command.cardId);
     if (card == cards_.end()) {

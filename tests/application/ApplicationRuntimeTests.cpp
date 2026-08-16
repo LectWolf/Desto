@@ -28,6 +28,20 @@ void RunTests() {
     DESTO_CHECK(runtime.cards()[1]->id() == "mapping-1");
     DESTO_CHECK(runtime.cards()[2]->id() == "todo-1");
 
+    DESTO_CHECK(runtime.execute(SetCardChromePreferences{
+        "application-1",
+        {.showCollapseControl = false, .showCloseControl = false,
+         .showPinControl = false, .showTitle = true},
+    }).status == CommandStatus::Applied);
+    DESTO_CHECK(!runtime.findCard("application-1")->chrome().showCollapseControl);
+    DESTO_CHECK(runtime.execute(SetCardAppearancePreferences{
+        "application-1", {.preset = "jewel", .opacity = 0.92, .cornerRadius = 20.0},
+    }).status == CommandStatus::Applied);
+    DESTO_CHECK(runtime.findCard("application-1")->appearance().preset == "jewel");
+    DESTO_CHECK(runtime.execute(SetCardAppearancePreferences{
+        "application-1", {.preset = "jewel", .opacity = 2.0, .cornerRadius = 20.0},
+    }).status == CommandStatus::Rejected);
+
     auto todoResult = runtime.execute(AddTodoItem{"todo-1", "todo-a", "First task"});
     DESTO_CHECK(todoResult.status == CommandStatus::Applied);
     DESTO_CHECK(todoResult.changes.changedCards == std::vector<CardId>{"todo-1"});
