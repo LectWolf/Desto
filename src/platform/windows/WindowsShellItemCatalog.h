@@ -8,14 +8,24 @@
 
 namespace desto::platform::windows {
 
+enum class ShellIconSourceSize : int {
+    Small = 16,
+    Medium = 32,
+};
+
+[[nodiscard]] ShellIconSourceSize ResolveShellIconSourceSize(
+    domain::CardItemSize itemSize) noexcept;
+
 class WindowsShellItemCatalog {
 public:
     [[nodiscard]] presentation::CardItemView inspect(
-        const std::filesystem::path& sourcePath) const;
+        const std::filesystem::path& sourcePath,
+        ShellIconSourceSize iconSize = ShellIconSourceSize::Medium) const;
 
     [[nodiscard]] std::vector<presentation::CardItemView> enumerate(
         const std::filesystem::path& directory,
-        std::span<const std::filesystem::path> preferredOrder = {}) const;
+        std::span<const std::filesystem::path> preferredOrder = {},
+        ShellIconSourceSize iconSize = ShellIconSourceSize::Medium) const;
 
     [[nodiscard]] presentation::CardItemView retarget(
         presentation::CardItemView preparedItem,

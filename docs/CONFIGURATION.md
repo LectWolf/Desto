@@ -43,13 +43,13 @@ WorkspaceLayout
 - 高频交互先更新内存状态，再合并和延迟持久化。
 - 缓存可以删除重建，配置和布局不能依赖缓存才能恢复。
 
-当前原型使用 `JsonConfigStore` 保存 schema 5 JSON。已知字段包括 `schemaVersion`、`storage.root`、`cards` 和 `workspace.placements`；Card 的存储目录仍记录为相对于 `storage.root` 的路径。v1 -> v2 迁移会显式补齐 `cards` 字段，v2 -> v3 增加可选的 Card 内容偏好和应用项目顺序，v3 -> v4 将线性顺序转换为独立的自定义槽位，v4 -> v5 增加 Placement 横纵锚点和参考工作区；缺失字段使用中等图标、隐藏名称、自适应尺寸和自由位置。写入时读取并保留未知字段。Windows 使用临时文件、`FlushFileBuffers` 和原子替换；发布前保留 `settings.json.bak`，发布失败不会覆盖最后有效配置。
+当前原型使用 `JsonConfigStore` 保存 schema 5 JSON。已知字段包括 `schemaVersion`、`storage.root`、`cards` 和 `workspace.placements`；Card 的存储目录仍记录为相对于 `storage.root` 的路径。v1 -> v2 迁移会显式补齐 `cards` 字段，v2 -> v3 增加可选的 Card 内容偏好和应用项目顺序，v3 -> v4 将线性顺序转换为独立的自定义槽位，v4 -> v5 增加 Placement 横纵锚点和参考工作区；缺失字段使用大图标、隐藏名称、自适应尺寸和自由位置。写入时读取并保留未知字段。Windows 使用临时文件、`FlushFileBuffers` 和原子替换；发布前保留 `settings.json.bak`，发布失败不会覆盖最后有效配置。
 
 `cards` 保存 Card 身份、类型、可见/展开状态、Chrome 入口偏好、外观偏好和类型专属内容；`workspace.placements` 只保存原始布局。当前显示器拓扑与 Projection 不写入配置，启动后由平台适配器重新提供。
 
 Card 外观当前保存 `preset`、`opacity` 和 DIP 单位的 `cornerRadius`。预设至少包含纯白、透明黑和珠宝炫彩；`jewel` 是珠宝炫彩的稳定名称，旧的 `pearl-pink` 作为兼容别名使用同一渲染。设置界面必须用可见色块展示预设，文字只作为辅助名称或无障碍标签，不能用文本列表代替色块选择。圆角半径按 Card 实例保存，并限制在 0-128 DIP。
 
-Card 内容偏好按实例保存 `itemSize`、`showItemNames`、`sizeMode`、`fixedColumns` 和 `fixedRows`。图标规格使用 `small`、`medium`、`large`、`extraLarge` 四个稳定值，并同时决定图标像素、槽位和建议列数；隐藏名称时槽位是正方形，显示名称时在正方形图标区下增加 24 DIP 文字区。`adaptive` 使用建议列数并由内容行数决定 Card 高度，`fixed` 使用明确的列数、行数和容量边界。两种模式都由配置决定尺寸，不提供鼠标自由缩放。
+Card 内容偏好按实例保存 `itemSize`、`showItemNames`、`sizeMode`、`fixedColumns` 和 `fixedRows`。图标规格使用 `small`、`medium`、`large`、`extraLarge` 四个稳定值，默认 `large`；显示尺寸分别为 20、26、34、44 DIP，正方形槽位分别为 37、44、55、74 DIP，建议列数分别为 6、5、4、3。隐藏名称时槽位是正方形，显示名称时在正方形图标区下增加 24 DIP 文字区。`adaptive` 使用建议列数并由内容行数决定 Card 高度，`fixed` 使用明确的列数、行数和容量边界。两种模式都由配置决定尺寸，不提供鼠标自由缩放。
 
 Application Card 保存 `sortMode` 和 `itemPlacements`。`custom` 使用相对文件名及从零开始的 `column`、`row` 稀疏槽位；名称、大小和项目类型使用升序，修改日期使用降序，名称作为稳定兜底。自动排序只按当前列数生成临时投影，绝不覆盖自定义槽位，因此切回 `custom` 会恢复原位置。
 

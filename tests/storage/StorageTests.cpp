@@ -139,6 +139,7 @@ void RunTests() {
         DESTO_CHECK(migratedThree.cards.front().applicationItemPlacements.size() == 3);
         DESTO_CHECK(migratedThree.cards.front().applicationItemPlacements[2].column == 2);
         DESTO_CHECK(migratedThree.cards.front().applicationItemPlacements[2].row == 0);
+        DESTO_CHECK(migratedThree.cards.front().content.itemSize == CardItemSize::Large);
         DESTO_CHECK(!migratedThree.cards.front().content.showItemNames);
         loadedConfig.cards = {
             {

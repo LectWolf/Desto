@@ -181,7 +181,9 @@ presentation::CardItemIcon BitmapPixels(HBITMAP bitmap) {
     };
 }
 
-presentation::CardItemIcon LoadShellImage(const std::wstring& parsingName) {
+presentation::CardItemIcon LoadShellImage(
+    const std::wstring& parsingName,
+    ShellIconSourceSize sourceSize) {
     ComPtr<IShellItem> shellItem;
     if (FAILED(SHCreateItemFromParsingName(
             parsingName.c_str(),
@@ -194,9 +196,9 @@ presentation::CardItemIcon LoadShellImage(const std::wstring& parsingName) {
         return {};
     }
     HBITMAP bitmap = nullptr;
-    const SIZE size{64, 64};
-    const auto flags = static_cast<SIIGBF>(
-        SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK | SIIGBF_RESIZETOFIT);
+    const auto pixels = static_cast<LONG>(sourceSize);
+    const SIZE size{pixels, pixels};
+    const auto flags = static_cast<SIIGBF>(SIIGBF_ICONONLY | SIIGBF_RESIZETOFIT);
     if (FAILED(imageFactory->GetImage(size, flags, &bitmap)) || bitmap == nullptr) {
         return {};
     }
@@ -207,8 +209,21 @@ presentation::CardItemIcon LoadShellImage(const std::wstring& parsingName) {
 
 } // namespace
 
+ShellIconSourceSize ResolveShellIconSourceSize(domain::CardItemSize itemSize) noexcept {
+    switch (itemSize) {
+    case domain::CardItemSize::Small:
+    case domain::CardItemSize::Medium:
+        return ShellIconSourceSize::Small;
+    case domain::CardItemSize::Large:
+    case domain::CardItemSize::ExtraLarge:
+        return ShellIconSourceSize::Medium;
+    }
+    return ShellIconSourceSize::Medium;
+}
+
 presentation::CardItemView WindowsShellItemCatalog::inspect(
-    const std::filesystem::path& sourcePath) const {
+    const std::filesystem::path& sourcePath,
+    ShellIconSourceSize iconSize) const {
     const auto normalized = sourcePath.lexically_normal();
     presentation::CardItemView result{
         .id = normalized.wstring(),
@@ -253,13 +268,14 @@ presentation::CardItemView WindowsShellItemCatalog::inspect(
             result.state = presentation::CardItemState::UnresolvedShortcut;
         }
         if (!result.appUserModelId.empty()) {
-            result.icon = LoadShellImage(L"shell:AppsFolder\\" + result.appUserModelId);
+            result.icon = LoadShellImage(
+                L"shell:AppsFolder\\" + result.appUserModelId, iconSize);
         }
     }
     const auto canUseSourceImage = !shortcutSource
         || (result.appUserModelId.empty() && !result.resolvedTargetPath.empty());
     if (result.icon.empty() && canUseSourceImage) {
-        result.icon = LoadShellImage(normalized.wstring());
+        result.icon = LoadShellImage(normalized.wstring(), iconSize);
     }
     if (result.state == presentation::CardItemState::Ready && result.icon.empty()) {
         result.state = presentation::CardItemState::IconUnavailable;
@@ -269,7 +285,8 @@ presentation::CardItemView WindowsShellItemCatalog::inspect(
 
 std::vector<presentation::CardItemView> WindowsShellItemCatalog::enumerate(
     const std::filesystem::path& directory,
-    std::span<const std::filesystem::path> preferredOrder) const {
+    std::span<const std::filesystem::path> preferredOrder,
+    ShellIconSourceSize iconSize) const {
     std::vector<presentation::CardItemView> result;
     std::error_code error;
     if (!std::filesystem::exists(directory, error)) {
@@ -278,7 +295,7 @@ std::vector<presentation::CardItemView> WindowsShellItemCatalog::enumerate(
     for (std::filesystem::directory_iterator iterator(directory, error), end;
          !error && iterator != end;
          iterator.increment(error)) {
-        result.push_back(inspect(iterator->path()));
+        result.push_back(inspect(iterator->path(), iconSize));
     }
     const auto rank = [&](const presentation::CardItemView& item) {
         const auto name = item.sourcePath.filename().wstring();

@@ -87,6 +87,8 @@ Application Card 的目录所有权、Shell 解析和失败语义记录在 [APPL
 
 拖动由 Win32 标题区命中测试发起，窗口边缘始终返回内容命中，不提供鼠标自由缩放。Card 尺寸由实例内容偏好计算：自适应模式使用图标规格对应的建议列数和实际内容行数，固定模式使用明确格数；尺寸变化先在离屏位图完成，再以一次 Layered Window 提交更新。`presentation::ResolvePlacementInteraction` 在不依赖 HWND 的情况下完成屏幕边缘、中心和 Card 等距吸附；Ctrl 只绕过吸附，8 DIP 安全间隔和工作区夹取仍保留。操作结束后，宿主把最终矩形、横纵锚点和参考工作区提交给 `ApplicationRuntime::SetPlacement`。
 
+`WindowsShellItemCatalog` 根据 Card 的四档内容偏好选择两级 Shell 图标源：小/中使用 16 px，大/特大使用 32 px。CardItem 只携带当前所需的预乘 Alpha 位图；跨 Card 移动时，若源 Card 与目标 Card 的 Shell 源档位不同，移动前重新解析目标档位，避免长期放大低分辨率图标，也不为尚未选择的档位增加常驻内存。
+
 Windows 平台当前提供 `DisplayTopologyProvider` 的两个 Adapter：生产环境的 `WindowsDisplayTopology` 和测试使用的 `MemoryDisplayTopologyProvider`。`DisplayTopologyMonitor` 负责快照差异和防抖，`WindowsDisplayChangeSource` 负责系统消息输入。接口只暴露 `DisplaySnapshot`，不暴露 Win32 句柄、RECT 或 DPI API。
 
 事项 14 的原生原型位于 `prototypes/`，仅作为 Presentation/Platform 宿主验证，不属于正式产品 UI。它消费 `ApplicationRuntime::projections()`，为每个 `PlacementProjection` 创建一个 `WS_EX_LAYERED`、`WS_EX_NOACTIVATE`、点击穿透的 Win32 工具窗口；所有窗口通过 `BeginDeferWindowPos`/`EndDeferWindowPos` 批量定位和显示。进程使用 Per-Monitor-V2 DPI 感知，显示器工作区原点和 Placement 坐标在 DIP 与像素之间集中转换。原型不持有 Card 业务状态，也不把 HWND 泄漏到 Domain/Application 接口。

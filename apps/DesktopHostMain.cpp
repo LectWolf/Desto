@@ -141,6 +141,10 @@ std::optional<std::uint32_t> CardMaximumRows(const ApplicationCard& card) {
         : std::nullopt;
 }
 
+ShellIconSourceSize CardShellIconSource(const ApplicationCard& card) noexcept {
+    return ResolveShellIconSourceSize(card.content().itemSize);
+}
+
 class FileMoveRollbackGuard final {
 public:
     FileMoveRollbackGuard(
@@ -274,7 +278,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                 const auto directory = storageRoot.resolveCardPath(
                     applicationCard->relativeStoragePath());
                 std::filesystem::create_directories(directory);
-                auto items = shellItems.enumerate(directory, PlacementOrder(*applicationCard));
+                auto items = shellItems.enumerate(
+                    directory,
+                    PlacementOrder(*applicationCard),
+                    CardShellIconSource(*applicationCard));
                 const auto reconciled = ReconcileApplicationItemPlacements(
                     applicationCard->itemPlacements(),
                     ItemFileNames(items),
@@ -348,7 +355,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                     if (beforeEntry == cardItemsById.end()) {
                         beforeEntry = cardItemsById.emplace(
                             cardId,
-                            shellItems.enumerate(directory, PlacementOrder(*card))).first;
+                            shellItems.enumerate(
+                                directory,
+                                PlacementOrder(*card),
+                                CardShellIconSource(*card))).first;
                     }
                     const auto& before = beforeEntry->second;
                     const auto columns = CardColumns(runtime, *card);
@@ -388,10 +398,15 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                         desto::presentation::CardItemView> preparedItems;
                     for (const auto& path : paths) {
                         if (const auto* cached = FindCachedItem(cardItemsById, path);
-                            cached != nullptr) {
+                            cached != nullptr
+                            && (cached->icon.empty()
+                                || cached->icon.width
+                                    == static_cast<int>(CardShellIconSource(*card)))) {
                             preparedItems.emplace(PathKey(path), *cached);
                         } else {
-                            preparedItems.emplace(PathKey(path), shellItems.inspect(path));
+                            preparedItems.emplace(
+                                PathKey(path),
+                                shellItems.inspect(path, CardShellIconSource(*card)));
                         }
                     }
                     std::unordered_map<
@@ -405,7 +420,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                             ? cached->second
                             : shellItems.enumerate(
                                 storageRoot.resolveCardPath(affected->relativeStoragePath()),
-                                PlacementOrder(*affected));
+                                PlacementOrder(*affected),
+                                CardShellIconSource(*affected));
                     }
                     const auto plan = importService.plan(*card, paths);
                     const auto result = importService.execute(plan);
@@ -540,7 +556,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                                     update.cardId,
                                     shellItems.enumerate(
                                         storageRoot.resolveCardPath(restored->relativeStoragePath()),
-                                        PlacementOrder(*restored)),
+                                        PlacementOrder(*restored),
+                                        CardShellIconSource(*restored)),
                                     restored->sortMode(),
                                     restored->itemPlacements(),
                                 });
@@ -576,7 +593,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                 return;
             }
             const auto directory = storageRoot.resolveCardPath(card->relativeStoragePath());
-            auto items = shellItems.enumerate(directory, PlacementOrder(*card));
+            auto items = shellItems.enumerate(
+                directory, PlacementOrder(*card), CardShellIconSource(*card));
             auto placements = ReconcileApplicationItemPlacements(
                 card->itemPlacements(),
                 ItemFileNames(items),

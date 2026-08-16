@@ -342,7 +342,7 @@ ApplicationConfig ParseDocument(const Json& document) {
                     throw std::runtime_error("Configuration card content preferences are invalid.");
                 }
                 card.content.itemSize = ParseCardItemSize(
-                    content.value("itemSize", std::string{"medium"}));
+                    content.value("itemSize", std::string{"large"}));
                 card.content.showItemNames = content.value("showItemNames", false);
                 card.content.sizeMode = ParseCardSizeMode(
                     content.value("sizeMode", std::string{"adaptive"}));

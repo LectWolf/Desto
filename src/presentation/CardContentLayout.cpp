@@ -11,23 +11,23 @@ CardContentLayoutSettings ResolveCardContentLayoutSettings(
     CardContentLayoutSettings result;
     switch (preferences.itemSize) {
     case domain::CardItemSize::Small:
-        result.itemWidth = 52.0;
-        result.iconSize = 28.0;
-        result.preferredColumns = 5;
+        result.itemWidth = 37.0;
+        result.iconSize = 20.0;
+        result.preferredColumns = 6;
         break;
     case domain::CardItemSize::Medium:
-        result.itemWidth = 64.0;
-        result.iconSize = 40.0;
-        result.preferredColumns = 4;
+        result.itemWidth = 44.0;
+        result.iconSize = 26.0;
+        result.preferredColumns = 5;
         break;
     case domain::CardItemSize::Large:
-        result.itemWidth = 76.0;
-        result.iconSize = 52.0;
+        result.itemWidth = 55.0;
+        result.iconSize = 34.0;
         result.preferredColumns = 4;
         break;
     case domain::CardItemSize::ExtraLarge:
-        result.itemWidth = 96.0;
-        result.iconSize = 68.0;
+        result.itemWidth = 74.0;
+        result.iconSize = 44.0;
         result.preferredColumns = 3;
         break;
     }

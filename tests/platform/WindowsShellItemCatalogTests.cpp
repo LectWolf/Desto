@@ -12,6 +12,7 @@
 #include <fstream>
 
 using Microsoft::WRL::ComPtr;
+using namespace desto::domain;
 using namespace desto::platform::windows;
 using namespace desto::presentation;
 
@@ -57,10 +58,22 @@ void RunTests() {
     CreateShortcut(root / "Alpha.lnk", target, L"Desto.Test.Application!App");
 
     WindowsShellItemCatalog catalog;
+    DESTO_CHECK(ResolveShellIconSourceSize(CardItemSize::Small)
+                == ShellIconSourceSize::Small);
+    DESTO_CHECK(ResolveShellIconSourceSize(CardItemSize::Medium)
+                == ShellIconSourceSize::Small);
+    DESTO_CHECK(ResolveShellIconSourceSize(CardItemSize::Large)
+                == ShellIconSourceSize::Medium);
+    DESTO_CHECK(ResolveShellIconSourceSize(CardItemSize::ExtraLarge)
+                == ShellIconSourceSize::Medium);
     const auto textFile = catalog.inspect(root / "zeta.txt");
     DESTO_CHECK(textFile.fileSize == 7);
     DESTO_CHECK(!textFile.itemType.empty());
     DESTO_CHECK(textFile.modifiedTime != 0);
+    const auto smallTextFile = catalog.inspect(
+        root / "zeta.txt", ShellIconSourceSize::Small);
+    DESTO_CHECK(smallTextFile.icon.empty() || smallTextFile.icon.width == 16);
+    DESTO_CHECK(textFile.icon.empty() || textFile.icon.width == 32);
     const auto retargeted = catalog.retarget(textFile, root / "renamed.txt");
     DESTO_CHECK(retargeted.sourcePath == root / "renamed.txt");
     DESTO_CHECK(retargeted.displayName == L"renamed.txt");

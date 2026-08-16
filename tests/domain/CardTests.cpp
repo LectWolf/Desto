@@ -9,6 +9,7 @@ namespace {
 
 void RunTests() {
     DESTO_CHECK(!CardContentPreferences{}.showItemNames);
+    DESTO_CHECK(CardContentPreferences{}.itemSize == CardItemSize::Large);
     ApplicationCard application("application-1", "cards/application-1");
     MappingCard mapping("mapping-1");
     TodoCard todos("todos-1");

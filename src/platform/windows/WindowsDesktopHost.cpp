@@ -39,6 +39,7 @@ struct Surface {
     int width = 0;
     int height = 0;
     int interactiveHeight = 0;
+    bool collapseHovered = false;
     bool collapsePressed = false;
     HWND tooltip = nullptr;
     std::optional<std::size_t> hoveredItem;
@@ -199,7 +200,7 @@ struct WindowsDesktopHost::Impl {
                         wParam)) {
                     return 0;
                 }
-                instance->updateItemHover(
+                instance->updatePointerHover(
                     window,
                     GET_X_LPARAM(lParam),
                     GET_Y_LPARAM(lParam));
@@ -207,7 +208,7 @@ struct WindowsDesktopHost::Impl {
             break;
         case WM_MOUSELEAVE:
             if (instance != nullptr) {
-                instance->clearItemHover(window);
+                instance->clearPointerHover(window);
                 return 0;
             }
             break;
@@ -624,6 +625,7 @@ struct WindowsDesktopHost::Impl {
         if (surface == nullptr || !isCollapseControlHit(*surface, x, y)) {
             return false;
         }
+        surface->collapseHovered = true;
         surface->collapsePressed = true;
         SetCapture(window);
         try {
@@ -641,6 +643,7 @@ struct WindowsDesktopHost::Impl {
             return false;
         }
         const auto commit = isCollapseControlHit(*surface, x, y);
+        surface->collapseHovered = commit;
         surface->collapsePressed = false;
         if (GetCapture() == window) {
             ReleaseCapture();
@@ -729,7 +732,7 @@ struct WindowsDesktopHost::Impl {
         const auto cardId = surface->card.id;
         surface->pressedItem.reset();
         surface->itemDragActive = true;
-        clearItemHover(window);
+        clearPointerHover(window);
         if (GetCapture() == window) {
             ReleaseCapture();
         }
@@ -771,16 +774,23 @@ struct WindowsDesktopHost::Impl {
         return true;
     }
 
-    void clearItemHover(HWND window, bool repaint = true) noexcept {
+    void clearPointerHover(HWND window, bool repaint = true) noexcept {
         auto* surface = findSurface(window);
-        if (surface == nullptr || surface->tooltip == nullptr) {
+        if (surface == nullptr) {
             return;
         }
         KillTimer(window, ItemTooltipTimerId);
-        TOOLINFOW tool{.cbSize = sizeof(TOOLINFOW), .hwnd = surface->window, .uId = 1};
-        SendMessageW(surface->tooltip, TTM_TRACKACTIVATE, FALSE, reinterpret_cast<LPARAM>(&tool));
-        const auto changed = surface->hoveredItem.has_value();
+        if (surface->tooltip != nullptr) {
+            TOOLINFOW tool{.cbSize = sizeof(TOOLINFOW), .hwnd = surface->window, .uId = 1};
+            SendMessageW(
+                surface->tooltip,
+                TTM_TRACKACTIVATE,
+                FALSE,
+                reinterpret_cast<LPARAM>(&tool));
+        }
+        const auto changed = surface->hoveredItem.has_value() || surface->collapseHovered;
         surface->hoveredItem.reset();
+        surface->collapseHovered = false;
         if (changed && repaint) {
             try {
                 render(*surface, surface->display, surface->card, surface->ordinal);
@@ -812,7 +822,7 @@ struct WindowsDesktopHost::Impl {
         SendMessageW(surface->tooltip, TTM_TRACKACTIVATE, TRUE, reinterpret_cast<LPARAM>(&tool));
     }
 
-    void updateItemHover(HWND window, int x, int y) noexcept {
+    void updatePointerHover(HWND window, int x, int y) noexcept {
         auto* surface = findSurface(window);
         if (surface == nullptr) {
             return;
@@ -823,18 +833,20 @@ struct WindowsDesktopHost::Impl {
             .hwndTrack = window,
         };
         TrackMouseEvent(&tracking);
-        const auto index = itemAt(*surface, x, y);
-        if (index == surface->hoveredItem) {
+        const auto collapseHovered = isCollapseControlHit(*surface, x, y);
+        const auto index = collapseHovered
+            ? std::optional<std::size_t>{}
+            : itemAt(*surface, x, y);
+        if (index == surface->hoveredItem
+            && collapseHovered == surface->collapseHovered) {
             return;
         }
-        const auto hadHover = surface->hoveredItem.has_value();
-        clearItemHover(window, false);
+        clearPointerHover(window, false);
+        surface->collapseHovered = collapseHovered;
         if (!index.has_value() || surface->tooltip == nullptr) {
-            if (hadHover) {
-                try {
-                    render(*surface, surface->display, surface->card, surface->ordinal);
-                } catch (...) {
-                }
+            try {
+                render(*surface, surface->display, surface->card, surface->ordinal);
+            } catch (...) {
             }
             return;
         }
@@ -1438,7 +1450,7 @@ struct WindowsDesktopHost::Impl {
             const auto centerX = (control.left + control.right) / 2.0;
             const auto centerY = (control.top + control.bottom) / 2.0;
             const auto scale = display.effectiveDpi / 96.0;
-            if (surface.collapsePressed) {
+            if (surface.collapseHovered || surface.collapsePressed) {
                 const auto pressRadius = 14.0 * scale;
                 for (int y = control.top; y < control.bottom; ++y) {
                     for (int x = control.left; x < control.right; ++x) {
@@ -1448,8 +1460,12 @@ struct WindowsDesktopHost::Impl {
                             pressRadius + 0.5 - std::sqrt(dx * dx + dy * dy),
                             0.0,
                             1.0);
-                        blendRgb(x, y, darkSurface ? 0x00FFFFFFu : 0x00000000u,
-                                 coverage * 0.08);
+                        const auto opacity = surface.collapsePressed ? 0.10 : 0.06;
+                        blendRgb(
+                            x,
+                            y,
+                            darkSurface ? 0x00FFFFFFu : 0x00000000u,
+                            coverage * opacity);
                     }
                 }
             }
@@ -1724,7 +1740,7 @@ struct WindowsDesktopHost::Impl {
             if (surface.card.id != cardId) {
                 continue;
             }
-            clearItemHover(surface.window, false);
+            clearPointerHover(surface.window, false);
             surface.card.items = items;
             if (surface.dropInsertionIndex.has_value()) {
                 surface.dropInsertionIndex = std::min(
@@ -1745,7 +1761,7 @@ struct WindowsDesktopHost::Impl {
                     return candidate.cardId == surface.card.id;
                 });
             if (update == updates.end()) continue;
-            clearItemHover(surface.window, false);
+            clearPointerHover(surface.window, false);
             surface.card.items = update->items;
             surface.card.applicationSortMode = update->sortMode;
             surface.card.applicationItemPlacements = update->itemPlacements;
