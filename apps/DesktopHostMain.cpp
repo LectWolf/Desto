@@ -17,12 +17,14 @@
 #include <shlobj.h>
 
 #include <algorithm>
+#include <cwctype>
 #include <filesystem>
 #include <stdexcept>
 #include <span>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <unordered_map>
 #include <vector>
 
 using namespace desto::application;
@@ -82,6 +84,30 @@ std::vector<std::filesystem::path> ItemFileNames(
         result.push_back(item.sourcePath.filename());
     }
     return result;
+}
+
+std::wstring PathKey(const std::filesystem::path& path) {
+    auto result = path.lexically_normal().wstring();
+    std::ranges::transform(result, result.begin(), [](wchar_t character) {
+        return static_cast<wchar_t>(std::towlower(character));
+    });
+    return result;
+}
+
+const desto::presentation::CardItemView* FindCachedItem(
+    const std::unordered_map<
+        CardId,
+        std::vector<desto::presentation::CardItemView>>& itemsByCard,
+    const std::filesystem::path& path) {
+    const auto key = PathKey(path);
+    for (const auto& [cardId, items] : itemsByCard) {
+        (void)cardId;
+        const auto found = std::ranges::find_if(items, [&](const auto& item) {
+            return PathKey(item.sourcePath) == key;
+        });
+        if (found != items.end()) return &*found;
+    }
+    return nullptr;
 }
 
 std::vector<std::filesystem::path> PlacementOrder(const ApplicationCard& card) {
@@ -241,6 +267,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
         ApplicationCardImportService importService(storageRoot);
         WindowsShellItemCatalog shellItems;
         std::vector<desto::presentation::CardView> cardViews;
+        std::unordered_map<
+            CardId,
+            std::vector<desto::presentation::CardItemView>> cardItemsById;
         for (const auto* card : runtime.cards()) {
             if (card->type() == CardType::Application) {
                 const auto* applicationCard = static_cast<const ApplicationCard*>(card);
@@ -262,6 +291,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                     });
                 }
                 auto view = desto::presentation::MakeCardView(*applicationCard);
+                cardItemsById[applicationCard->id()] = items;
                 view.items = std::move(items);
                 cardViews.push_back(std::move(view));
                 continue;
@@ -306,7 +336,13 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                 }
                 try {
                     const auto directory = storageRoot.resolveCardPath(card->relativeStoragePath());
-                    const auto before = shellItems.enumerate(directory, PlacementOrder(*card));
+                    auto beforeEntry = cardItemsById.find(cardId);
+                    if (beforeEntry == cardItemsById.end()) {
+                        beforeEntry = cardItemsById.emplace(
+                            cardId,
+                            shellItems.enumerate(directory, PlacementOrder(*card))).first;
+                    }
+                    const auto& before = beforeEntry->second;
                     const auto columns = CardColumns(runtime, *card);
                     const auto maximumRows = CardMaximumRows(*card);
                     if (maximumRows.has_value()) {
@@ -338,6 +374,31 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                         && std::ranges::find(refreshBatch, *sourceCardId) == refreshBatch.end()) {
                         refreshBatch.insert(refreshBatch.begin(), *sourceCardId);
                     }
+
+                    std::unordered_map<
+                        std::wstring,
+                        desto::presentation::CardItemView> preparedItems;
+                    for (const auto& path : paths) {
+                        if (const auto* cached = FindCachedItem(cardItemsById, path);
+                            cached != nullptr) {
+                            preparedItems.emplace(PathKey(path), *cached);
+                        } else {
+                            preparedItems.emplace(PathKey(path), shellItems.inspect(path));
+                        }
+                    }
+                    std::unordered_map<
+                        CardId,
+                        std::vector<desto::presentation::CardItemView>> nextItemsByCard;
+                    for (const auto& affectedCardId : refreshBatch) {
+                        const auto* affected = FindApplicationCard(runtime, affectedCardId);
+                        if (affected == nullptr) continue;
+                        const auto cached = cardItemsById.find(affectedCardId);
+                        nextItemsByCard[affectedCardId] = cached != cardItemsById.end()
+                            ? cached->second
+                            : shellItems.enumerate(
+                                storageRoot.resolveCardPath(affected->relativeStoragePath()),
+                                PlacementOrder(*affected));
+                    }
                     const auto plan = importService.plan(*card, paths);
                     const auto result = importService.execute(plan);
                     if (!result.succeeded) {
@@ -345,6 +406,29 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                         return false;
                     }
                     FileMoveRollbackGuard rollbackGuard(result.completedMoves, diagnostics);
+                    for (const auto& move : result.completedMoves) {
+                        const auto sourceKey = PathKey(move.source);
+                        for (auto& [affectedCardId, items] : nextItemsByCard) {
+                            (void)affectedCardId;
+                            std::erase_if(items, [&](const auto& item) {
+                                return PathKey(item.sourcePath) == sourceKey;
+                            });
+                        }
+                        const auto prepared = preparedItems.find(sourceKey);
+                        if (prepared == preparedItems.end()) {
+                            diagnostics.record(
+                                DiagnosticLevel::Warning, "desktop.prepared_item_missing");
+                            return false;
+                        }
+                        auto movedItem = shellItems.retarget(
+                            prepared->second, move.destination);
+                        auto& targetItems = nextItemsByCard[cardId];
+                        const auto destinationKey = PathKey(move.destination);
+                        std::erase_if(targetItems, [&](const auto& item) {
+                            return PathKey(item.sourcePath) == destinationKey;
+                        });
+                        targetItems.push_back(std::move(movedItem));
+                    }
                     std::vector<std::filesystem::path> movedNames;
                     for (const auto& source : paths) {
                         const auto normalized = source.lexically_normal();
@@ -369,10 +453,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                     for (const auto& affectedCardId : refreshBatch) {
                         const auto* affected = FindApplicationCard(runtime, affectedCardId);
                         if (affected == nullptr) continue;
-                        const auto affectedDirectory = storageRoot.resolveCardPath(
-                            affected->relativeStoragePath());
-                        auto items = shellItems.enumerate(
-                            affectedDirectory, PlacementOrder(*affected));
+                        auto items = nextItemsByCard[affectedCardId];
                         const auto affectedColumns = CardColumns(runtime, *affected);
                         auto placements = ReconcileApplicationItemPlacements(
                             affected->itemPlacements(),
@@ -402,6 +483,17 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                             std::move(items),
                         });
                     }
+                    std::vector<WindowsDesktopHost::CardItemsUpdate> updates;
+                    updates.reserve(pendingUpdates.size());
+                    for (const auto& update : pendingUpdates) {
+                        updates.push_back({
+                            update.cardId,
+                            update.items,
+                            update.sortMode,
+                            update.placements,
+                        });
+                    }
+
                     std::size_t appliedCount = 0;
                     for (; appliedCount < pendingUpdates.size(); ++appliedCount) {
                         const auto& update = pendingUpdates[appliedCount];
@@ -422,16 +514,6 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                         diagnostics.record(
                             DiagnosticLevel::Warning, "desktop.item_layout_rejected");
                         return false;
-                    }
-                    std::vector<WindowsDesktopHost::CardItemsUpdate> updates;
-                    updates.reserve(pendingUpdates.size());
-                    for (auto& update : pendingUpdates) {
-                        updates.push_back({
-                            update.cardId,
-                            std::move(update.items),
-                            update.sortMode,
-                            update.placements,
-                        });
                     }
                     try {
                         host.updateCardItemsBatch(std::move(updates));
@@ -464,7 +546,16 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                             DiagnosticLevel::Warning, "desktop.item_batch_update_failed");
                         return false;
                     }
+                    for (auto& update : pendingUpdates) {
+                        const auto cached = cardItemsById.find(update.cardId);
+                        if (cached != cardItemsById.end()) {
+                            cached->second.swap(update.items);
+                        }
+                    }
                     rollbackGuard.release();
+                    for (const auto& move : result.completedMoves) {
+                        shellItems.notifyMoved(move.source, move.destination);
+                    }
                     return true;
                 } catch (...) {
                     diagnostics.record(DiagnosticLevel::Warning, "desktop.import_rejected");
@@ -491,8 +582,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                 return;
             }
             host.updateCardItemsBatch({{
-                cardId, std::move(items), card->sortMode(), std::move(placements.placements),
+                cardId, items, card->sortMode(), std::move(placements.placements),
             }});
+            cardItemsById[cardId] = std::move(items);
         });
         host.setCardItemActivatedCallback(
             [&](const CardId&, const desto::presentation::CardItemView& item) {

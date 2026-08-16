@@ -43,7 +43,7 @@ WorkspaceLayout
 - 高频交互先更新内存状态，再合并和延迟持久化。
 - 缓存可以删除重建，配置和布局不能依赖缓存才能恢复。
 
-当前原型使用 `JsonConfigStore` 保存 schema 4 JSON。已知字段包括 `schemaVersion`、`storage.root`、`cards` 和 `workspace.placements`；Card 的存储目录仍记录为相对于 `storage.root` 的路径。v1 -> v2 迁移会显式补齐 `cards` 字段，v2 -> v3 增加可选的 Card 内容偏好和应用项目顺序，v3 -> v4 将线性顺序转换为独立的自定义槽位；缺失字段使用中等图标、显示名称和自适应尺寸。写入时读取并保留未知字段。Windows 使用临时文件、`FlushFileBuffers` 和原子替换；发布前保留 `settings.json.bak`，发布失败不会覆盖最后有效配置。
+当前原型使用 `JsonConfigStore` 保存 schema 4 JSON。已知字段包括 `schemaVersion`、`storage.root`、`cards` 和 `workspace.placements`；Card 的存储目录仍记录为相对于 `storage.root` 的路径。v1 -> v2 迁移会显式补齐 `cards` 字段，v2 -> v3 增加可选的 Card 内容偏好和应用项目顺序，v3 -> v4 将线性顺序转换为独立的自定义槽位；缺失字段使用中等图标、隐藏名称和自适应尺寸。写入时读取并保留未知字段。Windows 使用临时文件、`FlushFileBuffers` 和原子替换；发布前保留 `settings.json.bak`，发布失败不会覆盖最后有效配置。
 
 `cards` 保存 Card 身份、类型、可见/展开状态、Chrome 入口偏好、外观偏好和类型专属内容；`workspace.placements` 只保存原始布局。当前显示器拓扑与 Projection 不写入配置，启动后由平台适配器重新提供。
 

@@ -24,6 +24,7 @@ struct FileDropTargetCallbacks {
 struct FileDragResult {
     HRESULT status = E_FAIL;
     DWORD effect = DROPEFFECT_NONE;
+    bool completedInsideDesto = false;
 };
 
 [[nodiscard]] IDropTarget* CreateFileDropTarget(FileDropTargetCallbacks callbacks);
@@ -33,5 +34,7 @@ struct FileDragResult {
 [[nodiscard]] FileDragResult BeginFileDrag(
     const std::vector<std::filesystem::path>& paths,
     std::optional<std::string> sourceCardId = std::nullopt);
+[[nodiscard]] bool WasFileDropHandledByDesto(IDataObject* data) noexcept;
+[[nodiscard]] std::optional<DWORD> PerformedFileDropEffect(IDataObject* data) noexcept;
 
 } // namespace desto::platform::windows

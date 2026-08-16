@@ -8,6 +8,7 @@ using namespace desto::domain;
 namespace {
 
 void RunTests() {
+    DESTO_CHECK(!CardContentPreferences{}.showItemNames);
     ApplicationCard application("application-1", "cards/application-1");
     MappingCard mapping("mapping-1");
     TodoCard todos("todos-1");

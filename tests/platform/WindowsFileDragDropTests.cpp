@@ -22,6 +22,7 @@ void RunTests() {
     bool entered = false;
     bool left = false;
     bool dropped = false;
+    std::optional<std::string> expectedSourceCardId = "application-1";
     auto* target = CreateFileDropTarget({
         .dragOver = [&](POINTL point, DWORD allowed) {
             entered = true;
@@ -36,7 +37,7 @@ void RunTests() {
                     POINTL,
                     DWORD) {
             DESTO_CHECK(received == paths);
-            DESTO_CHECK(sourceCardId == "application-1");
+            DESTO_CHECK(sourceCardId == expectedSourceCardId);
             dropped = true;
             return static_cast<DWORD>(DROPEFFECT_MOVE);
         },
@@ -55,8 +56,20 @@ void RunTests() {
     DESTO_CHECK(target->Drop(data, 0, {140, 220}, &effect) == S_OK);
     DESTO_CHECK(dropped);
     DESTO_CHECK(effect == DROPEFFECT_MOVE);
+    DESTO_CHECK(WasFileDropHandledByDesto(data));
+    DESTO_CHECK(PerformedFileDropEffect(data) == DROPEFFECT_MOVE);
+
+    auto* externalData = CreateFileDataObject(paths);
+    DESTO_CHECK(externalData != nullptr);
+    expectedSourceCardId.reset();
+    effect = DROPEFFECT_MOVE | DROPEFFECT_COPY;
+    DESTO_CHECK(target->DragEnter(externalData, MK_LBUTTON, {140, 220}, &effect) == S_OK);
+    DESTO_CHECK(target->Drop(externalData, 0, {140, 220}, &effect) == S_OK);
+    DESTO_CHECK(!WasFileDropHandledByDesto(externalData));
+    DESTO_CHECK(PerformedFileDropEffect(externalData) == DROPEFFECT_MOVE);
 
     target->Release();
+    externalData->Release();
     data->Release();
     OleUninitialize();
 }

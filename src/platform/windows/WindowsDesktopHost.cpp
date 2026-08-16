@@ -23,6 +23,9 @@
 namespace desto::platform::windows {
 namespace {
 
+constexpr UINT_PTR ItemTooltipTimerId = 2;
+constexpr UINT ItemTooltipDelayMilliseconds = 600;
+
 struct Surface {
     HWND window = nullptr;
     HDC memoryDc = nullptr;
@@ -212,6 +215,12 @@ struct WindowsDesktopHost::Impl {
         case WM_MOUSELEAVE:
             if (instance != nullptr) {
                 instance->clearItemHover(window);
+                return 0;
+            }
+            break;
+        case WM_TIMER:
+            if (instance != nullptr && wParam == ItemTooltipTimerId) {
+                instance->showItemTooltip(window);
                 return 0;
             }
             break;
@@ -701,6 +710,7 @@ struct WindowsDesktopHost::Impl {
             current->itemDragActive = false;
         }
         if (result.status == DRAGDROP_S_DROP && result.effect != DROPEFFECT_NONE
+            && !result.completedInsideDesto
             && applicationItemDragCompleted) {
             try {
                 applicationItemDragCompleted(cardId);
@@ -733,14 +743,45 @@ struct WindowsDesktopHost::Impl {
         return true;
     }
 
-    void clearItemHover(HWND window) noexcept {
+    void clearItemHover(HWND window, bool repaint = true) noexcept {
         auto* surface = findSurface(window);
         if (surface == nullptr || surface->tooltip == nullptr) {
             return;
         }
+        KillTimer(window, ItemTooltipTimerId);
         TOOLINFOW tool{.cbSize = sizeof(TOOLINFOW), .hwnd = surface->window, .uId = 1};
         SendMessageW(surface->tooltip, TTM_TRACKACTIVATE, FALSE, reinterpret_cast<LPARAM>(&tool));
+        const auto changed = surface->hoveredItem.has_value();
         surface->hoveredItem.reset();
+        if (changed && repaint) {
+            try {
+                render(*surface, surface->display, surface->card, surface->ordinal);
+            } catch (...) {
+            }
+        }
+    }
+
+    void showItemTooltip(HWND window) noexcept {
+        auto* surface = findSurface(window);
+        if (surface == nullptr || surface->tooltip == nullptr
+            || !surface->hoveredItem.has_value()) {
+            return;
+        }
+        KillTimer(window, ItemTooltipTimerId);
+        TOOLINFOW tool{
+            .cbSize = sizeof(TOOLINFOW),
+            .hwnd = surface->window,
+            .uId = 1,
+            .lpszText = surface->tooltipText.data(),
+        };
+        POINT cursor{};
+        GetCursorPos(&cursor);
+        SendMessageW(
+            surface->tooltip,
+            TTM_TRACKPOSITION,
+            0,
+            MAKELPARAM(cursor.x + 12, cursor.y + 18));
+        SendMessageW(surface->tooltip, TTM_TRACKACTIVATE, TRUE, reinterpret_cast<LPARAM>(&tool));
     }
 
     void updateItemHover(HWND window, int x, int y) noexcept {
@@ -758,8 +799,15 @@ struct WindowsDesktopHost::Impl {
         if (index == surface->hoveredItem) {
             return;
         }
-        clearItemHover(window);
+        const auto hadHover = surface->hoveredItem.has_value();
+        clearItemHover(window, false);
         if (!index.has_value() || surface->tooltip == nullptr) {
+            if (hadHover) {
+                try {
+                    render(*surface, surface->display, surface->card, surface->ordinal);
+                } catch (...) {
+                }
+            }
             return;
         }
         surface->hoveredItem = index;
@@ -777,14 +825,11 @@ struct WindowsDesktopHost::Impl {
             .lpszText = surface->tooltipText.data(),
         };
         SendMessageW(surface->tooltip, TTM_UPDATETIPTEXTW, 0, reinterpret_cast<LPARAM>(&tool));
-        POINT cursor{};
-        GetCursorPos(&cursor);
-        SendMessageW(
-            surface->tooltip,
-            TTM_TRACKPOSITION,
-            0,
-            MAKELPARAM(cursor.x + 12, cursor.y + 18));
-        SendMessageW(surface->tooltip, TTM_TRACKACTIVATE, TRUE, reinterpret_cast<LPARAM>(&tool));
+        SetTimer(window, ItemTooltipTimerId, ItemTooltipDelayMilliseconds, nullptr);
+        try {
+            render(*surface, surface->display, surface->card, surface->ordinal);
+        } catch (...) {
+        }
     }
 
     DWORD updateDropPreview(HWND window, POINTL screenPoint, DWORD allowedEffect) noexcept {
@@ -1158,6 +1203,44 @@ struct WindowsDesktopHost::Impl {
                     | composite(0);
             };
 
+            if (surface.hoveredItem.has_value()) {
+                const auto hovered = std::ranges::find(
+                    projection, *surface.hoveredItem, &ProjectedItem::itemIndex);
+                if (hovered != projection.end()) {
+                    auto hotspot = itemRect(
+                        surface, hovered->column, hovered->row, visualSlotCount);
+                    const auto inset = dipToPixels(2.0, surface);
+                    hotspot.left += inset;
+                    hotspot.top += inset;
+                    hotspot.right -= inset;
+                    hotspot.bottom -= inset;
+                    const auto hotspotRadius = static_cast<double>(dipToPixels(8.0, surface));
+                    const auto centerX = (hotspot.left + hotspot.right) / 2.0;
+                    const auto centerY = (hotspot.top + hotspot.bottom) / 2.0;
+                    const auto halfWidth = (hotspot.right - hotspot.left) / 2.0;
+                    const auto halfHeight = (hotspot.bottom - hotspot.top) / 2.0;
+                    for (int y = hotspot.top; y < hotspot.bottom; ++y) {
+                        for (int x = hotspot.left; x < hotspot.right; ++x) {
+                            const auto qx = std::abs(x + 0.5 - centerX)
+                                - (halfWidth - hotspotRadius);
+                            const auto qy = std::abs(y + 0.5 - centerY)
+                                - (halfHeight - hotspotRadius);
+                            const auto outsideX = std::max(qx, 0.0);
+                            const auto outsideY = std::max(qy, 0.0);
+                            const auto distance = std::sqrt(
+                                outsideX * outsideX + outsideY * outsideY)
+                                + std::min(std::max(qx, qy), 0.0) - hotspotRadius;
+                            const auto coverage = std::clamp(0.5 - distance, 0.0, 1.0);
+                            blendRgb(
+                                x,
+                                y,
+                                darkSurface ? 0x00FFFFFFu : 0x001F2937u,
+                                coverage * (darkSurface ? 0.10 : 0.06));
+                        }
+                    }
+                }
+            }
+
             if (surface.dropInsertionIndex.has_value()) {
                 auto preview = itemRect(
                     surface,
@@ -1184,8 +1267,22 @@ struct WindowsDesktopHost::Impl {
                         const auto outsideY = std::max(qy, 0.0);
                         const auto distance = std::sqrt(outsideX * outsideX + outsideY * outsideY)
                             + std::min(std::max(qx, qy), 0.0) - previewRadius;
-                        const auto coverage = std::clamp(0.5 - distance, 0.0, 1.0);
-                        blendRgb(x, y, 0x004A84FFu, coverage * (darkSurface ? 0.28 : 0.17));
+                        const auto fillCoverage = std::clamp(0.5 - distance, 0.0, 1.0);
+                        blendRgb(
+                            x,
+                            y,
+                            0x004A84FFu,
+                            fillCoverage * (darkSurface ? 0.12 : 0.08));
+                        const auto dashPhase = (x + y) % dipToPixels(7.0, surface);
+                        if (dashPhase < dipToPixels(4.0, surface)) {
+                            const auto strokeCoverage = std::clamp(
+                                1.5 - std::abs(distance), 0.0, 1.0);
+                            blendRgb(
+                                x,
+                                y,
+                                0x004A84FFu,
+                                strokeCoverage * (darkSurface ? 0.92 : 0.78));
+                        }
                     }
                 }
             }
@@ -1546,7 +1643,7 @@ struct WindowsDesktopHost::Impl {
             if (surface.card.id != cardId) {
                 continue;
             }
-            clearItemHover(surface.window);
+            clearItemHover(surface.window, false);
             surface.card.items = items;
             if (surface.dropInsertionIndex.has_value()) {
                 surface.dropInsertionIndex = std::min(
@@ -1566,7 +1663,7 @@ struct WindowsDesktopHost::Impl {
                     return candidate.cardId == surface.card.id;
                 });
             if (update == updates.end()) continue;
-            clearItemHover(surface.window);
+            clearItemHover(surface.window, false);
             surface.card.items = update->items;
             surface.card.applicationSortMode = update->sortMode;
             surface.card.applicationItemPlacements = update->itemPlacements;

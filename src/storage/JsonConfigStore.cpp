@@ -311,7 +311,7 @@ ApplicationConfig ParseDocument(const Json& document) {
                 }
                 card.content.itemSize = ParseCardItemSize(
                     content.value("itemSize", std::string{"medium"}));
-                card.content.showItemNames = content.value("showItemNames", true);
+                card.content.showItemNames = content.value("showItemNames", false);
                 card.content.sizeMode = ParseCardSizeMode(
                     content.value("sizeMode", std::string{"adaptive"}));
                 card.content.fixedColumns = content.value("fixedColumns", 4u);

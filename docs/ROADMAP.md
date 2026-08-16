@@ -94,7 +94,7 @@
 
 ## Card Features
 
-### 20. ApplicationCard shell integration [x]
+### 20. ApplicationCard shell integration
 
 接入 Explorer 拖放、卡片间移动、原生文件名、快捷方式解析、Shell 图标、商店应用身份和失效状态；实现稀疏自定义位置、名称/大小/类型/修改日期投影排序、自适应/固定格数与源目标批量刷新。退出条件是解析失败可解释，不伪造错误类型或静默显示错误文件，自动排序不覆盖自定义位置，拖放事务与画面不会长期分叉。
 

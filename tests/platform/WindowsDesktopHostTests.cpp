@@ -2,6 +2,7 @@
 #include "WindowsDesktopHost.h"
 
 #include <Windows.h>
+#include <CommCtrl.h>
 
 #include <vector>
 
@@ -10,6 +11,25 @@ using namespace desto::platform::windows;
 using namespace desto::presentation;
 
 namespace {
+
+HWND FindOwnedTooltip(HWND owner) {
+    struct Search {
+        HWND owner;
+        HWND result = nullptr;
+    } search{owner};
+    EnumWindows([](HWND candidate, LPARAM parameter) {
+        auto& value = *reinterpret_cast<Search*>(parameter);
+        wchar_t className[64]{};
+        if (GetWindow(candidate, GW_OWNER) == value.owner
+            && GetClassNameW(candidate, className, 64) > 0
+            && _wcsicmp(className, TOOLTIPS_CLASSW) == 0) {
+            value.result = candidate;
+            return FALSE;
+        }
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&search));
+    return search.result;
+}
 
 void RunTests() {
     WindowsDesktopHost host(L"Desto Host Test");
@@ -105,6 +125,13 @@ void RunTests() {
     host.updateCardContentPreferences(
         "card-test",
         {.itemSize = CardItemSize::Large, .showItemNames = false});
+    const auto tooltip = FindOwnedTooltip(window);
+    DESTO_CHECK(tooltip != nullptr);
+    SendMessageW(window, WM_MOUSEMOVE, 0, MAKELPARAM(56, 82));
+    DESTO_CHECK(!IsWindowVisible(tooltip));
+    DESTO_CHECK(KillTimer(window, 2));
+    SendMessageW(window, WM_MOUSELEAVE, 0, 0);
+    DESTO_CHECK(!IsWindowVisible(tooltip));
     SendMessageW(window, WM_LBUTTONDBLCLK, MK_LBUTTON, MAKELPARAM(56, 82));
     DESTO_CHECK(itemActivated);
 

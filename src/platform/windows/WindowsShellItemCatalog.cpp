@@ -304,6 +304,45 @@ std::vector<presentation::CardItemView> WindowsShellItemCatalog::enumerate(
     return result;
 }
 
+presentation::CardItemView WindowsShellItemCatalog::retarget(
+    presentation::CardItemView preparedItem,
+    const std::filesystem::path& destinationPath) const {
+    const auto destination = destinationPath.lexically_normal();
+    if (_wcsicmp(
+            preparedItem.sourcePath.filename().c_str(),
+            destination.filename().c_str()) != 0) {
+        preparedItem.displayName = IsShortcut(destination)
+            ? destination.stem().wstring()
+            : destination.filename().wstring();
+    }
+    preparedItem.id = destination.wstring();
+    preparedItem.sourcePath = destination;
+    return preparedItem;
+}
+
+void WindowsShellItemCatalog::notifyMoved(
+    const std::filesystem::path& sourcePath,
+    const std::filesystem::path& destinationPath) const noexcept {
+    const auto source = sourcePath.lexically_normal();
+    const auto destination = destinationPath.lexically_normal();
+    std::error_code error;
+    const auto event = std::filesystem::is_directory(destination, error)
+        ? SHCNE_RENAMEFOLDER
+        : SHCNE_RENAMEITEM;
+    constexpr auto flags = SHCNF_PATHW | SHCNF_FLUSHNOWAIT;
+    SHChangeNotify(event, flags, source.c_str(), destination.c_str());
+
+    const auto sourceDirectory = source.parent_path();
+    const auto destinationDirectory = destination.parent_path();
+    if (!sourceDirectory.empty()) {
+        SHChangeNotify(SHCNE_UPDATEDIR, flags, sourceDirectory.c_str(), nullptr);
+    }
+    if (!destinationDirectory.empty()
+        && _wcsicmp(sourceDirectory.c_str(), destinationDirectory.c_str()) != 0) {
+        SHChangeNotify(SHCNE_UPDATEDIR, flags, destinationDirectory.c_str(), nullptr);
+    }
+}
+
 bool WindowsShellItemCatalog::launch(const presentation::CardItemView& item) const noexcept {
     if (item.sourcePath.empty()
         || item.state == presentation::CardItemState::Missing

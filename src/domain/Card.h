@@ -77,7 +77,7 @@ struct CardAppearancePreferences {
 
 struct CardContentPreferences {
     CardItemSize itemSize = CardItemSize::Medium;
-    bool showItemNames = true;
+    bool showItemNames = false;
     CardSizeMode sizeMode = CardSizeMode::Adaptive;
     std::uint32_t fixedColumns = 4;
     std::uint32_t fixedRows = 3;

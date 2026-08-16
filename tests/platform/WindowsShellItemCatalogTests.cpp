@@ -61,6 +61,11 @@ void RunTests() {
     DESTO_CHECK(textFile.fileSize == 7);
     DESTO_CHECK(!textFile.itemType.empty());
     DESTO_CHECK(textFile.modifiedTime != 0);
+    const auto retargeted = catalog.retarget(textFile, root / "renamed.txt");
+    DESTO_CHECK(retargeted.sourcePath == root / "renamed.txt");
+    DESTO_CHECK(retargeted.displayName == L"renamed.txt");
+    DESTO_CHECK(retargeted.fileSize == textFile.fileSize);
+    DESTO_CHECK(retargeted.icon.premultipliedPixels == textFile.icon.premultipliedPixels);
     const auto shortcut = catalog.inspect(root / "Alpha.lnk");
     DESTO_CHECK(shortcut.displayName == L"Alpha");
     DESTO_CHECK(shortcut.sourcePath.extension() == L".lnk");

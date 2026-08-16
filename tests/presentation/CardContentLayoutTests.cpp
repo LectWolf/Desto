@@ -46,7 +46,12 @@ void RunTests() {
     DESTO_CHECK(ResolveCardInsertionIndex(7, 320.0, 110.0, 64.0) == 1);
     DESTO_CHECK(ResolveCardInsertionIndex(7, 320.0, 1000.0, 1000.0) == 7);
     DESTO_CHECK(ResolveCardSlotIndex(320.0, 190.0, 148.0).value() == 6);
-    DESTO_CHECK(!ResolveCardSlotIndex(320.0, 190.0, 400.0, {}, 2).has_value());
+    DESTO_CHECK(ResolveCardSlotIndex(320.0, 190.0, 400.0, {}, 2).value() == 6);
+    DESTO_CHECK(ResolveCardSlotIndex(320.0, 0.0, 64.0).value() == 0);
+    DESTO_CHECK(ResolveCardSlotIndex(320.0, 88.0, 64.0).value() == 0);
+    DESTO_CHECK(ResolveCardSlotIndex(320.0, 319.0, 64.0).value() == 3);
+    DESTO_CHECK(ResolveCardSlotIndex(320.0, 36.0, 140.0).value() == 0);
+    DESTO_CHECK(ResolveCardSlotIndex(320.0, 36.0, 219.0, {}, 2).value() == 4);
 
     bool rejected = false;
     try {

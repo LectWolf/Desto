@@ -17,6 +17,14 @@ public:
         const std::filesystem::path& directory,
         std::span<const std::filesystem::path> preferredOrder = {}) const;
 
+    [[nodiscard]] presentation::CardItemView retarget(
+        presentation::CardItemView preparedItem,
+        const std::filesystem::path& destinationPath) const;
+
+    void notifyMoved(
+        const std::filesystem::path& sourcePath,
+        const std::filesystem::path& destinationPath) const noexcept;
+
     [[nodiscard]] bool launch(const presentation::CardItemView& item) const noexcept;
 };
 

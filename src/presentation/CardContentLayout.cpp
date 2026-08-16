@@ -108,18 +108,22 @@ std::optional<std::size_t> ResolveCardSlotIndex(
     std::optional<std::size_t> maximumRows) {
     const auto layout = ResolveCardContentLayout(0, availableWidth, settings);
     const auto contentLeft = (availableWidth - layout.contentWidth) / 2.0;
-    const auto localX = pointerX - contentLeft;
-    const auto localY = pointerY - settings.headerHeight - settings.verticalPadding;
-    if (localX < 0 || localY < 0) return std::nullopt;
     const auto pitchX = settings.itemWidth + settings.horizontalGap;
     const auto pitchY = settings.itemHeight + settings.verticalGap;
-    const auto column = static_cast<std::size_t>(std::floor(localX / pitchX));
-    const auto row = static_cast<std::size_t>(std::floor(localY / pitchY));
-    if (column >= layout.columns
-        || (maximumRows.has_value() && row >= *maximumRows)
-        || std::fmod(localX, pitchX) >= settings.itemWidth
-        || std::fmod(localY, pitchY) >= settings.itemHeight) {
-        return std::nullopt;
+    const auto localX = std::clamp(
+        pointerX - contentLeft,
+        0.0,
+        std::max(0.0, layout.contentWidth - 1.0));
+    const auto localY = std::max(
+        0.0,
+        pointerY - settings.headerHeight - settings.verticalPadding);
+    const auto column = std::min(
+        layout.columns - 1,
+        static_cast<std::size_t>(std::floor(localX / pitchX)));
+    auto row = static_cast<std::size_t>(std::floor(localY / pitchY));
+    if (maximumRows.has_value()) {
+        if (*maximumRows == 0) return std::nullopt;
+        row = std::min(row, *maximumRows - 1);
     }
     return row * layout.columns + column;
 }

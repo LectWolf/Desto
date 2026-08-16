@@ -33,9 +33,33 @@ FORMATETC PreferredEffectFormat() noexcept {
     };
 }
 
+FORMATETC PerformedEffectFormat() noexcept {
+    static const auto format = static_cast<CLIPFORMAT>(RegisterClipboardFormatW(
+        L"Performed DropEffect"));
+    return {
+        .cfFormat = format,
+        .ptd = nullptr,
+        .dwAspect = DVASPECT_CONTENT,
+        .lindex = -1,
+        .tymed = TYMED_HGLOBAL,
+    };
+}
+
 FORMATETC DestoSourceCardFormat() noexcept {
     static const auto format = static_cast<CLIPFORMAT>(RegisterClipboardFormatW(
         L"Desto.ApplicationCardId"));
+    return {
+        .cfFormat = format,
+        .ptd = nullptr,
+        .dwAspect = DVASPECT_CONTENT,
+        .lindex = -1,
+        .tymed = TYMED_HGLOBAL,
+    };
+}
+
+FORMATETC DestoDropCompletedFormat() noexcept {
+    static const auto format = static_cast<CLIPFORMAT>(RegisterClipboardFormatW(
+        L"Desto.ApplicationCardDropCompleted"));
     return {
         .cfFormat = format,
         .ptd = nullptr,
@@ -142,6 +166,32 @@ HGLOBAL CreateEffectMemory(DWORD effect) {
     return memory;
 }
 
+std::optional<DWORD> ReadEffectMemory(const STGMEDIUM& medium) noexcept {
+    if (medium.tymed != TYMED_HGLOBAL
+        || medium.hGlobal == nullptr
+        || GlobalSize(medium.hGlobal) < sizeof(DWORD)) {
+        return std::nullopt;
+    }
+    const auto* value = static_cast<const DWORD*>(GlobalLock(medium.hGlobal));
+    if (value == nullptr) return std::nullopt;
+    const auto result = *value;
+    GlobalUnlock(medium.hGlobal);
+    return result;
+}
+
+bool SetEffectData(IDataObject* data, const FORMATETC& sourceFormat, DWORD effect) noexcept {
+    if (data == nullptr) return false;
+    auto format = sourceFormat;
+    STGMEDIUM medium{
+        .tymed = TYMED_HGLOBAL,
+        .hGlobal = CreateEffectMemory(effect),
+    };
+    if (medium.hGlobal == nullptr) return false;
+    if (SUCCEEDED(data->SetData(&format, &medium, TRUE))) return true;
+    ReleaseStgMedium(&medium);
+    return false;
+}
+
 HGLOBAL CreateStringMemory(const std::string& value) {
     auto memory = GlobalAlloc(GMEM_MOVEABLE, value.size() + 1);
     if (memory == nullptr) return nullptr;
@@ -193,7 +243,9 @@ public:
         try {
             const auto fileFormat = FileDropFormat();
             const auto effectFormat = PreferredEffectFormat();
+            const auto performedFormat = PerformedEffectFormat();
             const auto sourceFormat = DestoSourceCardFormat();
+            const auto completedFormat = DestoDropCompletedFormat();
             HGLOBAL memory = nullptr;
             if (format->cfFormat == fileFormat.cfFormat
                 && (format->tymed & TYMED_HGLOBAL) != 0) {
@@ -201,10 +253,18 @@ public:
             } else if (format->cfFormat == effectFormat.cfFormat
                        && (format->tymed & TYMED_HGLOBAL) != 0) {
                 memory = CreateEffectMemory(DROPEFFECT_MOVE);
+            } else if (performedDropEffect_.has_value()
+                       && format->cfFormat == performedFormat.cfFormat
+                       && (format->tymed & TYMED_HGLOBAL) != 0) {
+                memory = CreateEffectMemory(*performedDropEffect_);
             } else if (sourceCardId_.has_value()
                        && format->cfFormat == sourceFormat.cfFormat
                        && (format->tymed & TYMED_HGLOBAL) != 0) {
                 memory = CreateStringMemory(*sourceCardId_);
+            } else if (dropCompleted_
+                       && format->cfFormat == completedFormat.cfFormat
+                       && (format->tymed & TYMED_HGLOBAL) != 0) {
+                memory = CreateEffectMemory(TRUE);
             } else {
                 return DV_E_FORMATETC;
             }
@@ -228,14 +288,20 @@ public:
         }
         const auto fileFormat = FileDropFormat();
         const auto effectFormat = PreferredEffectFormat();
+        const auto performedFormat = PerformedEffectFormat();
         const auto sourceFormat = DestoSourceCardFormat();
+        const auto completedFormat = DestoDropCompletedFormat();
         return (format->dwAspect == DVASPECT_CONTENT
                 && format->lindex == -1
                 && (format->tymed & TYMED_HGLOBAL) != 0
                 && (format->cfFormat == fileFormat.cfFormat
                     || format->cfFormat == effectFormat.cfFormat
+                    || (performedDropEffect_.has_value()
+                        && format->cfFormat == performedFormat.cfFormat)
                     || (sourceCardId_.has_value()
-                        && format->cfFormat == sourceFormat.cfFormat)))
+                        && format->cfFormat == sourceFormat.cfFormat)
+                    || (dropCompleted_
+                        && format->cfFormat == completedFormat.cfFormat)))
             ? S_OK
             : DV_E_FORMATETC;
     }
@@ -245,8 +311,22 @@ public:
         }
         return E_NOTIMPL;
     }
-    HRESULT STDMETHODCALLTYPE SetData(FORMATETC*, STGMEDIUM*, BOOL) override {
-        return E_NOTIMPL;
+    HRESULT STDMETHODCALLTYPE SetData(
+        FORMATETC* format,
+        STGMEDIUM* medium,
+        BOOL release) override {
+        if (format == nullptr || medium == nullptr) return E_POINTER;
+        const auto effect = ReadEffectMemory(*medium);
+        if (!effect.has_value()) return DV_E_TYMED;
+        if (format->cfFormat == DestoDropCompletedFormat().cfFormat) {
+            dropCompleted_ = *effect != 0;
+        } else if (format->cfFormat == PerformedEffectFormat().cfFormat) {
+            performedDropEffect_ = *effect;
+        } else {
+            return E_NOTIMPL;
+        }
+        if (release) ReleaseStgMedium(medium);
+        return S_OK;
     }
     HRESULT STDMETHODCALLTYPE EnumFormatEtc(DWORD direction, IEnumFORMATETC** output) override {
         if (output == nullptr) {
@@ -256,8 +336,15 @@ public:
         if (direction != DATADIR_GET) {
             return E_NOTIMPL;
         }
-        FORMATETC formats[]{FileDropFormat(), PreferredEffectFormat(), DestoSourceCardFormat()};
-        return SHCreateStdEnumFmtEtc(sourceCardId_.has_value() ? 3 : 2, formats, output);
+        std::vector<FORMATETC> formats{
+            FileDropFormat(),
+            PreferredEffectFormat(),
+        };
+        if (sourceCardId_.has_value()) formats.push_back(DestoSourceCardFormat());
+        if (dropCompleted_) formats.push_back(DestoDropCompletedFormat());
+        if (performedDropEffect_.has_value()) formats.push_back(PerformedEffectFormat());
+        return SHCreateStdEnumFmtEtc(
+            static_cast<UINT>(formats.size()), formats.data(), output);
     }
     HRESULT STDMETHODCALLTYPE DAdvise(FORMATETC*, DWORD, IAdviseSink*, DWORD*) override {
         return OLE_E_ADVISENOTSUPPORTED;
@@ -271,6 +358,8 @@ private:
     std::atomic<ULONG> references_{1};
     std::vector<std::filesystem::path> paths_;
     std::optional<std::string> sourceCardId_;
+    std::optional<DWORD> performedDropEffect_;
+    bool dropCompleted_ = false;
 };
 
 class FileDropSource final : public IDropSource {
@@ -382,9 +471,16 @@ public:
             auto paths = acceptsFiles_ ? ReadFileDrop(data) : std::vector<std::filesystem::path>{};
             acceptsFiles_ = false;
             auto sourceCardId = ReadSourceCardId(data);
+            const auto internalSource = sourceCardId.has_value();
             *effect = !paths.empty() && callbacks_.drop
                 ? callbacks_.drop(std::move(paths), std::move(sourceCardId), point, allowed)
                 : DROPEFFECT_NONE;
+            if (*effect != DROPEFFECT_NONE) {
+                (void)SetEffectData(data, PerformedEffectFormat(), *effect);
+            }
+            if (internalSource && *effect != DROPEFFECT_NONE) {
+                (void)SetEffectData(data, DestoDropCompletedFormat(), TRUE);
+            }
             return S_OK;
         } catch (...) {
             acceptsFiles_ = false;
@@ -444,9 +540,27 @@ FileDragResult BeginFileDrag(
     }
     DWORD effect = DROPEFFECT_NONE;
     const auto status = DoDragDrop(data, source, DROPEFFECT_MOVE | DROPEFFECT_COPY, &effect);
+    const auto completedInsideDesto = WasFileDropHandledByDesto(data);
     data->Release();
     source->Release();
-    return {.status = status, .effect = effect};
+    return {
+        .status = status,
+        .effect = effect,
+        .completedInsideDesto = completedInsideDesto,
+    };
+}
+
+bool WasFileDropHandledByDesto(IDataObject* data) noexcept {
+    return SupportsFormat(data, DestoDropCompletedFormat());
+}
+
+std::optional<DWORD> PerformedFileDropEffect(IDataObject* data) noexcept {
+    auto format = PerformedEffectFormat();
+    STGMEDIUM medium{};
+    if (data == nullptr || FAILED(data->GetData(&format, &medium))) return std::nullopt;
+    const auto result = ReadEffectMemory(medium);
+    ReleaseStgMedium(&medium);
+    return result;
 }
 
 } // namespace desto::platform::windows
