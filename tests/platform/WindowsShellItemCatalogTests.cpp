@@ -127,6 +127,10 @@ void RunTests() {
     DESTO_CHECK(missing.state == CardItemState::Missing);
     DESTO_CHECK(missing.icon.empty());
 
+    std::ofstream(root / "notes.txt") << "notes";
+    const auto namedFile = catalog.inspect(root / "notes.txt");
+    DESTO_CHECK(namedFile.displayName == L"notes.txt");
+
     const auto items = catalog.enumerate(root);
     DESTO_CHECK(items.size() >= 2);
     DESTO_CHECK(items[0].displayName == L"Alpha");

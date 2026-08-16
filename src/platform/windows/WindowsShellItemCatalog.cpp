@@ -102,16 +102,6 @@ std::wstring DisplayName(const std::filesystem::path& path) {
     if (IsShortcut(path)) {
         return path.stem().wstring();
     }
-    SHFILEINFOW info{};
-    if (SHGetFileInfoW(
-            path.c_str(),
-            0,
-            &info,
-            sizeof(info),
-            SHGFI_DISPLAYNAME) != 0
-        && info.szDisplayName[0] != L'\0') {
-        return info.szDisplayName;
-    }
     return path.filename().wstring();
 }
 

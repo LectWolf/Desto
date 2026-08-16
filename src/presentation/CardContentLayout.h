@@ -14,8 +14,9 @@ struct CardContentLayoutSettings {
     double itemWidth = 55.0;
     double itemHeight = 55.0;
     double iconSize = 34.0;
-    double horizontalGap = 4.0;
-    double verticalGap = 4.0;
+    double itemFontSize = 10.0;
+    double horizontalGap = 0.0;
+    double verticalGap = 0.0;
     std::size_t minimumColumns = 1;
     std::size_t maximumColumns = 8;
     std::size_t preferredColumns = 4;
@@ -55,11 +56,12 @@ struct CardDropPreview {
 };
 
 [[nodiscard]] CardDropPreview ResolveAdaptiveCardDropPreview(
-    std::size_t itemCount,
+    std::size_t occupiedSlotCount,
     double availableWidth,
     double pointerX,
     double pointerY,
-    CardContentLayoutSettings settings = {});
+    CardContentLayoutSettings settings = {},
+    std::optional<CardDropPreview> previousPreview = std::nullopt);
 
 [[nodiscard]] std::optional<std::size_t> ResolveCardSlotIndex(
     double availableWidth,

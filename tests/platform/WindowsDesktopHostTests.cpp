@@ -100,7 +100,7 @@ void RunTests() {
     host.setCardItemActivatedCallback(
         [&](const CardId& cardId, const CardItemView& item) {
             DESTO_CHECK(cardId == "card-test");
-            DESTO_CHECK(item.displayName == L"Example");
+            DESTO_CHECK(item.displayName == L"Example.txt");
             itemActivated = true;
         });
     host.present(projections, displays, cards);
@@ -116,7 +116,7 @@ void RunTests() {
 
     RECT windowRect{};
     DESTO_CHECK(GetWindowRect(window, &windowRect));
-    DESTO_CHECK(windowRect.right - windowRect.left == 256);
+    DESTO_CHECK(windowRect.right - windowRect.left == 244);
     DESTO_CHECK(windowRect.bottom - windowRect.top == 127);
     const auto captionHit = SendMessageW(
         window,
@@ -131,20 +131,20 @@ void RunTests() {
         MAKELPARAM(windowRect.left + 2, windowRect.top + 2));
     DESTO_CHECK(cornerHit == HTCAPTION);
 
-    RECT movingRect{7, 9, 263, 136};
+    RECT movingRect{7, 9, 251, 136};
     SendMessageW(window, WM_MOVING, 0, reinterpret_cast<LPARAM>(&movingRect));
     const auto guide = FindWindowW(L"DestoAlignmentGuide", nullptr);
     DESTO_CHECK(guide != nullptr);
     DESTO_CHECK(IsWindowVisible(guide));
     DESTO_CHECK((GetWindowLongPtrW(guide, GWL_EXSTYLE) & WS_EX_TRANSPARENT) != 0);
 
-    DESTO_CHECK(SetWindowPos(window, nullptr, 7, 9, 256, 127, SWP_NOACTIVATE | SWP_NOZORDER));
+    DESTO_CHECK(SetWindowPos(window, nullptr, 7, 9, 244, 127, SWP_NOACTIVATE | SWP_NOZORDER));
     SendMessageW(window, WM_EXITSIZEMOVE, 0, 0);
     DESTO_CHECK(!IsWindowVisible(guide));
     DESTO_CHECK(callbackCalled);
     DESTO_CHECK(changed.left == 8);
     DESTO_CHECK(changed.top == 8);
-    DESTO_CHECK(changed.width == 256);
+    DESTO_CHECK(changed.width == 244);
     DESTO_CHECK(changed.height == 127);
     DESTO_CHECK(horizontalAnchor == PlacementHorizontalAnchor::Left);
     DESTO_CHECK(verticalAnchor == PlacementVerticalAnchor::Top);
@@ -154,7 +154,7 @@ void RunTests() {
 
     host.updateCardItems("card-test", {{
         .id = L"example",
-        .displayName = L"Example",
+        .displayName = L"Example.txt",
         .sourcePath = L"C:\\Example.exe",
         .state = CardItemState::IconUnavailable,
     }});
@@ -162,14 +162,35 @@ void RunTests() {
         "card-test",
         {.itemSize = CardItemSize::Large, .showItemNames = false});
     DESTO_CHECK(GetWindowRect(window, &windowRect));
-    DESTO_CHECK(windowRect.right - windowRect.left == 256);
+    DESTO_CHECK(windowRect.right - windowRect.left == 244);
     DESTO_CHECK(windowRect.bottom - windowRect.top == 127);
 
     const auto tooltip = FindOwnedTooltip(window);
     DESTO_CHECK(tooltip != nullptr);
     SendMessageW(window, WM_MOUSEMOVE, 0, MAKELPARAM(56, 82));
     DESTO_CHECK(!IsWindowVisible(tooltip));
-    DESTO_CHECK(KillTimer(window, 2));
+    DESTO_CHECK(SendMessageW(tooltip, TTM_GETTOOLCOUNT, 0, 0) == 1);
+    SendMessageW(window, WM_TIMER, 2, 0);
+    TOOLINFOW currentTooltipTool{.cbSize = TTTOOLINFOW_V2_SIZE};
+    DESTO_CHECK(SendMessageW(
+        tooltip,
+        TTM_GETCURRENTTOOLW,
+        0,
+        reinterpret_cast<LPARAM>(&currentTooltipTool)) != FALSE);
+    DESTO_CHECK(IsWindowVisible(tooltip));
+    wchar_t tooltipText[128]{};
+    TOOLINFOW tooltipTool{
+        .cbSize = TTTOOLINFOW_V2_SIZE,
+        .hwnd = window,
+        .uId = 1,
+        .lpszText = tooltipText,
+    };
+    SendMessageW(
+        tooltip,
+        TTM_GETTEXTW,
+        static_cast<WPARAM>(std::size(tooltipText)),
+        reinterpret_cast<LPARAM>(&tooltipTool));
+    DESTO_CHECK(std::wstring_view(tooltipText) == L"Example.txt");
     SendMessageW(window, WM_MOUSELEAVE, 0, 0);
     DESTO_CHECK(!IsWindowVisible(tooltip));
     SendMessageW(window, WM_LBUTTONDBLCLK, MK_LBUTTON, MAKELPARAM(56, 82));
@@ -186,7 +207,7 @@ void RunTests() {
     }
     host.updateCardItems("card-test", adaptiveItems);
     DESTO_CHECK(GetWindowRect(window, &windowRect));
-    DESTO_CHECK(windowRect.right - windowRect.left == 256);
+    DESTO_CHECK(windowRect.right - windowRect.left == 244);
     host.updateCardItemsBatch({{
         "card-test",
         adaptiveItems,
@@ -200,7 +221,7 @@ void RunTests() {
         },
     }});
     DESTO_CHECK(GetWindowRect(window, &windowRect));
-    DESTO_CHECK(windowRect.right - windowRect.left == 315);
+    DESTO_CHECK(windowRect.right - windowRect.left == 299);
     adaptiveItems.pop_back();
     host.updateCardItemsBatch({{
         "card-test",
@@ -214,7 +235,7 @@ void RunTests() {
         },
     }});
     DESTO_CHECK(GetWindowRect(window, &windowRect));
-    DESTO_CHECK(windowRect.right - windowRect.left == 256);
+    DESTO_CHECK(windowRect.right - windowRect.left == 244);
 
     int refreshCount = 0;
     host.setCardItemsRefreshCallback(
@@ -236,14 +257,14 @@ void RunTests() {
         });
     DESTO_CHECK(GetWindowRect(window, &windowRect));
     DESTO_CHECK(windowRect.right - windowRect.left == 180);
-    DESTO_CHECK(windowRect.bottom - windowRect.top == 212);
+    DESTO_CHECK(windowRect.bottom - windowRect.top == 204);
     DESTO_CHECK(refreshCount == 1);
 
     host.updateCardContentPreferences(
         "card-test",
         {.itemSize = CardItemSize::Large, .showItemNames = false});
     DESTO_CHECK(GetWindowRect(window, &windowRect));
-    DESTO_CHECK(windowRect.right - windowRect.left == 256);
+    DESTO_CHECK(windowRect.right - windowRect.left == 244);
     DESTO_CHECK(windowRect.bottom - windowRect.top == 127);
     DESTO_CHECK(refreshCount == 2);
 
@@ -259,19 +280,19 @@ void RunTests() {
         MAKELPARAM(windowRect.left + 100, windowRect.top + 100)) == HTTRANSPARENT);
 
     DESTO_CHECK(SetWindowPos(
-        window, nullptr, 2050, 120, 256, 127, SWP_NOACTIVATE | SWP_NOZORDER));
-    RECT crossDisplayMovingRect{2050, 120, 2306, 247};
+        window, nullptr, 2050, 120, 244, 127, SWP_NOACTIVATE | SWP_NOZORDER));
+    RECT crossDisplayMovingRect{2050, 120, 2294, 247};
     SendMessageW(
         window,
         WM_MOVING,
         0,
         reinterpret_cast<LPARAM>(&crossDisplayMovingRect));
-    DESTO_CHECK(crossDisplayMovingRect.right - crossDisplayMovingRect.left == 384);
+    DESTO_CHECK(crossDisplayMovingRect.right - crossDisplayMovingRect.left == 366);
     SendMessageW(window, WM_EXITSIZEMOVE, 0, 0);
     DESTO_CHECK(changedDisplayId == "display-high-dpi");
-    DESTO_CHECK(changed.width == 256);
+    DESTO_CHECK(changed.width == 244);
     DESTO_CHECK(GetWindowRect(window, &windowRect));
-    DESTO_CHECK(windowRect.right - windowRect.left == 384);
+    DESTO_CHECK(windowRect.right - windowRect.left == 366);
 
     const auto refreshesBeforeQueuedRequest = refreshCount;
     host.setCardItemsRefreshCallback(

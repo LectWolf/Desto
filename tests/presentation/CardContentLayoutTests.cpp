@@ -19,9 +19,9 @@ void RunTests() {
     const auto compact = ResolveCardContentLayout(7, 320.0);
     DESTO_CHECK(compact.columns == 5);
     DESTO_CHECK(compact.rows == 2);
-    DESTO_CHECK(compact.contentWidth == 291.0);
-    DESTO_CHECK(compact.contentHeight == 114.0);
-    DESTO_CHECK(compact.idealHeight == 186.0);
+    DESTO_CHECK(compact.contentWidth == 275.0);
+    DESTO_CHECK(compact.contentHeight == 110.0);
+    DESTO_CHECK(compact.idealHeight == 182.0);
 
     const auto narrow = ResolveCardContentLayout(3, 150.0);
     DESTO_CHECK(narrow.columns == 2);
@@ -47,20 +47,41 @@ void RunTests() {
         .itemSize = CardItemSize::Large,
         .showItemNames = false,
     });
+    const auto smallWithName = ResolveCardContentLayoutSettings({
+        .itemSize = CardItemSize::Small,
+        .showItemNames = true,
+    });
+    const auto mediumWithName = ResolveCardContentLayoutSettings({
+        .itemSize = CardItemSize::Medium,
+        .showItemNames = true,
+    });
+    const auto largeWithName = ResolveCardContentLayoutSettings({
+        .itemSize = CardItemSize::Large,
+        .showItemNames = true,
+    });
     DESTO_CHECK(small.iconSize == 20.0);
+    DESTO_CHECK(small.itemFontSize == 8.0);
     DESTO_CHECK(small.itemWidth == 37.0);
     DESTO_CHECK(small.itemWidth == small.itemHeight);
     DESTO_CHECK(small.preferredColumns == 6);
+    DESTO_CHECK(small.horizontalGap == 0.0);
+    DESTO_CHECK(small.verticalGap == 0.0);
+    DESTO_CHECK(smallWithName.itemHeight == 49.0);
     DESTO_CHECK(medium.iconSize == 26.0);
+    DESTO_CHECK(medium.itemFontSize == 9.0);
     DESTO_CHECK(medium.itemWidth == 44.0);
     DESTO_CHECK(medium.itemWidth == medium.itemHeight);
     DESTO_CHECK(medium.preferredColumns == 5);
+    DESTO_CHECK(mediumWithName.itemHeight == 58.0);
     DESTO_CHECK(large.iconSize == 34.0);
+    DESTO_CHECK(large.itemFontSize == 10.0);
     DESTO_CHECK(large.itemWidth == 55.0);
     DESTO_CHECK(large.preferredColumns == 4);
+    DESTO_CHECK(largeWithName.itemHeight == 71.0);
     DESTO_CHECK(extraLarge.iconSize == 44.0);
+    DESTO_CHECK(extraLarge.itemFontSize == 11.0);
     DESTO_CHECK(extraLarge.itemWidth == 74.0);
-    DESTO_CHECK(extraLarge.itemHeight == extraLarge.itemWidth + 24.0);
+    DESTO_CHECK(extraLarge.itemHeight == extraLarge.itemWidth + 32.0);
     DESTO_CHECK(extraLarge.preferredColumns == 3);
     DESTO_CHECK(ResolveAdaptiveCardColumns(4, 1, large) == 4);
     DESTO_CHECK(ResolveAdaptiveCardColumns(5, 1, large) == 5);
@@ -88,13 +109,30 @@ void RunTests() {
     DESTO_CHECK(rightExpansion.columns == 5);
     const auto downwardExpansion = ResolveAdaptiveCardDropPreview(
         4, 256.0, 100.0, 120.0, large);
-    DESTO_CHECK(downwardExpansion.insertionIndex == 4);
+    DESTO_CHECK(downwardExpansion.insertionIndex == 5);
     DESTO_CHECK(downwardExpansion.columns == 4);
     const auto shrinkInside = ResolveAdaptiveCardDropPreview(
         4, 315.0, 190.0, 80.0, large);
     DESTO_CHECK(shrinkInside.columns == 4);
-    DESTO_CHECK(ResolveCardSlotIndex(320.0, 190.0, 148.0).value() == 7);
-    DESTO_CHECK(ResolveCardSlotIndex(320.0, 190.0, 400.0, {}, 2).value() == 7);
+    const auto sparseRightExpansion = ResolveAdaptiveCardDropPreview(
+        2, 256.0, 230.0, 80.0, large);
+    DESTO_CHECK(sparseRightExpansion.insertionIndex == 4);
+    DESTO_CHECK(sparseRightExpansion.columns == 5);
+    const auto secondRowExpansion = ResolveAdaptiveCardDropPreview(
+        2, 256.0, 40.0, 110.0, large);
+    DESTO_CHECK(secondRowExpansion.insertionIndex == 4);
+    DESTO_CHECK(secondRowExpansion.columns == 4);
+    const auto thirdRowExpansion = ResolveAdaptiveCardDropPreview(
+        2,
+        256.0,
+        40.0,
+        169.0,
+        large,
+        secondRowExpansion);
+    DESTO_CHECK(thirdRowExpansion.insertionIndex == 8);
+    DESTO_CHECK(thirdRowExpansion.columns == 4);
+    DESTO_CHECK(ResolveCardSlotIndex(320.0, 190.0, 148.0).value() == 8);
+    DESTO_CHECK(ResolveCardSlotIndex(320.0, 190.0, 400.0, {}, 2).value() == 8);
     DESTO_CHECK(ResolveCardSlotIndex(320.0, 0.0, 64.0).value() == 0);
     DESTO_CHECK(ResolveCardSlotIndex(320.0, 88.0, 64.0).value() == 1);
     DESTO_CHECK(ResolveCardSlotIndex(320.0, 319.0, 64.0).value() == 4);

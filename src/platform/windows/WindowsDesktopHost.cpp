@@ -31,6 +31,7 @@ constexpr UINT ItemTooltipDelayMilliseconds = 600;
 constexpr UINT_PTR DropPreviewResetTimerId = 3;
 constexpr UINT DropPreviewResetDelayMilliseconds = 90;
 constexpr UINT CardItemsRefreshMessage = WM_APP + 0x41;
+constexpr UINT CardTooltipInfoSize = TTTOOLINFOW_V2_SIZE;
 
 struct Surface {
     HWND window = nullptr;
@@ -407,7 +408,9 @@ struct WindowsDesktopHost::Impl {
         return settings;
     }
 
-    static std::size_t contentSlotCount(const Surface& surface) noexcept {
+    static std::size_t contentSlotCount(
+        const Surface& surface,
+        bool includeDropPreview = true) noexcept {
         if (surface.card.content.sizeMode == domain::CardSizeMode::Fixed) {
             return static_cast<std::size_t>(surface.card.content.fixedColumns)
                 * surface.card.content.fixedRows;
@@ -422,7 +425,7 @@ struct WindowsDesktopHost::Impl {
                         + placement.column + 1);
             }
         }
-        if (surface.dropInsertionIndex.has_value()) {
+        if (includeDropPreview && surface.dropInsertionIndex.has_value()) {
             result = std::max(result, *surface.dropInsertionIndex + 1);
         }
         return result;
@@ -921,7 +924,7 @@ struct WindowsDesktopHost::Impl {
         }
         KillTimer(window, ItemTooltipTimerId);
         if (surface->tooltip != nullptr) {
-            TOOLINFOW tool{.cbSize = sizeof(TOOLINFOW), .hwnd = surface->window, .uId = 1};
+            TOOLINFOW tool{.cbSize = CardTooltipInfoSize, .hwnd = surface->window, .uId = 1};
             SendMessageW(
                 surface->tooltip,
                 TTM_TRACKACTIVATE,
@@ -947,7 +950,7 @@ struct WindowsDesktopHost::Impl {
         }
         KillTimer(window, ItemTooltipTimerId);
         TOOLINFOW tool{
-            .cbSize = sizeof(TOOLINFOW),
+            .cbSize = CardTooltipInfoSize,
             .hwnd = surface->window,
             .uId = 1,
             .lpszText = surface->tooltipText.data(),
@@ -999,7 +1002,7 @@ struct WindowsDesktopHost::Impl {
             surface->tooltipText += L"\n(Shortcut is unavailable)";
         }
         TOOLINFOW tool{
-            .cbSize = sizeof(TOOLINFOW),
+            .cbSize = CardTooltipInfoSize,
             .hwnd = surface->window,
             .uId = 1,
             .lpszText = surface->tooltipText.data(),
@@ -1042,12 +1045,19 @@ struct WindowsDesktopHost::Impl {
                 surface->card.content.fixedRows);
         } else {
             const auto settings = baseItemLayoutSettings(*surface);
+            const auto previousPreview = surface->dropInsertionIndex.has_value()
+                ? std::optional<presentation::CardDropPreview>({
+                    *surface->dropInsertionIndex,
+                    surface->dropPreviewColumns.value_or(settings.preferredColumns),
+                })
+                : std::nullopt;
             const auto preview = presentation::ResolveAdaptiveCardDropPreview(
-                surface->card.items.size(),
+                contentSlotCount(*surface, false),
                 widthDip,
                 pointerXDip,
                 pointerYDip,
-                settings);
+                settings,
+                previousPreview);
             insertion = preview.insertionIndex;
             previewColumns = preview.columns;
         }
@@ -1293,7 +1303,7 @@ struct WindowsDesktopHost::Impl {
             throw std::runtime_error("CreateWindowExW failed for Card item tooltip.");
         }
         TOOLINFOW tool{
-            .cbSize = sizeof(TOOLINFOW),
+            .cbSize = CardTooltipInfoSize,
             .uFlags = TTF_TRACK | TTF_ABSOLUTE,
             .hwnd = surface.window,
             .uId = 1,
@@ -1633,7 +1643,7 @@ struct WindowsDesktopHost::Impl {
             const auto itemFont = !card.content.showItemNames
                 ? nullptr
                 : CreateFontW(
-                -dipToPixels(11.0, surface),
+                    -dipToPixels(settings.itemFontSize, surface),
                 0,
                 0,
                 0,

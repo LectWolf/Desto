@@ -9,30 +9,41 @@ namespace desto::presentation {
 CardContentLayoutSettings ResolveCardContentLayoutSettings(
     const domain::CardContentPreferences& preferences) noexcept {
     CardContentLayoutSettings result;
+    double fileNameHeight = 16.0;
     switch (preferences.itemSize) {
     case domain::CardItemSize::Small:
         result.itemWidth = 37.0;
         result.iconSize = 20.0;
+        result.itemFontSize = 8.0;
+        fileNameHeight = 12.0;
         result.preferredColumns = 6;
         break;
     case domain::CardItemSize::Medium:
         result.itemWidth = 44.0;
         result.iconSize = 26.0;
+        result.itemFontSize = 9.0;
+        fileNameHeight = 14.0;
         result.preferredColumns = 5;
         break;
     case domain::CardItemSize::Large:
         result.itemWidth = 55.0;
         result.iconSize = 34.0;
+        result.itemFontSize = 10.0;
+        fileNameHeight = 16.0;
         result.preferredColumns = 4;
         break;
     case domain::CardItemSize::ExtraLarge:
         result.itemWidth = 74.0;
         result.iconSize = 44.0;
+        result.itemFontSize = 11.0;
+        fileNameHeight = 32.0;
         result.preferredColumns = 3;
         break;
     }
+    result.horizontalGap = 0.0;
+    result.verticalGap = 0.0;
     result.itemHeight = preferences.showItemNames
-        ? result.itemWidth + 24.0
+        ? result.itemWidth + fileNameHeight
         : result.itemWidth;
     return result;
 }
@@ -58,6 +69,7 @@ CardContentLayout ResolveCardContentLayout(
         || !std::isfinite(settings.itemWidth) || settings.itemWidth <= 0
         || !std::isfinite(settings.itemHeight) || settings.itemHeight <= 0
         || !std::isfinite(settings.iconSize) || settings.iconSize <= 0
+        || !std::isfinite(settings.itemFontSize) || settings.itemFontSize <= 0
         || !std::isfinite(settings.horizontalGap) || settings.horizontalGap < 0
         || !std::isfinite(settings.verticalGap) || settings.verticalGap < 0
         || settings.minimumColumns == 0
@@ -123,35 +135,59 @@ std::size_t ResolveCardInsertionIndex(
 }
 
 CardDropPreview ResolveAdaptiveCardDropPreview(
-    std::size_t itemCount,
+    std::size_t occupiedSlotCount,
     double availableWidth,
     double pointerX,
     double pointerY,
-    CardContentLayoutSettings settings) {
-    const auto insertion = ResolveCardInsertionIndex(
-        itemCount, availableWidth, pointerX, pointerY, settings);
-    const auto layout = ResolveCardContentLayout(
-        std::max<std::size_t>(1, itemCount), availableWidth, settings);
-    const auto contentLeft = (availableWidth - layout.contentWidth) / 2.0;
+    CardContentLayoutSettings settings,
+    std::optional<CardDropPreview> previousPreview) {
+    constexpr double edgeExpansionThreshold = 14.0;
+    const auto baseColumns = std::clamp(
+        settings.preferredColumns,
+        settings.minimumColumns,
+        settings.maximumColumns);
+    const auto baseRows = std::max<std::size_t>(
+        1,
+        (std::max<std::size_t>(1, occupiedSlotCount) + baseColumns - 1)
+            / baseColumns);
+    const auto previousColumns = previousPreview.has_value()
+        ? previousPreview->columns : baseColumns;
+    const auto visibleColumns = std::clamp(
+        std::max(baseColumns, previousColumns),
+        settings.minimumColumns,
+        settings.maximumColumns);
+    const auto previousRows = previousPreview.has_value()
+        ? previousPreview->insertionIndex / visibleColumns + 1
+        : baseRows;
+    const auto visibleRows = std::max(baseRows, previousRows);
+    const auto contentWidth = visibleColumns * settings.itemWidth
+        + (visibleColumns - 1) * settings.horizontalGap;
+    const auto contentHeight = visibleRows * settings.itemHeight
+        + (visibleRows - 1) * settings.verticalGap;
+    const auto contentLeft = (availableWidth - contentWidth) / 2.0;
     const auto localX = pointerX - contentLeft;
     const auto localY = pointerY - settings.headerHeight - settings.verticalPadding;
-    const auto belowContent = localY >= layout.contentHeight;
-    if (belowContent) {
-        return {insertion, settings.preferredColumns};
+    const auto pitchX = settings.itemWidth + settings.horizontalGap;
+    const auto pitchY = settings.itemHeight + settings.verticalGap;
+    auto column = static_cast<std::size_t>(std::clamp(
+        std::floor(std::max(0.0, localX) / pitchX),
+        0.0,
+        static_cast<double>(visibleColumns - 1)));
+    auto columns = std::max(baseColumns, column + 1);
+    if (localX >= contentWidth - edgeExpansionThreshold
+        && visibleColumns < settings.maximumColumns) {
+        column = visibleColumns;
+        columns = visibleColumns + 1;
     }
 
-    const auto pitchX = settings.itemWidth + settings.horizontalGap;
-    const auto pointerColumn = localX >= layout.contentWidth
-        ? layout.columns
-        : static_cast<std::size_t>(std::clamp(
-            std::floor((localX + settings.horizontalGap * 0.5) / pitchX),
-            0.0,
-            static_cast<double>(layout.columns - 1)));
-    const auto maximumColumns = std::max(settings.maximumColumns, settings.preferredColumns);
-    const auto columns = std::max(
-        settings.preferredColumns,
-        std::min(pointerColumn + 1, maximumColumns));
-    return {insertion, columns};
+    auto row = static_cast<std::size_t>(std::clamp(
+        std::floor(std::max(0.0, localY) / pitchY),
+        0.0,
+        static_cast<double>(visibleRows - 1)));
+    if (localY >= contentHeight - edgeExpansionThreshold) {
+        row = visibleRows;
+    }
+    return {row * columns + column, columns};
 }
 
 std::optional<std::size_t> ResolveCardSlotIndex(
