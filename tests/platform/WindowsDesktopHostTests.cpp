@@ -34,6 +34,8 @@ void RunTests() {
     }};
     PlacementRect changed{};
     bool callbackCalled = false;
+    bool expansionCallbackCalled = false;
+    bool expanded = true;
     host.setPlacementChangedCallback(
         [&](const PlacementId& placementId, const CardId& cardId, const PlacementRect& rect) {
             DESTO_CHECK(placementId == "placement-test");
@@ -41,6 +43,11 @@ void RunTests() {
             changed = rect;
             callbackCalled = true;
         });
+    host.setCardExpandedChangedCallback([&](const CardId& cardId, bool value) {
+        DESTO_CHECK(cardId == "card-test");
+        expansionCallbackCalled = true;
+        expanded = value;
+    });
     host.present(projections, displays, cards);
 
     const auto window = FindWindowW(L"DestoDesktopHostSurface", L"Desto Host Test");
@@ -64,13 +71,31 @@ void RunTests() {
     DESTO_CHECK(minimums.ptMinTrackSize.x == 160);
     DESTO_CHECK(minimums.ptMinTrackSize.y == 80);
 
+    RECT movingRect{7, 9, 307, 209};
+    SendMessageW(window, WM_MOVING, 0, reinterpret_cast<LPARAM>(&movingRect));
+    const auto guide = FindWindowW(L"DestoAlignmentGuide", nullptr);
+    DESTO_CHECK(guide != nullptr);
+    DESTO_CHECK(IsWindowVisible(guide));
+    DESTO_CHECK((GetWindowLongPtrW(guide, GWL_EXSTYLE) & WS_EX_TRANSPARENT) != 0);
+
     DESTO_CHECK(SetWindowPos(window, nullptr, 7, 9, 300, 200, SWP_NOACTIVATE | SWP_NOZORDER));
     SendMessageW(window, WM_EXITSIZEMOVE, 0, 0);
+    DESTO_CHECK(!IsWindowVisible(guide));
     DESTO_CHECK(callbackCalled);
     DESTO_CHECK(changed.left == 0);
     DESTO_CHECK(changed.top == 0);
     DESTO_CHECK(changed.width == 300);
     DESTO_CHECK(changed.height == 200);
+
+    SendMessageW(window, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(278, 24));
+    SendMessageW(window, WM_LBUTTONUP, 0, MAKELPARAM(278, 24));
+    DESTO_CHECK(expansionCallbackCalled);
+    DESTO_CHECK(!expanded);
+    DESTO_CHECK(SendMessageW(
+        window,
+        WM_NCHITTEST,
+        0,
+        MAKELPARAM(windowRect.left + 100, windowRect.top + 100)) == HTTRANSPARENT);
 }
 
 } // namespace

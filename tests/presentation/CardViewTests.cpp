@@ -16,8 +16,8 @@ void RunTests() {
     DESTO_CHECK(applicationView.title == L"Application");
     DESTO_CHECK(applicationView.showTitle);
     DESTO_CHECK(applicationView.showCollapseControl);
-    DESTO_CHECK(applicationView.showCloseControl);
-    DESTO_CHECK(applicationView.showPinControl);
+    DESTO_CHECK(!applicationView.showCloseControl);
+    DESTO_CHECK(!applicationView.showPinControl);
     DESTO_CHECK(applicationView.opacity == 1.0);
 
     auto chrome = application.chrome();

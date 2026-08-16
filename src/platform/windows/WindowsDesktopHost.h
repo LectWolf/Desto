@@ -16,6 +16,7 @@ public:
         const domain::PlacementId&,
         const domain::CardId&,
         const domain::PlacementRect&)>;
+    using CardExpandedChangedCallback = std::function<void(const domain::CardId&, bool)>;
 
     explicit WindowsDesktopHost(std::wstring title = L"Desto");
     ~WindowsDesktopHost();
@@ -33,6 +34,7 @@ public:
     int run(int durationMilliseconds = 0);
     void requestClose() noexcept;
     void setPlacementChangedCallback(PlacementChangedCallback callback);
+    void setCardExpandedChangedCallback(CardExpandedChangedCallback callback);
 
 private:
     struct Impl;

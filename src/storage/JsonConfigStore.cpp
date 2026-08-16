@@ -223,8 +223,8 @@ ApplicationConfig ParseDocument(const Json& document) {
                     throw std::runtime_error("Configuration card chrome is invalid.");
                 }
                 card.chrome.showCollapseControl = chrome.value("showCollapseControl", true);
-                card.chrome.showCloseControl = chrome.value("showCloseControl", true);
-                card.chrome.showPinControl = chrome.value("showPinControl", true);
+                card.chrome.showCloseControl = chrome.value("showCloseControl", false);
+                card.chrome.showPinControl = chrome.value("showPinControl", false);
                 card.chrome.showTitle = chrome.value("showTitle", true);
             }
             if (value.contains("appearance")) {

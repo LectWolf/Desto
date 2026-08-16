@@ -35,8 +35,8 @@ struct CardDeletionPreview {
 
 struct CardChromePreferences {
     bool showCollapseControl = true;
-    bool showCloseControl = true;
-    bool showPinControl = true;
+    bool showCloseControl = false;
+    bool showPinControl = false;
     bool showTitle = true;
 };
 

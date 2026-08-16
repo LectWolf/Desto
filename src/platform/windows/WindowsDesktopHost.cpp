@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -31,7 +32,28 @@ struct Surface {
     int width = 0;
     int height = 0;
     int interactiveHeight = 0;
+    bool collapsePressed = false;
 };
+
+LRESULT CALLBACK GuideWindowProcedure(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
+    switch (message) {
+    case WM_NCHITTEST:
+        return HTTRANSPARENT;
+    case WM_MOUSEACTIVATE:
+        return MA_NOACTIVATE;
+    case WM_PAINT: {
+        PAINTSTRUCT paint{};
+        const auto dc = BeginPaint(window, &paint);
+        RECT bounds{};
+        GetClientRect(window, &bounds);
+        FillRect(dc, &bounds, reinterpret_cast<HBRUSH>(GetClassLongPtrW(window, GCLP_HBRBACKGROUND)));
+        EndPaint(window, &paint);
+        return 0;
+    }
+    default:
+        return DefWindowProcW(window, message, wParam, lParam);
+    }
+}
 
 } // namespace
 
@@ -44,18 +66,31 @@ struct WindowsDesktopHost::Impl {
     }
 
     ~Impl() {
+        destroyGuides();
         destroySurfaces();
+        if (guideWindowClassRegistered) {
+            UnregisterClassW(guideClassName.c_str(), module);
+        }
         if (windowClassRegistered) {
             UnregisterClassW(className.c_str(), module);
+        }
+        if (guideBrush != nullptr) {
+            DeleteObject(guideBrush);
         }
     }
 
     std::wstring title;
     std::wstring className = L"DestoDesktopHostSurface";
+    std::wstring guideClassName = L"DestoAlignmentGuide";
     HINSTANCE module = nullptr;
     bool windowClassRegistered = false;
+    bool guideWindowClassRegistered = false;
     bool closeRequested = false;
+    HWND verticalGuide = nullptr;
+    HWND horizontalGuide = nullptr;
+    HBRUSH guideBrush = nullptr;
     WindowsDesktopHost::PlacementChangedCallback placementChanged;
+    WindowsDesktopHost::CardExpandedChangedCallback cardExpandedChanged;
     std::vector<Surface> surfaces;
 
     static LRESULT CALLBACK WindowProcedure(
@@ -82,13 +117,51 @@ struct WindowsDesktopHost::Impl {
                 return 0;
             }
             break;
+        case WM_ENTERSIZEMOVE:
+            if (instance != nullptr) {
+                instance->hideGuides();
+                return 0;
+            }
+            break;
+        case WM_MOVING:
+        case WM_SIZING:
+            if (instance != nullptr) {
+                try {
+                    instance->updateInteractionGuides(
+                        window,
+                        *reinterpret_cast<const RECT*>(lParam));
+                } catch (...) {
+                    instance->hideGuides();
+                }
+                return TRUE;
+            }
+            break;
         case WM_EXITSIZEMOVE:
             if (instance != nullptr) {
+                instance->hideGuides();
                 try {
                     instance->commitInteraction(window);
                 } catch (...) {
                     // Native window procedures must not allow exceptions to cross Win32.
                 }
+                return 0;
+            }
+            break;
+        case WM_LBUTTONDOWN:
+            if (instance != nullptr
+                && instance->beginCollapsePress(window, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) {
+                return 0;
+            }
+            break;
+        case WM_LBUTTONUP:
+            if (instance != nullptr
+                && instance->endCollapsePress(window, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) {
+                return 0;
+            }
+            break;
+        case WM_CAPTURECHANGED:
+            if (instance != nullptr) {
+                instance->cancelCollapsePress(window);
                 return 0;
             }
             break;
@@ -111,6 +184,21 @@ struct WindowsDesktopHost::Impl {
             throw std::runtime_error("RegisterClassW failed for desktop host.");
         }
         windowClassRegistered = true;
+
+        guideBrush = CreateSolidBrush(RGB(74, 132, 255));
+        if (guideBrush == nullptr) {
+            throw std::runtime_error("CreateSolidBrush failed for alignment guides.");
+        }
+        WNDCLASSW guideClass{};
+        guideClass.lpfnWndProc = &GuideWindowProcedure;
+        guideClass.hInstance = module;
+        guideClass.lpszClassName = guideClassName.c_str();
+        guideClass.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(IDC_ARROW));
+        guideClass.hbrBackground = guideBrush;
+        if (RegisterClassW(&guideClass) == 0) {
+            throw std::runtime_error("RegisterClassW failed for alignment guides.");
+        }
+        guideWindowClassRegistered = true;
     }
 
     Surface* findSurface(HWND window) noexcept {
@@ -119,6 +207,31 @@ struct WindowsDesktopHost::Impl {
                 return surface.window == window;
             });
         return found == surfaces.end() ? nullptr : &*found;
+    }
+
+    static int dipToPixels(double value, const Surface& surface) noexcept {
+        return std::max(1, static_cast<int>(std::lround(
+            value * surface.display.effectiveDpi / 96.0)));
+    }
+
+    static RECT collapseControlRect(const Surface& surface) noexcept {
+        const auto size = dipToPixels(36.0, surface);
+        const auto inset = dipToPixels(6.0, surface);
+        return {
+            surface.width - inset - size,
+            inset,
+            surface.width - inset,
+            inset + size,
+        };
+    }
+
+    static bool pointInside(const RECT& rect, int x, int y) noexcept {
+        return x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
+    }
+
+    bool isCollapseControlHit(const Surface& surface, int x, int y) const noexcept {
+        return surface.card.showCollapseControl
+            && pointInside(collapseControlRect(surface), x, y);
     }
 
     LRESULT hitTest(HWND window, LPARAM lParam) noexcept {
@@ -133,7 +246,7 @@ struct WindowsDesktopHost::Impl {
         if (y < 0 || y >= surface->interactiveHeight) {
             return HTTRANSPARENT;
         }
-        constexpr int resizeBorder = 6;
+        const auto resizeBorder = dipToPixels(6.0, *surface);
         const auto left = x < resizeBorder;
         const auto right = x >= surface->width - resizeBorder;
         const auto top = y < resizeBorder;
@@ -146,7 +259,7 @@ struct WindowsDesktopHost::Impl {
         if (right) return HTRIGHT;
         if (bottom) return HTBOTTOM;
         if (top) return HTTOP;
-        if (y < 48 && x < surface->width - 96) {
+        if (y < dipToPixels(48.0, *surface) && !isCollapseControlHit(*surface, x, y)) {
             return HTCAPTION;
         }
         return HTCLIENT;
@@ -161,6 +274,176 @@ struct WindowsDesktopHost::Impl {
         const auto scale = surface->display.effectiveDpi / 96.0;
         bounds->ptMinTrackSize.x = static_cast<LONG>(std::lround(160.0 * scale));
         bounds->ptMinTrackSize.y = static_cast<LONG>(std::lround(80.0 * scale));
+    }
+
+    void destroyGuides() noexcept {
+        if (verticalGuide != nullptr) {
+            DestroyWindow(verticalGuide);
+            verticalGuide = nullptr;
+        }
+        if (horizontalGuide != nullptr) {
+            DestroyWindow(horizontalGuide);
+            horizontalGuide = nullptr;
+        }
+    }
+
+    void hideGuides() noexcept {
+        if (verticalGuide != nullptr) {
+            ShowWindow(verticalGuide, SW_HIDE);
+        }
+        if (horizontalGuide != nullptr) {
+            ShowWindow(horizontalGuide, SW_HIDE);
+        }
+    }
+
+    void ensureGuides() {
+        const auto createGuide = [&]() {
+            const auto window = CreateWindowExW(
+                WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
+                guideClassName.c_str(),
+                L"",
+                WS_POPUP,
+                0,
+                0,
+                1,
+                1,
+                nullptr,
+                nullptr,
+                module,
+                nullptr);
+            if (window == nullptr) {
+                throw std::runtime_error("CreateWindowExW failed for alignment guide.");
+            }
+            SetLayeredWindowAttributes(window, 0, 210, LWA_ALPHA);
+            return window;
+        };
+        if (verticalGuide == nullptr) {
+            verticalGuide = createGuide();
+        }
+        if (horizontalGuide == nullptr) {
+            horizontalGuide = createGuide();
+        }
+    }
+
+    void updateInteractionGuides(HWND window, const RECT& windowRect) {
+        auto* moved = findSurface(window);
+        if (moved == nullptr || (GetKeyState(VK_CONTROL) & 0x8000) != 0) {
+            hideGuides();
+            return;
+        }
+        const auto scale = moved->display.effectiveDpi / 96.0;
+        const domain::PlacementRect proposed{
+            .left = windowRect.left / scale - moved->display.workAreaLeft,
+            .top = windowRect.top / scale - moved->display.workAreaTop,
+            .width = (windowRect.right - windowRect.left) / scale,
+            .height = (windowRect.bottom - windowRect.top) / scale,
+        };
+        std::vector<domain::PlacementRect> otherCards;
+        for (const auto& surface : surfaces) {
+            if (surface.window != window
+                && surface.projection.displayId == moved->projection.displayId
+                && surface.projection.placementId != moved->projection.placementId) {
+                otherCards.push_back(surface.projection.rect);
+            }
+        }
+        const auto result = presentation::ResolvePlacementInteractionDetailed(
+            proposed,
+            moved->display.workAreaWidth,
+            moved->display.workAreaHeight,
+            otherCards,
+            false);
+        ensureGuides();
+        constexpr int guideThickness = 2;
+        const auto workLeft = static_cast<int>(std::lround(moved->display.workAreaLeft * scale));
+        const auto workTop = static_cast<int>(std::lround(moved->display.workAreaTop * scale));
+        const auto workWidth = std::max(1, static_cast<int>(std::lround(
+            moved->display.workAreaWidth * scale)));
+        const auto workHeight = std::max(1, static_cast<int>(std::lround(
+            moved->display.workAreaHeight * scale)));
+        if (result.verticalGuide.has_value()) {
+            const auto x = static_cast<int>(std::lround(
+                (moved->display.workAreaLeft + *result.verticalGuide) * scale));
+            SetWindowPos(
+                verticalGuide,
+                HWND_TOPMOST,
+                x - guideThickness / 2,
+                workTop,
+                guideThickness,
+                workHeight,
+                SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        } else {
+            ShowWindow(verticalGuide, SW_HIDE);
+        }
+        if (result.horizontalGuide.has_value()) {
+            const auto y = static_cast<int>(std::lround(
+                (moved->display.workAreaTop + *result.horizontalGuide) * scale));
+            SetWindowPos(
+                horizontalGuide,
+                HWND_TOPMOST,
+                workLeft,
+                y - guideThickness / 2,
+                workWidth,
+                guideThickness,
+                SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        } else {
+            ShowWindow(horizontalGuide, SW_HIDE);
+        }
+    }
+
+    bool beginCollapsePress(HWND window, int x, int y) noexcept {
+        auto* surface = findSurface(window);
+        if (surface == nullptr || !isCollapseControlHit(*surface, x, y)) {
+            return false;
+        }
+        surface->collapsePressed = true;
+        SetCapture(window);
+        try {
+            render(*surface, surface->display, surface->card, surface->ordinal);
+        } catch (...) {
+            surface->collapsePressed = false;
+            ReleaseCapture();
+        }
+        return true;
+    }
+
+    bool endCollapsePress(HWND window, int x, int y) noexcept {
+        auto* surface = findSurface(window);
+        if (surface == nullptr || !surface->collapsePressed) {
+            return false;
+        }
+        const auto commit = isCollapseControlHit(*surface, x, y);
+        surface->collapsePressed = false;
+        if (GetCapture() == window) {
+            ReleaseCapture();
+        }
+        if (commit) {
+            surface->card.expanded = !surface->card.expanded;
+        }
+        try {
+            render(*surface, surface->display, surface->card, surface->ordinal);
+        } catch (...) {
+            return true;
+        }
+        if (commit && cardExpandedChanged) {
+            try {
+                cardExpandedChanged(surface->card.id, surface->card.expanded);
+            } catch (...) {
+                // Native window procedures must not allow callback exceptions to escape.
+            }
+        }
+        return true;
+    }
+
+    void cancelCollapsePress(HWND window) noexcept {
+        auto* surface = findSurface(window);
+        if (surface == nullptr || !surface->collapsePressed) {
+            return;
+        }
+        surface->collapsePressed = false;
+        try {
+            render(*surface, surface->display, surface->card, surface->ordinal);
+        } catch (...) {
+        }
     }
 
     void destroyBitmap(Surface& surface) noexcept {
@@ -242,119 +525,189 @@ struct WindowsDesktopHost::Impl {
         const domain::DisplaySnapshot& display,
         const presentation::CardView& card,
         std::size_t ordinal) {
-        std::uint32_t red = 0x20;
-        std::uint32_t green = 0x80;
-        std::uint32_t blue = 0xD0;
-        const auto lightSurface = card.appearancePreset == "white"
-            || card.appearancePreset == "pearl-pink"
-            || card.appearancePreset == "default";
-        if (lightSurface) {
-            red = 0xF6;
-            green = 0xF7;
-            blue = 0xFA;
-        } else if (card.appearancePreset == "pearl-pink") {
-            red = 0xF4;
-            green = 0xB0;
-            blue = 0xD8;
-        } else if (card.appearancePreset == "compact") {
-            red = 0x30;
-            green = 0xA0;
-            blue = 0x90;
-        } else if (card.appearancePreset == "dark") {
-            red = 0x28;
-            green = 0x34;
-            blue = 0x48;
-        }
-        if (card.appearancePreset == "pearl-pink") {
-            red = 0xF2;
-            green = 0xAE;
-            blue = 0xD6;
-        }
-        red = (red + (ordinal % 3) * 8) & 0xFF;
-        const auto alpha = static_cast<std::uint32_t>(
-            std::lround(std::clamp(card.opacity, 0.0, 1.0) * 255.0));
-        const auto accent = (alpha << 24) | (red << 16) | (green << 8) | blue;
-        const auto visibleBottom = card.expanded ? surface.height : std::min(surface.height, 52);
+        (void)ordinal;
+        const auto darkSurface = card.appearancePreset == "black"
+            || card.appearancePreset == "dark";
+        const auto pearlSurface = card.appearancePreset == "pearl-pink";
+        const auto visibleBottom = card.expanded
+            ? surface.height
+            : std::min(surface.height, dipToPixels(48.0, surface));
         surface.interactiveHeight = visibleBottom;
         const auto radius = std::min(
             static_cast<int>(std::lround(card.cornerRadius * display.effectiveDpi / 96.0)),
             std::min(surface.width, visibleBottom) / 2);
-        const auto isInside = [&](int x, int y) {
-            if (radius <= 0) {
-                return true;
-            }
-            const auto cornerX = x < radius ? radius : x >= surface.width - radius
-                ? surface.width - radius - 1 : -1;
-            const auto cornerY = y < radius ? radius : y >= visibleBottom - radius
-                ? visibleBottom - radius - 1 : -1;
-            if (cornerX < 0 || cornerY < 0) {
-                return true;
-            }
-            const auto dx = static_cast<double>(x - cornerX);
-            const auto dy = static_cast<double>(y - cornerY);
-            return dx * dx + dy * dy <= static_cast<double>(radius * radius);
-        };
-        std::fill(surface.pixels, surface.pixels + surface.width * surface.height, accent);
-        if (visibleBottom < surface.height) {
-            std::fill(surface.pixels + visibleBottom * surface.width,
-                      surface.pixels + surface.width * surface.height,
-                      0u);
-        }
+
         for (int y = 0; y < surface.height; ++y) {
             for (int x = 0; x < surface.width; ++x) {
-                if (y >= visibleBottom || !isInside(x, y)) {
-                    surface.pixels[y * surface.width + x] = 0u;
-                } else if (x < 2 || y < 2 || x >= surface.width - 2
-                           || y >= visibleBottom - 2) {
-                    const auto borderColor = lightSurface ? 0x002B3948u : 0x00FFFFFFu;
-                    surface.pixels[y * surface.width + x] = (alpha << 24) | borderColor;
+                std::uint32_t red = darkSurface ? 31u : 248u;
+                std::uint32_t green = darkSurface ? 33u : 250u;
+                std::uint32_t blue = darkSurface ? 38u : 252u;
+                if (pearlSurface) {
+                    const auto horizontal = surface.width <= 1
+                        ? 0.0
+                        : static_cast<double>(x) / (surface.width - 1);
+                    const auto vertical = visibleBottom <= 1
+                        ? 0.0
+                        : static_cast<double>(std::min(y, visibleBottom - 1))
+                            / (visibleBottom - 1);
+                    red = static_cast<std::uint32_t>(std::lround(
+                        250.0 - 10.0 * horizontal + 4.0 * vertical));
+                    green = static_cast<std::uint32_t>(std::lround(
+                        244.0 + 8.0 * horizontal + 3.0 * vertical));
+                    blue = static_cast<std::uint32_t>(std::lround(
+                        250.0 + 4.0 * horizontal - 1.0 * vertical));
                 }
+                surface.pixels[y * surface.width + x] = (red << 16) | (green << 8) | blue;
             }
         }
+
+        for (int y = 0; y < surface.height; ++y) {
+            if (y >= visibleBottom) {
+                std::fill(
+                    surface.pixels + y * surface.width,
+                    surface.pixels + (y + 1) * surface.width,
+                    0u);
+            }
+        }
+
         const auto text = card.showTitle ? card.title : L"";
         SetBkMode(surface.memoryDc, TRANSPARENT);
-        const auto foreground = lightSurface ? RGB(32, 42, 52) : RGB(255, 255, 255);
+        const auto foreground = darkSurface ? RGB(244, 246, 249) : RGB(38, 40, 45);
         SetTextColor(surface.memoryDc, foreground);
-        wchar_t iconGlyph = L'C';
-        if (card.type == domain::CardType::Application) {
-            iconGlyph = L'A';
-        } else if (card.type == domain::CardType::Mapping) {
-            iconGlyph = L'M';
-        } else if (card.type == domain::CardType::Todo) {
-            iconGlyph = L'T';
+        const auto font = CreateFontW(
+            -dipToPixels(14.0, surface),
+            0,
+            0,
+            0,
+            FW_SEMIBOLD,
+            FALSE,
+            FALSE,
+            FALSE,
+            DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS,
+            CLIP_DEFAULT_PRECIS,
+            CLEARTYPE_QUALITY,
+            DEFAULT_PITCH | FF_DONTCARE,
+            L"Segoe UI Variable Text");
+        const auto previousFont = font == nullptr
+            ? nullptr
+            : SelectObject(surface.memoryDc, font);
+        const auto textLeft = dipToPixels(14.0, surface);
+        const auto control = collapseControlRect(surface);
+        RECT textRect{
+            textLeft,
+            0,
+            card.showCollapseControl ? control.left - dipToPixels(4.0, surface)
+                                     : surface.width - textLeft,
+            std::min(visibleBottom, dipToPixels(48.0, surface)),
+        };
+        DrawTextW(
+            surface.memoryDc,
+            text.c_str(),
+            -1,
+            &textRect,
+            DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
+        if (previousFont != nullptr) {
+            SelectObject(surface.memoryDc, previousFont);
         }
-        RECT iconRect{12, 12, 34, 34};
-        HBRUSH iconBrush = CreateSolidBrush(lightSurface ? RGB(45, 55, 65) : RGB(255, 255, 255));
-        FillRect(surface.memoryDc, &iconRect, iconBrush);
-        DeleteObject(iconBrush);
-        SetTextColor(surface.memoryDc, lightSurface ? RGB(245, 247, 250) : RGB(20, 40, 60));
-        DrawTextW(surface.memoryDc, &iconGlyph, 1, &iconRect,
-                  DT_CENTER | DT_SINGLELINE | DT_VCENTER);
-        SetTextColor(surface.memoryDc, foreground);
-        RECT textRect{42, 12, surface.width - 120, 42};
-        DrawTextW(surface.memoryDc, text.c_str(), -1, &textRect, DT_LEFT | DT_SINGLELINE);
-        int controlRight = surface.width - 12;
-        const auto drawControl = [&](wchar_t glyph, bool enabled) {
-            if (!enabled) {
+        if (font != nullptr) {
+            DeleteObject(font);
+        }
+
+        const auto blendRgb = [&](int x, int y, std::uint32_t color, double coverage) {
+            if (x < 0 || y < 0 || x >= surface.width || y >= visibleBottom || coverage <= 0.0) {
                 return;
             }
-            RECT controlRect{controlRight - 20, 12, controlRight, 42};
-            const std::wstring label(1, glyph);
-            DrawTextW(surface.memoryDc, label.c_str(), -1, &controlRect,
-                      DT_CENTER | DT_SINGLELINE);
-            controlRight -= 24;
+            auto& pixel = surface.pixels[y * surface.width + x];
+            const auto amount = std::clamp(coverage, 0.0, 1.0);
+            const auto mix = [&](int shift) {
+                const auto background = static_cast<double>((pixel >> shift) & 0xFFu);
+                const auto foregroundChannel = static_cast<double>((color >> shift) & 0xFFu);
+                return static_cast<std::uint32_t>(std::lround(
+                    background + (foregroundChannel - background) * amount));
+            };
+            pixel = (mix(16) << 16) | (mix(8) << 8) | mix(0);
         };
-        drawControl(L'X', card.showCloseControl);
-        drawControl(L'P', card.showPinControl);
-        drawControl(card.expanded ? L'-' : L'+', card.showCollapseControl);
+        if (card.showCollapseControl) {
+            const auto centerX = (control.left + control.right) / 2.0;
+            const auto centerY = (control.top + control.bottom) / 2.0;
+            const auto scale = display.effectiveDpi / 96.0;
+            if (surface.collapsePressed) {
+                const auto pressRadius = 14.0 * scale;
+                for (int y = control.top; y < control.bottom; ++y) {
+                    for (int x = control.left; x < control.right; ++x) {
+                        const auto dx = x + 0.5 - centerX;
+                        const auto dy = y + 0.5 - centerY;
+                        const auto coverage = std::clamp(
+                            pressRadius + 0.5 - std::sqrt(dx * dx + dy * dy),
+                            0.0,
+                            1.0);
+                        blendRgb(x, y, darkSurface ? 0x00FFFFFFu : 0x00000000u,
+                                 coverage * 0.08);
+                    }
+                }
+            }
+            const auto chevronColor = darkSurface ? 0x00E5E8EDu : 0x005B6069u;
+            const auto halfWidth = 5.0 * scale;
+            const auto halfHeight = 2.75 * scale;
+            const auto direction = card.expanded ? -1.0 : 1.0;
+            const auto middleY = centerY + direction * halfHeight;
+            const auto sideY = centerY - direction * halfHeight;
+            const auto strokeRadius = std::max(0.75, 0.8 * scale);
+            const auto drawSegment = [&](double x1, double y1, double x2, double y2) {
+                const auto vx = x2 - x1;
+                const auto vy = y2 - y1;
+                const auto lengthSquared = vx * vx + vy * vy;
+                const auto minX = static_cast<int>(std::floor(std::min(x1, x2) - strokeRadius - 1));
+                const auto maxX = static_cast<int>(std::ceil(std::max(x1, x2) + strokeRadius + 1));
+                const auto minY = static_cast<int>(std::floor(std::min(y1, y2) - strokeRadius - 1));
+                const auto maxY = static_cast<int>(std::ceil(std::max(y1, y2) + strokeRadius + 1));
+                for (int y = minY; y <= maxY; ++y) {
+                    for (int x = minX; x <= maxX; ++x) {
+                        const auto px = x + 0.5;
+                        const auto py = y + 0.5;
+                        const auto projection = std::clamp(
+                            ((px - x1) * vx + (py - y1) * vy) / lengthSquared,
+                            0.0,
+                            1.0);
+                        const auto dx = px - (x1 + projection * vx);
+                        const auto dy = py - (y1 + projection * vy);
+                        const auto coverage = std::clamp(
+                            strokeRadius + 0.5 - std::sqrt(dx * dx + dy * dy),
+                            0.0,
+                            1.0);
+                        blendRgb(x, y, chevronColor, coverage);
+                    }
+                }
+            };
+            drawSegment(centerX - halfWidth, sideY, centerX, middleY);
+            drawSegment(centerX, middleY, centerX + halfWidth, sideY);
+        }
 
-        if (card.expanded) {
-            const auto typeText = card.typeLabel + L"  "
-                + std::to_wstring(static_cast<int>(display.effectiveDpi)) + L" DPI";
-            RECT typeRect{14, 58, surface.width - 14, 86};
-            SetTextColor(surface.memoryDc, lightSurface ? RGB(70, 80, 90) : RGB(230, 240, 250));
-            DrawTextW(surface.memoryDc, typeText.c_str(), -1, &typeRect,
-                      DT_LEFT | DT_SINGLELINE);
+        const auto surfaceAlpha = std::clamp(card.opacity, 0.0, 1.0) * 255.0;
+        const auto halfWidth = surface.width / 2.0;
+        const auto halfHeight = visibleBottom / 2.0;
+        for (int y = 0; y < visibleBottom; ++y) {
+            for (int x = 0; x < surface.width; ++x) {
+                double coverage = 1.0;
+                if (radius > 0) {
+                    const auto qx = std::abs(x + 0.5 - halfWidth) - (halfWidth - radius);
+                    const auto qy = std::abs(y + 0.5 - halfHeight) - (halfHeight - radius);
+                    const auto outsideX = std::max(qx, 0.0);
+                    const auto outsideY = std::max(qy, 0.0);
+                    const auto signedDistance = std::sqrt(
+                        outsideX * outsideX + outsideY * outsideY)
+                        + std::min(std::max(qx, qy), 0.0) - radius;
+                    coverage = std::clamp(0.5 - signedDistance, 0.0, 1.0);
+                }
+                const auto alpha = static_cast<std::uint32_t>(std::lround(
+                    surfaceAlpha * coverage));
+                auto& pixel = surface.pixels[y * surface.width + x];
+                const auto red = ((pixel >> 16) & 0xFFu) * alpha / 255u;
+                const auto green = ((pixel >> 8) & 0xFFu) * alpha / 255u;
+                const auto blue = (pixel & 0xFFu) * alpha / 255u;
+                pixel = (alpha << 24) | (red << 16) | (green << 8) | blue;
+            }
         }
 
         HDC screen = GetDC(nullptr);
@@ -583,6 +936,10 @@ void WindowsDesktopHost::requestClose() noexcept {
 
 void WindowsDesktopHost::setPlacementChangedCallback(PlacementChangedCallback callback) {
     impl_->placementChanged = std::move(callback);
+}
+
+void WindowsDesktopHost::setCardExpandedChangedCallback(CardExpandedChangedCallback callback) {
+    impl_->cardExpandedChanged = std::move(callback);
 }
 
 } // namespace desto::platform::windows

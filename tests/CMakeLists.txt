@@ -123,6 +123,19 @@ target_link_libraries(desto_card_view_tests
 
 add_test(NAME desto_card_view_tests COMMAND desto_card_view_tests)
 
+add_executable(desto_card_content_layout_tests
+    presentation/CardContentLayoutTests.cpp
+)
+
+target_include_directories(desto_card_content_layout_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+target_link_libraries(desto_card_content_layout_tests
+    PRIVATE
+        desto_presentation
+)
+
+add_test(NAME desto_card_content_layout_tests COMMAND desto_card_content_layout_tests)
+
 add_executable(desto_placement_interaction_tests
     presentation/PlacementInteractionTests.cpp
 )

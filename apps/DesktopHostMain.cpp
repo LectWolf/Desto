@@ -122,6 +122,13 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                     diagnostics.record(DiagnosticLevel::Warning, "desktop.placement_rejected");
                 }
             });
+        host.setCardExpandedChangedCallback(
+            [&](const CardId& cardId, bool expanded) {
+                if (runtime.execute(SetCardExpanded{cardId, expanded}).status
+                    == CommandStatus::Rejected) {
+                    diagnostics.record(DiagnosticLevel::Warning, "desktop.expansion_rejected");
+                }
+            });
         host.present(runtime.projections(), displays, cardViews);
         if (!lifecycle.runtimeReady().applied) {
             throw std::runtime_error("Runtime lifecycle transition failed.");

@@ -15,8 +15,8 @@ struct CardView {
     bool expanded = true;
     bool showTitle = true;
     bool showCollapseControl = true;
-    bool showCloseControl = true;
-    bool showPinControl = true;
+    bool showCloseControl = false;
+    bool showPinControl = false;
     std::string appearancePreset = "default";
     double opacity = 1.0;
     double cornerRadius = 16.0;

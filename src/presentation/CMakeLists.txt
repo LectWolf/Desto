@@ -1,4 +1,6 @@
 add_library(desto_presentation STATIC
+    CardContentLayout.cpp
+    CardContentLayout.h
     CardView.cpp
     CardView.h
     PlacementInteraction.cpp
