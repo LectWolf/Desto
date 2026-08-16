@@ -5,6 +5,7 @@
 #include <cmath>
 #include <fstream>
 #include <format>
+#include <regex>
 #include <stdexcept>
 #include <unordered_set>
 
@@ -93,6 +94,23 @@ domain::ApplicationItemSortMode ParseApplicationItemSortMode(const std::string& 
     if (value == "itemType") return domain::ApplicationItemSortMode::ItemType;
     if (value == "modifiedDate") return domain::ApplicationItemSortMode::ModifiedDate;
     throw std::runtime_error("Configuration application sort mode is invalid.");
+}
+
+domain::TodoDate ParseTodoDate(const std::string& value) {
+    std::smatch match;
+    static const std::regex pattern(R"(^([0-9]{4})-([0-9]{2})-([0-9]{2})$)");
+    if (!std::regex_match(value, match, pattern)) {
+        throw std::runtime_error("Configuration Todo date is invalid.");
+    }
+    const domain::TodoDate date{
+        static_cast<std::int32_t>(std::stoi(match[1].str())),
+        static_cast<std::uint8_t>(std::stoi(match[2].str())),
+        static_cast<std::uint8_t>(std::stoi(match[3].str())),
+    };
+    if (!domain::IsValidTodoDate(date)) {
+        throw std::runtime_error("Configuration Todo date is invalid.");
+    }
+    return date;
 }
 
 Json ReadDocument(const std::filesystem::path& path) {
@@ -185,6 +203,12 @@ Json MigrateDocument(Json document) {
             }
             document["schemaVersion"] = 5;
             version = 5;
+            continue;
+        }
+        if (version == 5) {
+            // Schema 6 adds optional Todo dates, creation timestamps and archive state.
+            document["schemaVersion"] = 6;
+            version = 6;
             continue;
         }
         throw std::runtime_error("Configuration schema migration is unavailable.");
@@ -422,11 +446,24 @@ ApplicationConfig ParseDocument(const Json& document) {
                         || !item.contains("title") || !item.at("title").is_string()) {
                         throw std::runtime_error("Configuration todo item is invalid.");
                     }
+                    std::optional<domain::TodoDate> scheduledDate;
+                    if (item.contains("scheduledDate") && !item.at("scheduledDate").is_null()) {
+                        if (!item.at("scheduledDate").is_string()) {
+                            throw std::runtime_error("Configuration Todo date is invalid.");
+                        }
+                        scheduledDate = ParseTodoDate(item.at("scheduledDate").get<std::string>());
+                    }
                     card.todoItems.push_back({
                         .id = item.at("id").get<std::string>(),
                         .title = item.at("title").get<std::string>(),
                         .completed = item.value("completed", false),
+                        .createdAtUnixMilliseconds = item.value("createdAt", std::int64_t{0}),
+                        .scheduledDate = scheduledDate,
+                        .archived = item.value("archived", false),
                     });
+                }
+                if (todo.contains("showCreatedTime")) {
+                    card.todoPreferences.showCreatedTime = todo.at("showCreatedTime").get<bool>();
                 }
                 break;
             }
@@ -583,10 +620,9 @@ void JsonConfigStore::save(const ApplicationConfig& config) const {
             }
             break;
         case domain::CardType::Todo:
-            for (const auto& item : card.todoItems) {
-                if (item.id.empty() || item.title.empty()) {
-                    throw std::invalid_argument("Todo item must have an id and title.");
-                }
+            {
+                domain::TodoCard validated(card.id);
+                validated.setItems(card.todoItems);
             }
             break;
         }
@@ -697,13 +733,20 @@ void JsonConfigStore::save(const ApplicationConfig& config) const {
         case domain::CardType::Todo:
             value.erase("application");
             value.erase("mapping");
+            value["todo"]["showCreatedTime"] = card.todoPreferences.showCreatedTime;
             value["todo"]["items"] = Json::array();
             for (const auto& item : card.todoItems) {
-                value["todo"]["items"].push_back({
+                Json serializedItem{
                     {"id", item.id},
                     {"title", item.title},
                     {"completed", item.completed},
-                });
+                    {"createdAt", item.createdAtUnixMilliseconds},
+                    {"archived", item.archived},
+                };
+                if (item.scheduledDate.has_value()) {
+                    serializedItem["scheduledDate"] = domain::ToString(*item.scheduledDate);
+                }
+                value["todo"]["items"].push_back(std::move(serializedItem));
             }
             break;
         }

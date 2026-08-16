@@ -62,6 +62,7 @@ struct CardView {
     std::vector<domain::ApplicationItemPlacement> applicationItemPlacements;
     domain::MappingMode mappingMode = domain::MappingMode::Empty;
     bool mappingAllowsSourceMutation = true;
+    domain::TodoCardPreferences todoPreferences;
     std::vector<domain::TodoItem> todoItems;
     std::vector<CardItemView> items;
 };

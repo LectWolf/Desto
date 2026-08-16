@@ -24,11 +24,14 @@ void RunTests() {
     bool dropped = false;
     std::optional<std::string> expectedSourceCardId = "application-1";
     auto* target = CreateFileDropTarget({
-        .dragOver = [&](POINTL point, DWORD allowed) {
+        .dragOver = [&] (POINTL point,
+                        DWORD allowed,
+                        const std::optional<std::string>& sourceCardId) {
             entered = true;
             DESTO_CHECK(point.x == 140);
             DESTO_CHECK(point.y == 220);
             DESTO_CHECK((allowed & DROPEFFECT_MOVE) != 0);
+            DESTO_CHECK(sourceCardId == expectedSourceCardId);
             return static_cast<DWORD>(DROPEFFECT_MOVE);
         },
         .dragLeave = [&] { left = true; },

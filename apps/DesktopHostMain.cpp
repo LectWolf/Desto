@@ -417,8 +417,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                 }
             });
         std::uint64_t nextTodoItemSequence = 1;
-        host.setTodoItemAddedCallback(
-            [&](const CardId& cardId, const std::string& title)
+        host.setTodoItemAddedScheduledCallback(
+            [&](const CardId& cardId, const std::string& title, TodoDate scheduledDate)
                 -> std::optional<TodoItem> {
                 const auto* card = runtime.findCard(cardId);
                 if (card == nullptr || card->type() != CardType::Todo) return std::nullopt;
@@ -429,10 +429,12 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                 } while (std::ranges::any_of(todo->items(), [&](const TodoItem& item) {
                     return item.id == itemId;
                 }));
-                const auto result = runtime.execute(AddTodoItem{cardId, itemId, title});
-                return result.status == CommandStatus::Applied
-                    ? std::optional<TodoItem>{{itemId, title, false}}
-                    : std::nullopt;
+                const auto result = runtime.execute(
+                    AddTodoItem{cardId, itemId, title, 0, scheduledDate});
+                if (result.status != CommandStatus::Applied) return std::nullopt;
+                const auto* updated = static_cast<const TodoCard*>(runtime.findCard(cardId));
+                const auto item = std::ranges::find(updated->items(), itemId, &TodoItem::id);
+                return item == updated->items().end() ? std::nullopt : std::optional<TodoItem>(*item);
             });
         host.setTodoItemRenamedCallback(
             [&](const CardId& cardId, const std::string& itemId, const std::string& title) {
@@ -454,6 +456,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                 return runtime.execute(ReorderTodoItems{cardId, order}).status
                     != CommandStatus::Rejected;
             });
+        host.setTodoItemsArchivedCallback([&](const CardId& cardId) {
+            return runtime.execute(ArchiveCompletedTodoItems{cardId}).status
+                != CommandStatus::Rejected;
+        });
         host.setApplicationItemsDroppedCallback(
             [&](const CardId& cardId,
                 const std::vector<std::filesystem::path>& paths,

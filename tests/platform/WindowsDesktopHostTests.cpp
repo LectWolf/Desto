@@ -23,7 +23,7 @@ HWND FindOwnedTooltip(HWND owner) {
         wchar_t className[64]{};
         if (GetWindow(candidate, GW_OWNER) == value.owner
             && GetClassNameW(candidate, className, 64) > 0
-            && _wcsicmp(className, TOOLTIPS_CLASSW) == 0) {
+            && _wcsicmp(className, L"DestoItemTooltip") == 0) {
             value.result = candidate;
             return FALSE;
         }
@@ -167,29 +167,16 @@ void RunTests() {
 
     const auto tooltip = FindOwnedTooltip(window);
     DESTO_CHECK(tooltip != nullptr);
+    wchar_t tooltipClass[64]{};
+    DESTO_CHECK(GetClassNameW(
+        tooltip, tooltipClass, static_cast<int>(std::size(tooltipClass))) > 0);
+    DESTO_CHECK(std::wstring_view(tooltipClass) == L"DestoItemTooltip");
     SendMessageW(window, WM_MOUSEMOVE, 0, MAKELPARAM(56, 82));
     DESTO_CHECK(!IsWindowVisible(tooltip));
-    DESTO_CHECK(SendMessageW(tooltip, TTM_GETTOOLCOUNT, 0, 0) == 1);
     SendMessageW(window, WM_TIMER, 2, 0);
-    TOOLINFOW currentTooltipTool{.cbSize = TTTOOLINFOW_V2_SIZE};
-    DESTO_CHECK(SendMessageW(
-        tooltip,
-        TTM_GETCURRENTTOOLW,
-        0,
-        reinterpret_cast<LPARAM>(&currentTooltipTool)) != FALSE);
     DESTO_CHECK(IsWindowVisible(tooltip));
     wchar_t tooltipText[128]{};
-    TOOLINFOW tooltipTool{
-        .cbSize = TTTOOLINFOW_V2_SIZE,
-        .hwnd = window,
-        .uId = 1,
-        .lpszText = tooltipText,
-    };
-    SendMessageW(
-        tooltip,
-        TTM_GETTEXTW,
-        static_cast<WPARAM>(std::size(tooltipText)),
-        reinterpret_cast<LPARAM>(&tooltipTool));
+    GetWindowTextW(tooltip, tooltipText, static_cast<int>(std::size(tooltipText)));
     DESTO_CHECK(std::wstring_view(tooltipText) == L"Example.txt");
     SendMessageW(window, WM_MOUSELEAVE, 0, 0);
     DESTO_CHECK(!IsWindowVisible(tooltip));
@@ -375,6 +362,8 @@ void RunTests() {
         WindowsDesktopHost todoHost(L"Desto Todo Host Test");
         bool completedChanged = false;
         bool renamed = false;
+        bool archived = false;
+        std::optional<TodoDate> addedDate;
         std::vector<std::string> reordered;
         todoHost.setTodoItemCompletedChangedCallback(
             [&](const CardId& cardId, const std::string& itemId, bool completed) {
@@ -396,32 +385,57 @@ void RunTests() {
                 reordered = order;
                 return true;
             });
+        todoHost.setTodoItemsArchivedCallback([&](const CardId& cardId) {
+            DESTO_CHECK(cardId == "todo-card");
+            archived = true;
+            return true;
+        });
+        todoHost.setTodoItemAddedScheduledCallback(
+            [&](const CardId& cardId, const std::string& title, TodoDate date)
+                -> std::optional<TodoItem> {
+                DESTO_CHECK(cardId == "todo-card");
+                DESTO_CHECK(title == "Scheduled task");
+                addedDate = date;
+                return TodoItem{.id = "todo-scheduled", .title = title, .scheduledDate = date};
+            });
         todoHost.present(todoProjections, displays, todoCards);
         const auto todoWindow = FindWindowW(L"DestoDesktopHostSurface", L"Desto Todo Host Test");
         DESTO_CHECK(todoWindow != nullptr);
         RECT todoRect{};
         DESTO_CHECK(GetWindowRect(todoWindow, &todoRect));
-        DESTO_CHECK(todoRect.bottom - todoRect.top == 130);
+        DESTO_CHECK(todoRect.bottom - todoRect.top == 200);
 
-        SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(26, 69));
+        SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(26, 131));
         DESTO_CHECK(completedChanged);
 
-        SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(100, 69));
-        SendMessageW(todoWindow, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(100, 105));
-        SendMessageW(todoWindow, WM_LBUTTONUP, 0, MAKELPARAM(100, 105));
+        SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(100, 131));
+        SendMessageW(todoWindow, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(100, 173));
+        SendMessageW(todoWindow, WM_LBUTTONUP, 0, MAKELPARAM(100, 173));
         DESTO_CHECK(reordered == std::vector<std::string>({"todo-second", "todo-first"}));
 
-        SendMessageW(todoWindow, WM_LBUTTONDBLCLK, MK_LBUTTON, MAKELPARAM(100, 69));
+        SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(100, 131));
+        SendMessageW(todoWindow, WM_LBUTTONUP, 0, MAKELPARAM(100, 131));
         const auto editor = FindWindowW(L"Edit", L"Second task");
         DESTO_CHECK(editor != nullptr);
         SetWindowTextW(editor, L"Renamed task");
         SendMessageW(editor, WM_KEYDOWN, VK_RETURN, 0);
         DESTO_CHECK(renamed);
 
+        todoCards.front().todoItems.front().completed = true;
         todoCards.front().todoItems.push_back({"todo-third", "Third task", false});
         todoHost.updateTodoItems("todo-card", todoCards.front().todoItems);
         DESTO_CHECK(GetWindowRect(todoWindow, &todoRect));
-        DESTO_CHECK(todoRect.bottom - todoRect.top == 166);
+        DESTO_CHECK(todoRect.bottom - todoRect.top == 242);
+
+        SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(259, 24));
+        DESTO_CHECK(archived);
+        SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(250, 70));
+        SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(40, 70));
+        const auto addEditor = FindWindowW(L"Edit", L"");
+        DESTO_CHECK(addEditor != nullptr);
+        SetWindowTextW(addEditor, L"Scheduled task");
+        SendMessageW(addEditor, WM_KEYDOWN, VK_RETURN, 0);
+        DESTO_CHECK(addedDate == AddTodoDays(CurrentSystemTodoDate(), 1));
     }
 }
 

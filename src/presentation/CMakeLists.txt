@@ -7,6 +7,8 @@ add_library(desto_presentation STATIC
     PlacementInteraction.h
     PremultipliedImageResampler.cpp
     PremultipliedImageResampler.h
+    RoundedDashGeometry.cpp
+    RoundedDashGeometry.h
 )
 
 target_compile_features(desto_presentation PUBLIC cxx_std_20)

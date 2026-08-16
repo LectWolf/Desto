@@ -55,13 +55,24 @@ struct CardDropPreview {
     std::size_t columns = 1;
 };
 
+enum class CardDropOrigin {
+    External,
+    SameCard,
+    OtherCard,
+};
+
+[[nodiscard]] bool IsAdaptiveDropExpansionReady(
+    CardDropOrigin origin,
+    std::uint64_t edgeHoverMilliseconds) noexcept;
+
 [[nodiscard]] CardDropPreview ResolveAdaptiveCardDropPreview(
     std::size_t occupiedSlotCount,
     double availableWidth,
     double pointerX,
     double pointerY,
     CardContentLayoutSettings settings = {},
-    std::optional<CardDropPreview> previousPreview = std::nullopt);
+    std::optional<CardDropPreview> previousPreview = std::nullopt,
+    bool allowEdgeExpansion = true);
 
 [[nodiscard]] std::optional<std::size_t> ResolveCardSlotIndex(
     double availableWidth,

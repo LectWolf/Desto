@@ -432,9 +432,11 @@ public:
         DWORD* effect) override {
         try {
             acceptsFiles_ = SupportsFormat(data, FileDropFormat());
+            sourceCardId_ = ReadSourceCardId(data);
             return Update(point, effect);
         } catch (...) {
             acceptsFiles_ = false;
+            sourceCardId_.reset();
             if (effect != nullptr) *effect = DROPEFFECT_NONE;
             return E_UNEXPECTED;
         }
@@ -450,6 +452,7 @@ public:
     HRESULT STDMETHODCALLTYPE DragLeave() override {
         try {
             acceptsFiles_ = false;
+            sourceCardId_.reset();
             if (callbacks_.dragLeave) {
                 callbacks_.dragLeave();
             }
@@ -471,6 +474,7 @@ public:
             auto paths = acceptsFiles_ ? ReadFileDrop(data) : std::vector<std::filesystem::path>{};
             acceptsFiles_ = false;
             auto sourceCardId = ReadSourceCardId(data);
+            sourceCardId_.reset();
             const auto internalSource = sourceCardId.has_value();
             *effect = !paths.empty() && callbacks_.drop
                 ? callbacks_.drop(std::move(paths), std::move(sourceCardId), point, allowed)
@@ -496,7 +500,7 @@ private:
         }
         const auto allowed = *effect;
         *effect = acceptsFiles_ && callbacks_.dragOver
-            ? callbacks_.dragOver(point, allowed)
+            ? callbacks_.dragOver(point, allowed, sourceCardId_)
             : DROPEFFECT_NONE;
         return S_OK;
     }
@@ -504,6 +508,7 @@ private:
     std::atomic<ULONG> references_{1};
     FileDropTargetCallbacks callbacks_;
     bool acceptsFiles_ = false;
+    std::optional<std::string> sourceCardId_;
 };
 
 } // namespace

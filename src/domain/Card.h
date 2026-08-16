@@ -2,8 +2,10 @@
 
 #include <filesystem>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 namespace desto::domain {
@@ -92,12 +94,39 @@ struct FileReference {
     bool operator==(const FileReference&) const = default;
 };
 
+struct TodoDate {
+    std::int32_t year = 1970;
+    std::uint8_t month = 1;
+    std::uint8_t day = 1;
+
+    bool operator==(const TodoDate&) const = default;
+    bool operator<(const TodoDate& other) const noexcept {
+        return std::tie(year, month, day)
+            < std::tie(other.year, other.month, other.day);
+    }
+};
+
+[[nodiscard]] bool IsValidTodoDate(TodoDate date) noexcept;
+[[nodiscard]] TodoDate CurrentSystemTodoDate() noexcept;
+[[nodiscard]] TodoDate AddTodoDays(TodoDate date, std::int32_t days) noexcept;
+[[nodiscard]] std::int32_t CompareTodoDates(TodoDate left, TodoDate right) noexcept;
+[[nodiscard]] std::string ToString(TodoDate date);
+
 struct TodoItem {
     std::string id;
     std::string title;
     bool completed = false;
+    std::int64_t createdAtUnixMilliseconds = 0;
+    std::optional<TodoDate> scheduledDate;
+    bool archived = false;
 
     bool operator==(const TodoItem&) const = default;
+};
+
+struct TodoCardPreferences {
+    bool showCreatedTime = false;
+
+    bool operator==(const TodoCardPreferences&) const = default;
 };
 
 // Persistence-neutral value representation used at the storage seam.
@@ -115,6 +144,7 @@ struct CardSnapshot {
     std::filesystem::path mappingSourceRoot;
     std::vector<FileReference> mappingReferences;
     bool mappingAllowsSourceMutation = true;
+    TodoCardPreferences todoPreferences;
     std::vector<TodoItem> todoItems;
 };
 
@@ -209,9 +239,12 @@ public:
         return CardDeletionEffect::RemoveCardOnly;
     }
     [[nodiscard]] const std::vector<TodoItem>& items() const noexcept { return items_; }
+    [[nodiscard]] const TodoCardPreferences& preferences() const noexcept { return preferences_; }
     void setItems(std::vector<TodoItem> items);
+    void setPreferences(TodoCardPreferences preferences) noexcept { preferences_ = preferences; }
 
 private:
+    TodoCardPreferences preferences_;
     std::vector<TodoItem> items_;
 };
 

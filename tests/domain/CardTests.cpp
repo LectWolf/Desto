@@ -27,12 +27,18 @@ void RunTests() {
     DESTO_CHECK(todos.deletionPreview().requiresConfirmation);
     DESTO_CHECK(mapping.mode() == MappingMode::Empty);
     DESTO_CHECK(mapping.presentsAsFolderMapping());
+    DESTO_CHECK(IsValidTodoDate({2024, 2, 29}));
+    DESTO_CHECK(!IsValidTodoDate({2023, 2, 29}));
+    DESTO_CHECK(AddTodoDays({2024, 2, 28}, 1) == TodoDate(2024, 2, 29));
+    DESTO_CHECK(ToString({2026, 8, 16}) == "2026-08-16");
 
     todos.setItems({
-        {.id = "todo-1", .title = "First", .completed = false},
-        {.id = "todo-2", .title = "Second", .completed = true},
+        {.id = "todo-1", .title = "First", .completed = false,
+         .createdAtUnixMilliseconds = 100, .scheduledDate = TodoDate{2026, 8, 16}},
+        {.id = "todo-2", .title = "Second", .completed = true, .archived = true},
     });
     DESTO_CHECK(todos.items().size() == 2);
+    DESTO_CHECK(todos.items()[0].scheduledDate == TodoDate(2026, 8, 16));
     const auto validTodos = todos.items();
 
     bool invalidTodosRejected = false;

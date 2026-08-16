@@ -164,7 +164,9 @@ void RunTests() {
                 .id = "todo-1",
                 .type = CardType::Todo,
                 .todoItems = {
-                    {.id = "todo-item-1", .title = "Ship persistence", .completed = true},
+                    {.id = "todo-item-1", .title = "Ship persistence", .completed = true,
+                     .createdAtUnixMilliseconds = 1723800000000,
+                     .scheduledDate = TodoDate{2024, 8, 16}},
                 },
             },
         };
@@ -209,6 +211,7 @@ void RunTests() {
         DESTO_CHECK(!reloadedConfig.cards[1].mappingAllowsSourceMutation);
         DESTO_CHECK(reloadedConfig.cards[2].todoItems.size() == 1);
         DESTO_CHECK(reloadedConfig.cards[2].todoItems.front().completed);
+        DESTO_CHECK(reloadedConfig.cards[2].todoItems.front().createdAtUnixMilliseconds > 0);
         DESTO_CHECK(reloadedConfig.workspace.placements().front().horizontalAnchor
                     == PlacementHorizontalAnchor::Right);
         DESTO_CHECK(reloadedConfig.workspace.placements().front().verticalAnchor

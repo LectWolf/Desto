@@ -1,6 +1,7 @@
 #include "ApplicationRuntime.h"
 
 #include <algorithm>
+#include <chrono>
 #include <stdexcept>
 #include <utility>
 
@@ -96,6 +97,7 @@ std::unique_ptr<domain::Card> RestoreCard(const domain::CardSnapshot& snapshot) 
         {
             auto todo = std::make_unique<domain::TodoCard>(snapshot.id);
             todo->setItems(snapshot.todoItems);
+            todo->setPreferences(snapshot.todoPreferences);
             card = std::move(todo);
         }
         break;
@@ -177,6 +179,7 @@ std::vector<domain::CardSnapshot> ApplicationRuntime::cardSnapshots() const {
             break;
         }
         case domain::CardType::Todo:
+            snapshot.todoPreferences = static_cast<const domain::TodoCard*>(card)->preferences();
             snapshot.todoItems = static_cast<const domain::TodoCard*>(card)->items();
             break;
         }
@@ -288,8 +291,76 @@ CommandResult ApplicationRuntime::handle(const AddTodoItem& command) {
         return rejected(CommandError::DuplicateTodoItemId);
     }
     auto items = todo->items();
-    items.push_back({command.itemId, command.title, false});
+    items.push_back({
+        command.itemId,
+        command.title,
+        false,
+        command.createdAtUnixMilliseconds == 0
+            ? std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count()
+            : command.createdAtUnixMilliseconds,
+        command.scheduledDate.value_or(domain::CurrentSystemTodoDate()),
+        false,
+    });
     todo->setItems(std::move(items));
+    return applied({
+        .changedCards = {command.cardId},
+        .persistence = PersistenceUrgency::Deferred,
+    });
+}
+
+CommandResult ApplicationRuntime::handle(const ArchiveCompletedTodoItems& command) {
+    auto card = cards_.find(command.cardId);
+    if (card == cards_.end() || card->second->type() != domain::CardType::Todo) {
+        return rejected(CommandError::CardNotFound);
+    }
+    auto* todo = static_cast<domain::TodoCard*>(card->second.get());
+    auto items = todo->items();
+    bool changed = false;
+    for (auto& item : items) {
+        if (item.completed && !item.archived) {
+            item.archived = true;
+            changed = true;
+        }
+    }
+    if (!changed) return noChange();
+    todo->setItems(std::move(items));
+    return applied({
+        .changedCards = {command.cardId},
+        .persistence = PersistenceUrgency::Deferred,
+    });
+}
+
+CommandResult ApplicationRuntime::handle(const RestoreArchivedTodoItems& command) {
+    auto card = cards_.find(command.cardId);
+    if (card == cards_.end() || card->second->type() != domain::CardType::Todo) {
+        return rejected(CommandError::CardNotFound);
+    }
+    auto* todo = static_cast<domain::TodoCard*>(card->second.get());
+    auto items = todo->items();
+    bool changed = false;
+    for (auto& item : items) {
+        if (item.archived) {
+            item.archived = false;
+            changed = true;
+        }
+    }
+    if (!changed) return noChange();
+    todo->setItems(std::move(items));
+    return applied({
+        .changedCards = {command.cardId},
+        .persistence = PersistenceUrgency::Deferred,
+    });
+}
+
+CommandResult ApplicationRuntime::handle(const SetTodoCardPreferences& command) {
+    auto card = cards_.find(command.cardId);
+    if (card == cards_.end() || card->second->type() != domain::CardType::Todo) {
+        return rejected(CommandError::CardNotFound);
+    }
+    auto* todo = static_cast<domain::TodoCard*>(card->second.get());
+    if (todo->preferences() == command.preferences) return noChange();
+    todo->setPreferences(command.preferences);
     return applied({
         .changedCards = {command.cardId},
         .persistence = PersistenceUrgency::Deferred,

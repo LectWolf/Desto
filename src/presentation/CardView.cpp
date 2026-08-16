@@ -45,7 +45,9 @@ CardView MakeCardView(const domain::Card& card) {
         result.mappingMode = mapping.mode();
         result.mappingAllowsSourceMutation = mapping.allowsSourceMutation();
     } else if (card.type() == domain::CardType::Todo) {
-        result.todoItems = static_cast<const domain::TodoCard&>(card).items();
+        const auto& todo = static_cast<const domain::TodoCard&>(card);
+        result.todoPreferences = todo.preferences();
+        result.todoItems = todo.items();
     }
     return result;
 }

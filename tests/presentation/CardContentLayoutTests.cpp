@@ -1,5 +1,6 @@
 #include "CardContentLayout.h"
 #include "PremultipliedImageResampler.h"
+#include "RoundedDashGeometry.h"
 #include "TestSupport.h"
 
 #include <stdexcept>
@@ -99,6 +100,31 @@ void RunTests() {
     DESTO_CHECK(SamplePremultipliedBilinear(image, 2, 2, 3, 3, 0, 0) == image[0]);
     DESTO_CHECK(SamplePremultipliedBilinear(image, 2, 2, 3, 3, 1, 1) == 0xBF404040u);
 
+    const RoundedDashSpec dashSpec{
+        .width = 160.0,
+        .height = 80.0,
+        .radius = 12.0,
+        .strokeWidth = 2.5,
+        .nominalPeriod = 9.0,
+    };
+    DESTO_CHECK(SampleRoundedDashCoverage(dashSpec, 80.0, 1.25) > 0.9);
+    bool topHasDash = false;
+    bool topHasGap = false;
+    for (int x = 16; x < 144; ++x) {
+        const auto coverage = SampleRoundedDashCoverage(dashSpec, x + 0.5, 1.25);
+        topHasDash = topHasDash || coverage > 0.8;
+        topHasGap = topHasGap || coverage < 0.1;
+        DESTO_CHECK(std::abs(
+            coverage - SampleRoundedDashCoverage(dashSpec, 159.5 - x, 1.25)) < 0.0001);
+    }
+    DESTO_CHECK(topHasDash);
+    DESTO_CHECK(topHasGap);
+    DESTO_CHECK(IsAdaptiveDropExpansionReady(CardDropOrigin::External, 0));
+    DESTO_CHECK(IsAdaptiveDropExpansionReady(CardDropOrigin::OtherCard, 0));
+    DESTO_CHECK(!IsAdaptiveDropExpansionReady(CardDropOrigin::SameCard, 0));
+    DESTO_CHECK(!IsAdaptiveDropExpansionReady(CardDropOrigin::SameCard, 359));
+    DESTO_CHECK(IsAdaptiveDropExpansionReady(CardDropOrigin::SameCard, 360));
+
     DESTO_CHECK(ResolveCardInsertionIndex(7, 320.0, 36.0, 64.0) == 0);
     DESTO_CHECK(ResolveCardInsertionIndex(7, 320.0, 110.0, 64.0) == 1);
     DESTO_CHECK(ResolveCardInsertionIndex(4, 256.0, 250.0, 80.0) == 4);
@@ -107,6 +133,10 @@ void RunTests() {
         4, 256.0, 250.0, 80.0, large);
     DESTO_CHECK(rightExpansion.insertionIndex == 4);
     DESTO_CHECK(rightExpansion.columns == 5);
+    const auto delayedRightExpansion = ResolveAdaptiveCardDropPreview(
+        4, 256.0, 250.0, 80.0, large, std::nullopt, false);
+    DESTO_CHECK(delayedRightExpansion.columns == 4);
+    DESTO_CHECK(delayedRightExpansion.insertionIndex == 3);
     const auto downwardExpansion = ResolveAdaptiveCardDropPreview(
         4, 256.0, 100.0, 120.0, large);
     DESTO_CHECK(downwardExpansion.insertionIndex == 5);

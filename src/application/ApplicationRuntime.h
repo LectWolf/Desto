@@ -32,6 +32,8 @@ struct AddTodoItem {
     domain::CardId cardId;
     std::string itemId;
     std::string title;
+    std::int64_t createdAtUnixMilliseconds = 0;
+    std::optional<domain::TodoDate> scheduledDate;
 };
 
 struct RenameTodoItem {
@@ -54,6 +56,19 @@ struct RemoveTodoItem {
 struct ReorderTodoItems {
     domain::CardId cardId;
     std::vector<std::string> orderedItemIds;
+};
+
+struct ArchiveCompletedTodoItems {
+    domain::CardId cardId;
+};
+
+struct RestoreArchivedTodoItems {
+    domain::CardId cardId;
+};
+
+struct SetTodoCardPreferences {
+    domain::CardId cardId;
+    domain::TodoCardPreferences preferences;
 };
 
 struct SetCardVisibility {
@@ -131,6 +146,9 @@ using ApplicationCommand = std::variant<
     SetTodoItemCompleted,
     RemoveTodoItem,
     ReorderTodoItems,
+    ArchiveCompletedTodoItems,
+    RestoreArchivedTodoItems,
+    SetTodoCardPreferences,
     SetCardVisibility,
     SetCardExpanded,
     SetCardContentPreferences,
@@ -233,6 +251,9 @@ private:
     [[nodiscard]] CommandResult handle(const SetTodoItemCompleted& command);
     [[nodiscard]] CommandResult handle(const RemoveTodoItem& command);
     [[nodiscard]] CommandResult handle(const ReorderTodoItems& command);
+    [[nodiscard]] CommandResult handle(const ArchiveCompletedTodoItems& command);
+    [[nodiscard]] CommandResult handle(const RestoreArchivedTodoItems& command);
+    [[nodiscard]] CommandResult handle(const SetTodoCardPreferences& command);
     [[nodiscard]] CommandResult handle(const SetCardVisibility& command);
     [[nodiscard]] CommandResult handle(const SetCardExpanded& command);
     [[nodiscard]] CommandResult handle(const SetCardContentPreferences& command);

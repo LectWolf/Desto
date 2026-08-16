@@ -1,12 +1,40 @@
 #include "Card.h"
 
 #include <algorithm>
+#include <array>
+#include <chrono>
 #include <cwctype>
+#include <iomanip>
+#include <sstream>
 #include <stdexcept>
 #include <unordered_set>
 
 namespace desto::domain {
 namespace {
+
+constexpr std::int64_t DaysFromCivil(std::int32_t year, std::int32_t month, std::int32_t day) noexcept {
+    year -= month <= 2;
+    const auto era = (year >= 0 ? year : year - 399) / 400;
+    const auto yearOfEra = year - era * 400;
+    const auto dayOfYear = (153 * (month + (month > 2 ? -3 : 9)) + 2) / 5 + day - 1;
+    const auto dayOfEra = yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear;
+    return static_cast<std::int64_t>(era) * 146097 + dayOfEra - 719468;
+}
+
+TodoDate CivilFromDays(std::int64_t days) noexcept {
+    days += 719468;
+    const auto era = (days >= 0 ? days : days - 146096) / 146097;
+    const auto dayOfEra = days - era * 146097;
+    const auto yearOfEra = (dayOfEra - dayOfEra / 1460 + dayOfEra / 36524
+        - dayOfEra / 146096) / 365;
+    auto year = static_cast<std::int32_t>(yearOfEra + era * 400);
+    const auto dayOfYear = dayOfEra - (365 * yearOfEra + yearOfEra / 4 - yearOfEra / 100);
+    const auto monthPart = (5 * dayOfYear + 2) / 153;
+    const auto day = static_cast<std::uint8_t>(dayOfYear - (153 * monthPart + 2) / 5 + 1);
+    const auto month = static_cast<std::uint8_t>(monthPart + (monthPart < 10 ? 3 : -9));
+    year += month <= 2;
+    return {year, month, day};
+}
 
 void ValidateAppearance(const CardAppearancePreferences& appearance) {
     if (appearance.opacity < 0 || appearance.opacity > 1
@@ -77,6 +105,48 @@ void NormalizeAndValidatePlacements(std::vector<ApplicationItemPlacement>& place
 }
 
 } // namespace
+
+bool IsValidTodoDate(TodoDate date) noexcept {
+    if (date.month < 1 || date.month > 12 || date.day < 1) return false;
+    constexpr std::array<std::uint8_t, 12> daysInMonth{
+        31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    auto maximum = daysInMonth[date.month - 1];
+    const auto leap = date.year % 4 == 0
+        && (date.year % 100 != 0 || date.year % 400 == 0);
+    if (date.month == 2 && leap) ++maximum;
+    return date.day <= maximum;
+}
+
+TodoDate CurrentSystemTodoDate() noexcept {
+    const auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    std::tm local{};
+#if defined(_WIN32)
+    localtime_s(&local, &now);
+#else
+    local = *std::localtime(&now);
+#endif
+    return {local.tm_year + 1900, static_cast<std::uint8_t>(local.tm_mon + 1),
+        static_cast<std::uint8_t>(local.tm_mday)};
+}
+
+TodoDate AddTodoDays(TodoDate date, std::int32_t days) noexcept {
+    return CivilFromDays(DaysFromCivil(date.year, date.month, date.day) + days);
+}
+
+std::int32_t CompareTodoDates(TodoDate left, TodoDate right) noexcept {
+    const auto leftDays = DaysFromCivil(left.year, left.month, left.day);
+    const auto rightDays = DaysFromCivil(right.year, right.month, right.day);
+    return leftDays < rightDays ? -1 : leftDays > rightDays ? 1 : 0;
+}
+
+std::string ToString(TodoDate date) {
+    if (!IsValidTodoDate(date)) throw std::invalid_argument("Todo date is invalid.");
+    std::ostringstream result;
+    result << std::setfill('0') << std::setw(4) << date.year << '-'
+        << std::setw(2) << static_cast<int>(date.month) << '-'
+        << std::setw(2) << static_cast<int>(date.day);
+    return result.str();
+}
 
 Card::Card(CardId id, CardType type)
     : id_(std::move(id)), type_(type) {
@@ -214,6 +284,8 @@ void TodoCard::setItems(std::vector<TodoItem> items) {
         const auto hasVisibleTitle = item.title.find_first_not_of(" \t\r\n")
             != std::string::npos;
         if (item.id.empty() || !hasVisibleTitle || item.title.size() > 512
+            || item.createdAtUnixMilliseconds < 0
+            || (item.scheduledDate.has_value() && !IsValidTodoDate(*item.scheduledDate))
             || !ids.insert(item.id).second) {
             throw std::invalid_argument(
                 "Todo items must have unique ids and non-empty titles up to 512 bytes.");

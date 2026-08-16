@@ -41,6 +41,10 @@ public:
     using TodoItemAddedCallback = std::function<std::optional<domain::TodoItem>(
         const domain::CardId&,
         const std::string&)>;
+    using TodoItemAddedScheduledCallback = std::function<std::optional<domain::TodoItem>(
+        const domain::CardId&,
+        const std::string&,
+        domain::TodoDate)>;
     using TodoItemRenamedCallback = std::function<bool(
         const domain::CardId&,
         const std::string&,
@@ -55,6 +59,7 @@ public:
     using TodoItemsReorderedCallback = std::function<bool(
         const domain::CardId&,
         const std::vector<std::string>&)>;
+    using TodoItemsArchivedCallback = std::function<bool(const domain::CardId&)>;
 
     explicit WindowsDesktopHost(std::wstring title = L"Desto");
     ~WindowsDesktopHost();
@@ -78,10 +83,12 @@ public:
     void setCardItemActivatedCallback(CardItemActivatedCallback callback);
     void setCardItemsRefreshCallback(CardItemsRefreshCallback callback);
     void setTodoItemAddedCallback(TodoItemAddedCallback callback);
+    void setTodoItemAddedScheduledCallback(TodoItemAddedScheduledCallback callback);
     void setTodoItemRenamedCallback(TodoItemRenamedCallback callback);
     void setTodoItemCompletedChangedCallback(TodoItemCompletedChangedCallback callback);
     void setTodoItemRemovedCallback(TodoItemRemovedCallback callback);
     void setTodoItemsReorderedCallback(TodoItemsReorderedCallback callback);
+    void setTodoItemsArchivedCallback(TodoItemsArchivedCallback callback);
     void updateCardItems(
         const domain::CardId& cardId,
         std::vector<presentation::CardItemView> items);

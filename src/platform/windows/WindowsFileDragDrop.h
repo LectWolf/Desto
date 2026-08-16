@@ -12,7 +12,10 @@
 namespace desto::platform::windows {
 
 struct FileDropTargetCallbacks {
-    std::function<DWORD(POINTL, DWORD)> dragOver;
+    std::function<DWORD(
+        POINTL,
+        DWORD,
+        const std::optional<std::string>&)> dragOver;
     std::function<void()> dragLeave;
     std::function<DWORD(
         std::vector<std::filesystem::path>,

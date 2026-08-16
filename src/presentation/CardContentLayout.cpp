@@ -6,6 +6,14 @@
 
 namespace desto::presentation {
 
+bool IsAdaptiveDropExpansionReady(
+    CardDropOrigin origin,
+    std::uint64_t edgeHoverMilliseconds) noexcept {
+    constexpr std::uint64_t sameCardExpansionDelayMilliseconds = 360;
+    return origin != CardDropOrigin::SameCard
+        || edgeHoverMilliseconds >= sameCardExpansionDelayMilliseconds;
+}
+
 CardContentLayoutSettings ResolveCardContentLayoutSettings(
     const domain::CardContentPreferences& preferences) noexcept {
     CardContentLayoutSettings result;
@@ -140,7 +148,8 @@ CardDropPreview ResolveAdaptiveCardDropPreview(
     double pointerX,
     double pointerY,
     CardContentLayoutSettings settings,
-    std::optional<CardDropPreview> previousPreview) {
+    std::optional<CardDropPreview> previousPreview,
+    bool allowEdgeExpansion) {
     constexpr double edgeExpansionThreshold = 14.0;
     const auto baseColumns = std::clamp(
         settings.preferredColumns,
@@ -174,7 +183,7 @@ CardDropPreview ResolveAdaptiveCardDropPreview(
         0.0,
         static_cast<double>(visibleColumns - 1)));
     auto columns = std::max(baseColumns, column + 1);
-    if (localX >= contentWidth - edgeExpansionThreshold
+    if (allowEdgeExpansion && localX >= contentWidth - edgeExpansionThreshold
         && visibleColumns < settings.maximumColumns) {
         column = visibleColumns;
         columns = visibleColumns + 1;
@@ -184,7 +193,7 @@ CardDropPreview ResolveAdaptiveCardDropPreview(
         std::floor(std::max(0.0, localY) / pitchY),
         0.0,
         static_cast<double>(visibleRows - 1)));
-    if (localY >= contentHeight - edgeExpansionThreshold) {
+    if (allowEdgeExpansion && localY >= contentHeight - edgeExpansionThreshold) {
         row = visibleRows;
     }
     return {row * columns + column, columns};

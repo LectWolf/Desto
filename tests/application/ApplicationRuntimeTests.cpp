@@ -37,6 +37,8 @@ void RunTests() {
     const auto* todo = static_cast<const TodoCard*>(runtime.findCard("todo-1"));
     DESTO_CHECK(todo->items().size() == 2);
     DESTO_CHECK(todo->items()[0].title == "First task");
+    DESTO_CHECK(todo->items()[0].createdAtUnixMilliseconds > 0);
+    DESTO_CHECK(todo->items()[0].scheduledDate.has_value());
 
     const auto duplicateTodo = runtime.execute(AddTodoItem{"todo-1", "todo-a", "Duplicate"});
     DESTO_CHECK(duplicateTodo.status == CommandStatus::Rejected);
@@ -56,6 +58,17 @@ void RunTests() {
     DESTO_CHECK(todo->items()[0].completed);
     DESTO_CHECK(todo->items()[1].id == "todo-b");
 
+    DESTO_CHECK(runtime.execute(ArchiveCompletedTodoItems{"todo-1"}).status
+                == CommandStatus::Applied);
+    DESTO_CHECK(todo->items()[0].archived == true);
+    DESTO_CHECK(todo->items()[1].archived == false);
+    DESTO_CHECK(runtime.execute(RestoreArchivedTodoItems{"todo-1"}).status
+                == CommandStatus::Applied);
+    DESTO_CHECK(!todo->items()[1].archived);
+    DESTO_CHECK(runtime.execute(SetTodoCardPreferences{
+        "todo-1", {.showCreatedTime = true}}).status == CommandStatus::Applied);
+    DESTO_CHECK(todo->preferences().showCreatedTime);
+
     DESTO_CHECK(runtime.execute(ReorderTodoItems{
         "todo-1", {"todo-b", "todo-a"}}).status == CommandStatus::Applied);
     DESTO_CHECK(todo->items()[0].id == "todo-b");
@@ -65,8 +78,10 @@ void RunTests() {
     DESTO_CHECK(todo->items()[0].id == "todo-b");
     DESTO_CHECK(runtime.execute(RemoveTodoItem{"todo-1", "todo-a"}).status
                 == CommandStatus::Applied);
-    const std::vector<TodoItem> expectedTodoItems{{"todo-b", "Second task", false}};
-    DESTO_CHECK(todo->items() == expectedTodoItems);
+    DESTO_CHECK(todo->items().size() == 1);
+    DESTO_CHECK(todo->items().front().id == "todo-b");
+    DESTO_CHECK(todo->items().front().title == "Second task");
+    DESTO_CHECK(!todo->items().front().completed);
 
     ApplicationRuntime todoRestore;
     todoRestore.restore(runtime.cardSnapshots(), runtime.workspace());
