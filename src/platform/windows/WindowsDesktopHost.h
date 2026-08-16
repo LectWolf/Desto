@@ -70,6 +70,8 @@ public:
         std::vector<domain::ApplicationItemPlacement> itemPlacements;
     };
     void updateCardItemsBatch(std::vector<CardItemsUpdate> updates);
+    // Thread-safe. The refresh callback and rendering run later on the host thread.
+    void requestCardItemsRefresh(const domain::CardId& cardId) noexcept;
     void updateCardContentPreferences(
         const domain::CardId& cardId,
         domain::CardContentPreferences preferences);

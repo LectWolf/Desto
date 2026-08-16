@@ -1,6 +1,8 @@
 add_library(desto_domain STATIC
     Card.cpp
     Card.h
+    MappingSourceRegistry.cpp
+    MappingSourceRegistry.h
     WorkspaceLayout.cpp
     WorkspaceLayout.h
 )

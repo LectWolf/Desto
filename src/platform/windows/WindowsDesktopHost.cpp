@@ -12,10 +12,12 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <unordered_set>
 #include <vector>
 
 #undef max
@@ -28,6 +30,7 @@ constexpr UINT_PTR ItemTooltipTimerId = 2;
 constexpr UINT ItemTooltipDelayMilliseconds = 600;
 constexpr UINT_PTR DropPreviewResetTimerId = 3;
 constexpr UINT DropPreviewResetDelayMilliseconds = 90;
+constexpr UINT CardItemsRefreshMessage = WM_APP + 0x41;
 
 struct Surface {
     HWND window = nullptr;
@@ -79,10 +82,12 @@ LRESULT CALLBACK GuideWindowProcedure(HWND window, UINT message, WPARAM wParam, 
 
 struct WindowsDesktopHost::Impl {
     explicit Impl(std::wstring titleValue)
-        : title(std::move(titleValue)) {
+        : title(std::move(titleValue)), ownerThreadId(GetCurrentThreadId()) {
         if (title.empty()) {
             throw std::invalid_argument("Desktop host title must not be empty.");
         }
+        MSG message{};
+        PeekMessageW(&message, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
     }
 
     ~Impl() {
@@ -121,6 +126,9 @@ struct WindowsDesktopHost::Impl {
     WindowsDesktopHost::CardItemsRefreshCallback cardItemsRefresh;
     std::vector<Surface> surfaces;
     std::vector<domain::DisplaySnapshot> displays;
+    DWORD ownerThreadId = 0;
+    std::mutex pendingRefreshMutex;
+    std::unordered_set<domain::CardId> pendingRefreshCards;
 
     static LRESULT CALLBACK WindowProcedure(
         HWND window,
@@ -420,6 +428,25 @@ struct WindowsDesktopHost::Impl {
         return result;
     }
 
+    static DWORD acceptedDropEffect(
+        const Surface& surface,
+        DWORD allowedEffect) noexcept {
+        if (surface.card.type == domain::CardType::Application) {
+            return (allowedEffect & DROPEFFECT_MOVE) != 0
+                ? DROPEFFECT_MOVE : DROPEFFECT_NONE;
+        }
+        if (surface.card.type != domain::CardType::Mapping) {
+            return DROPEFFECT_NONE;
+        }
+        if (surface.card.mappingMode == domain::MappingMode::Folder) {
+            return surface.card.mappingAllowsSourceMutation
+                    && (allowedEffect & DROPEFFECT_MOVE) != 0
+                ? DROPEFFECT_MOVE : DROPEFFECT_NONE;
+        }
+        return (allowedEffect & DROPEFFECT_COPY) != 0
+            ? DROPEFFECT_COPY : DROPEFFECT_NONE;
+    }
+
     static domain::PlacementRect contentDrivenRect(const Surface& surface) {
         const auto settings = itemLayoutSettings(surface);
         const auto columns = settings.preferredColumns;
@@ -429,7 +456,8 @@ struct WindowsDesktopHost::Impl {
                 + columns * settings.itemWidth
                 + (columns - 1) * settings.horizontalGap);
         const auto slotCount = contentSlotCount(surface);
-        const auto layoutItemCount = surface.card.type == domain::CardType::Application
+        const auto layoutItemCount = (surface.card.type == domain::CardType::Application
+                || surface.card.type == domain::CardType::Mapping)
                 && slotCount == 0
             ? std::size_t{1}
             : slotCount;
@@ -825,6 +853,11 @@ struct WindowsDesktopHost::Impl {
             || !surface->pressedItem.has_value()) {
             return false;
         }
+        if (surface->card.type == domain::CardType::Mapping
+            && (surface->card.mappingMode != domain::MappingMode::Folder
+                || !surface->card.mappingAllowsSourceMutation)) {
+            return false;
+        }
         if ((keyState & MK_LBUTTON) == 0) {
             return endItemPress(window);
         }
@@ -982,8 +1015,8 @@ struct WindowsDesktopHost::Impl {
     DWORD updateDropPreview(HWND window, POINTL screenPoint, DWORD allowedEffect) noexcept {
         auto* surface = findSurface(window);
         KillTimer(window, DropPreviewResetTimerId);
-        if (surface == nullptr || surface->card.type != domain::CardType::Application
-            || !surface->card.expanded || (allowedEffect & DROPEFFECT_MOVE) == 0) {
+        if (surface == nullptr || !surface->card.expanded
+            || acceptedDropEffect(*surface, allowedEffect) == DROPEFFECT_NONE) {
             clearDropPreview(window);
             return DROPEFFECT_NONE;
         }
@@ -1035,7 +1068,7 @@ struct WindowsDesktopHost::Impl {
                 return DROPEFFECT_NONE;
             }
         }
-        return DROPEFFECT_MOVE;
+        return acceptedDropEffect(*surface, allowedEffect);
     }
 
     void clearDropPreview(HWND window) noexcept {
@@ -1092,7 +1125,7 @@ struct WindowsDesktopHost::Impl {
         try {
             if (applicationItemsDropped(
                     cardId, paths, sourceCardId, insertion, layoutColumns)) {
-                return DROPEFFECT_MOVE;
+                return acceptedDropEffect(*surface, allowedEffect);
             }
         } catch (...) {
         }
@@ -1218,7 +1251,10 @@ struct WindowsDesktopHost::Impl {
         if (surface.window == nullptr) {
             throw std::runtime_error("CreateWindowExW failed for desktop host surface.");
         }
-        if (surface.card.type == domain::CardType::Application) {
+        if (surface.card.type == domain::CardType::Application
+            || (surface.card.type == domain::CardType::Mapping
+                && (surface.card.mappingMode != domain::MappingMode::Folder
+                    || surface.card.mappingAllowsSourceMutation))) {
             surface.dropTarget = CreateFileDropTarget({
                 .dragOver = [this, window = surface.window](POINTL point, DWORD allowed) {
                     return updateDropPreview(window, point, allowed);
@@ -1237,7 +1273,7 @@ struct WindowsDesktopHost::Impl {
             });
             if (surface.dropTarget == nullptr
                 || FAILED(RegisterDragDrop(surface.window, surface.dropTarget))) {
-                throw std::runtime_error("RegisterDragDrop failed for Application Card.");
+                throw std::runtime_error("RegisterDragDrop failed for file Card.");
             }
         }
         surface.tooltip = CreateWindowExW(
@@ -1397,7 +1433,9 @@ struct WindowsDesktopHost::Impl {
             };
             pixel = (mix(16) << 16) | (mix(8) << 8) | mix(0);
         };
-        if (card.expanded && card.type == domain::CardType::Application
+        if (card.expanded
+            && (card.type == domain::CardType::Application
+                || card.type == domain::CardType::Mapping)
             && card.items.empty() && !surface.dropInsertionIndex.has_value()) {
             const auto inset = dipToPixels(12.0, surface);
             const auto top = dipToPixels(60.0, surface);
@@ -1990,6 +2028,60 @@ struct WindowsDesktopHost::Impl {
         for (auto* surface : affected) commitSurface(*surface);
     }
 
+    void queueCardItemsRefresh(const domain::CardId& cardId) noexcept {
+        if (cardId.empty()) {
+            return;
+        }
+        bool shouldPost = false;
+        {
+            std::lock_guard lock(pendingRefreshMutex);
+            shouldPost = pendingRefreshCards.insert(cardId).second;
+        }
+        if (shouldPost
+            && !PostThreadMessageW(ownerThreadId, CardItemsRefreshMessage, 0, 0)) {
+            std::lock_guard lock(pendingRefreshMutex);
+            pendingRefreshCards.erase(cardId);
+        }
+    }
+
+    void refreshQueuedCardItems() noexcept {
+        std::unordered_set<domain::CardId> pending;
+        {
+            std::lock_guard lock(pendingRefreshMutex);
+            pending.swap(pendingRefreshCards);
+        }
+        if (!cardItemsRefresh || pending.empty()) {
+            return;
+        }
+        std::vector<domain::CardId> ordered(pending.begin(), pending.end());
+        std::ranges::sort(ordered);
+        std::vector<WindowsDesktopHost::CardItemsUpdate> updates;
+        for (const auto& cardId : ordered) {
+            const auto surface = std::find_if(
+                surfaces.begin(), surfaces.end(), [&](const Surface& candidate) {
+                    return candidate.card.id == cardId;
+                });
+            if (surface == surfaces.end()) {
+                continue;
+            }
+            try {
+                updates.push_back({
+                    cardId,
+                    cardItemsRefresh(cardId, surface->card.content.itemSize),
+                    surface->card.applicationSortMode,
+                    surface->card.applicationItemPlacements,
+                });
+            } catch (...) {
+                // One failed Card refresh must not discard other queued Cards.
+            }
+        }
+        try {
+            updateCardItemsBatch(updates);
+        } catch (...) {
+            // Refresh requests cannot throw through the Win32 message loop.
+        }
+    }
+
     void updateCardContentPreferences(
         const domain::CardId& cardId,
         domain::CardContentPreferences preferences) {
@@ -2036,6 +2128,10 @@ struct WindowsDesktopHost::Impl {
         }
         MSG message{};
         while (!closeRequested && GetMessageW(&message, nullptr, 0, 0) > 0) {
+            if (message.message == CardItemsRefreshMessage) {
+                refreshQueuedCardItems();
+                continue;
+            }
             if (timer != 0 && message.message == WM_TIMER && message.wParam == timer) {
                 closeRequested = true;
                 continue;
@@ -2106,6 +2202,10 @@ void WindowsDesktopHost::updateCardItems(
 
 void WindowsDesktopHost::updateCardItemsBatch(std::vector<CardItemsUpdate> updates) {
     impl_->updateCardItemsBatch(updates);
+}
+
+void WindowsDesktopHost::requestCardItemsRefresh(const domain::CardId& cardId) noexcept {
+    impl_->queueCardItemsRefresh(cardId);
 }
 
 void WindowsDesktopHost::updateCardContentPreferences(

@@ -60,6 +60,8 @@ struct CardView {
     domain::ApplicationItemSortMode applicationSortMode =
         domain::ApplicationItemSortMode::Custom;
     std::vector<domain::ApplicationItemPlacement> applicationItemPlacements;
+    domain::MappingMode mappingMode = domain::MappingMode::Empty;
+    bool mappingAllowsSourceMutation = true;
     std::vector<CardItemView> items;
 };
 

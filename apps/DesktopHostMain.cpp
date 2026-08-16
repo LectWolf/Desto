@@ -6,9 +6,11 @@
 #include "Diagnostics.h"
 #include "CardContentLayout.h"
 #include "FileMoveTransaction.h"
+#include "MappingCardImport.h"
 #include "CardView.h"
 #include "StorageRoot.h"
 #include "WindowsDesktopHost.h"
+#include "WindowsDirectoryChangeSource.h"
 #include "WindowsDisplayTopology.h"
 #include "WindowsShellItemCatalog.h"
 #include "WindowsSingleInstanceGate.h"
@@ -76,6 +78,30 @@ const ApplicationCard* FindApplicationCard(
     return found == cards.end() ? nullptr : static_cast<const ApplicationCard*>(*found);
 }
 
+const MappingCard* FindMappingCard(
+    const ApplicationRuntime& runtime,
+    const CardId& cardId) {
+    const auto* card = runtime.findCard(cardId);
+    return card != nullptr && card->type() == CardType::Mapping
+        ? static_cast<const MappingCard*>(card) : nullptr;
+}
+
+std::vector<desto::presentation::CardItemView> MappingItems(
+    const MappingCard& card,
+    WindowsShellItemCatalog& catalog,
+    CardItemSize itemSize) {
+    const auto iconSize = ResolveShellIconSourceSize(itemSize);
+    if (card.mode() == MappingMode::Folder) {
+        return catalog.enumerate(card.sourceRoot(), {}, iconSize);
+    }
+    std::vector<desto::presentation::CardItemView> result;
+    result.reserve(card.references().size());
+    for (const auto& reference : card.references()) {
+        result.push_back(catalog.inspect(reference.path, iconSize));
+    }
+    return result;
+}
+
 std::vector<std::filesystem::path> ItemFileNames(
     const std::vector<desto::presentation::CardItemView>& items) {
     std::vector<std::filesystem::path> result;
@@ -92,6 +118,26 @@ std::wstring PathKey(const std::filesystem::path& path) {
         return static_cast<wchar_t>(std::towlower(character));
     });
     return result;
+}
+
+std::string MappingReferenceId(
+    const std::filesystem::path& path,
+    const std::vector<FileReference>& existing) {
+    std::uint64_t hash = 1469598103934665603ull;
+    for (const auto character : PathKey(path)) {
+        hash ^= static_cast<std::uint64_t>(character);
+        hash *= 1099511628211ull;
+    }
+    const auto base = "reference-" + std::to_string(hash);
+    auto candidate = base;
+    for (std::size_t suffix = 1;
+         std::ranges::any_of(existing, [&](const FileReference& reference) {
+             return reference.id == candidate;
+         });
+         ++suffix) {
+        candidate = base + "-" + std::to_string(suffix);
+    }
+    return candidate;
 }
 
 const desto::presentation::CardItemView* FindCachedItem(
@@ -195,7 +241,10 @@ private:
     bool active_ = true;
 };
 
-void SeedPreview(ApplicationRuntime& runtime, const std::vector<DisplaySnapshot>& displays) {
+void SeedPreview(
+    ApplicationRuntime& runtime,
+    const std::vector<DisplaySnapshot>& displays,
+    const std::filesystem::path& mappingSourceRoot) {
     if (displays.empty()) {
         throw std::runtime_error("A display is required to seed preview Cards.");
     }
@@ -218,6 +267,10 @@ void SeedPreview(ApplicationRuntime& runtime, const std::vector<DisplaySnapshot>
     if (runtime.execute(CreateMappingCard{ids[2]}).status == CommandStatus::Rejected
         || runtime.execute(CreateTodoCard{ids[3]}).status == CommandStatus::Rejected) {
         throw std::runtime_error("Unable to create preview Card.");
+    }
+    if (runtime.execute(SetMappingFolderSource{ids[2], mappingSourceRoot}).status
+        == CommandStatus::Rejected) {
+        throw std::runtime_error("Unable to configure Mapping Card preview source.");
     }
     for (std::size_t index = 0; index < ids.size(); ++index) {
         const auto placement = runtime.execute(SetPlacement{{
@@ -272,10 +325,13 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
         WindowsDisplayTopology topology;
         const auto displays = topology.snapshot();
         ApplicationRuntime runtime;
-        SeedPreview(runtime, displays);
         StorageRoot storageRoot(DefaultStorageRoot());
         storageRoot.ensureExists();
+        const auto mappingPreviewRoot = storageRoot.path() / "mapping-preview";
+        std::filesystem::create_directories(mappingPreviewRoot);
+        SeedPreview(runtime, displays, mappingPreviewRoot);
         ApplicationCardImportService importService(storageRoot);
+        MappingCardImportService mappingImportService;
         WindowsShellItemCatalog shellItems;
         std::vector<desto::presentation::CardView> cardViews;
         std::unordered_map<
@@ -306,6 +362,16 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                 }
                 auto view = desto::presentation::MakeCardView(*applicationCard);
                 cardItemsById[applicationCard->id()] = items;
+                view.items = std::move(items);
+                cardViews.push_back(std::move(view));
+                continue;
+            }
+            if (card->type() == CardType::Mapping) {
+                const auto* mappingCard = static_cast<const MappingCard*>(card);
+                auto items = MappingItems(
+                    *mappingCard, shellItems, mappingCard->content().itemSize);
+                auto view = desto::presentation::MakeCardView(*mappingCard);
+                cardItemsById[mappingCard->id()] = items;
                 view.items = std::move(items);
                 cardViews.push_back(std::move(view));
                 continue;
@@ -356,6 +422,125 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                 const std::optional<CardId>& sourceCardId,
                 std::size_t insertionIndex,
                 std::size_t layoutColumns) {
+                if (const auto* mapping = FindMappingCard(runtime, cardId);
+                    mapping != nullptr) {
+                    try {
+                        if (mapping->mode() != MappingMode::Folder) {
+                            auto references = mapping->references();
+                            for (const auto& pathValue : paths) {
+                                if (pathValue.empty() || !pathValue.is_absolute()
+                                    || !std::filesystem::exists(pathValue)) {
+                                    return false;
+                                }
+                                const auto path = pathValue.lexically_normal();
+                                if (std::ranges::any_of(references, [&](const FileReference& value) {
+                                        return PathKey(value.path) == PathKey(path);
+                                    })) {
+                                    continue;
+                                }
+                                references.push_back({MappingReferenceId(path, references), path});
+                            }
+                            if (runtime.execute(SetMappingReferences{cardId, references}).status
+                                == CommandStatus::Rejected) {
+                                return false;
+                            }
+                            auto items = MappingItems(
+                                *mapping, shellItems, mapping->content().itemSize);
+                            host.updateCardItems(cardId, items);
+                            cardItemsById[cardId] = std::move(items);
+                            return true;
+                        }
+
+                        const auto plan = mappingImportService.plan(*mapping, paths);
+                        const auto result = mappingImportService.execute(plan);
+                        if (!result.succeeded) {
+                            diagnostics.record(
+                                DiagnosticLevel::Warning, "desktop.mapping_import_failed");
+                            return false;
+                        }
+                        FileMoveRollbackGuard rollbackGuard(
+                            result.completedMoves, diagnostics);
+                        std::vector<WindowsDesktopHost::CardItemsUpdate> updates;
+                        auto targetItems = MappingItems(
+                            *mapping, shellItems, mapping->content().itemSize);
+                        updates.push_back({cardId, targetItems});
+
+                        std::optional<std::vector<ApplicationItemPlacement>> previousPlacements;
+                        std::optional<std::vector<ApplicationItemPlacement>> nextPlacements;
+                        std::vector<desto::presentation::CardItemView> sourceItems;
+                        if (sourceCardId.has_value() && *sourceCardId != cardId) {
+                            if (const auto* sourceApplication =
+                                    FindApplicationCard(runtime, *sourceCardId);
+                                sourceApplication != nullptr) {
+                                sourceItems = shellItems.enumerate(
+                                    storageRoot.resolveCardPath(
+                                        sourceApplication->relativeStoragePath()),
+                                    PlacementOrder(*sourceApplication),
+                                    CardShellIconSource(*sourceApplication));
+                                const auto reconciled = ReconcileApplicationItemPlacements(
+                                    sourceApplication->itemPlacements(),
+                                    ItemFileNames(sourceItems),
+                                    CardColumns(runtime, *sourceApplication, sourceItems.size()),
+                                    CardMaximumRows(*sourceApplication));
+                                if (!reconciled.fits) {
+                                    return false;
+                                }
+                                previousPlacements = sourceApplication->itemPlacements();
+                                nextPlacements = reconciled.placements;
+                                if (runtime.execute(SetApplicationCardLayout{
+                                        *sourceCardId,
+                                        sourceApplication->sortMode(),
+                                        *nextPlacements}).status == CommandStatus::Rejected) {
+                                    return false;
+                                }
+                                updates.push_back({
+                                    *sourceCardId,
+                                    sourceItems,
+                                    sourceApplication->sortMode(),
+                                    *nextPlacements,
+                                });
+                            } else if (const auto* sourceMapping =
+                                           FindMappingCard(runtime, *sourceCardId);
+                                       sourceMapping != nullptr) {
+                                sourceItems = MappingItems(
+                                    *sourceMapping,
+                                    shellItems,
+                                    sourceMapping->content().itemSize);
+                                updates.push_back({*sourceCardId, sourceItems});
+                            }
+                        }
+                        try {
+                            host.updateCardItemsBatch(std::move(updates));
+                        } catch (...) {
+                            if (previousPlacements.has_value()) {
+                                const auto* sourceApplication =
+                                    FindApplicationCard(runtime, *sourceCardId);
+                                if (sourceApplication != nullptr) {
+                                    (void)runtime.execute(SetApplicationCardLayout{
+                                        *sourceCardId,
+                                        sourceApplication->sortMode(),
+                                        *previousPlacements,
+                                    });
+                                }
+                            }
+                            (void)rollbackGuard.rollbackNow();
+                            return false;
+                        }
+                        cardItemsById[cardId] = std::move(targetItems);
+                        if (sourceCardId.has_value() && *sourceCardId != cardId) {
+                            cardItemsById[*sourceCardId] = std::move(sourceItems);
+                        }
+                        rollbackGuard.release();
+                        for (const auto& move : result.completedMoves) {
+                            shellItems.notifyMoved(move.source, move.destination);
+                        }
+                        return true;
+                    } catch (...) {
+                        diagnostics.record(
+                            DiagnosticLevel::Warning, "desktop.mapping_import_rejected");
+                        return false;
+                    }
+                }
                 const auto* card = FindApplicationCard(runtime, cardId);
                 if (card == nullptr) {
                     diagnostics.record(DiagnosticLevel::Warning, "desktop.import_card_missing");
@@ -635,6 +820,12 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
             });
         host.setCardItemsRefreshCallback(
             [&](const CardId& cardId, CardItemSize itemSize) {
+                if (const auto* mapping = FindMappingCard(runtime, cardId);
+                    mapping != nullptr) {
+                    auto items = MappingItems(*mapping, shellItems, itemSize);
+                    cardItemsById[cardId] = items;
+                    return items;
+                }
                 const auto* card = FindApplicationCard(runtime, cardId);
                 if (card == nullptr) {
                     return std::vector<desto::presentation::CardItemView>{};
@@ -645,6 +836,24 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                     ResolveShellIconSourceSize(itemSize));
             });
         host.present(runtime.projections(), displays, cardViews);
+        std::vector<DirectoryMappingWatch> mappingWatches;
+        for (const auto* card : runtime.cards()) {
+            if (card->type() != CardType::Mapping) {
+                continue;
+            }
+            const auto* mapping = static_cast<const MappingCard*>(card);
+            if (mapping->mode() == MappingMode::Folder) {
+                mappingWatches.push_back({mapping->id(), mapping->sourceRoot()});
+            }
+        }
+        WindowsDirectoryChangeSource directoryChanges(
+            std::move(mappingWatches),
+            [&](std::vector<CardId> changedCards) {
+                for (const auto& cardId : changedCards) {
+                    host.requestCardItemsRefresh(cardId);
+                }
+            });
+        directoryChanges.start();
         if (!lifecycle.runtimeReady().applied) {
             throw std::runtime_error("Runtime lifecycle transition failed.");
         }

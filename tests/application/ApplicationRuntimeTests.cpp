@@ -2,6 +2,8 @@
 #include "ApplicationCardOrdering.h"
 #include "TestSupport.h"
 
+#include <filesystem>
+
 using namespace desto::application;
 using namespace desto::domain;
 
@@ -25,6 +27,74 @@ void RunTests() {
     DESTO_CHECK(runtime.cards()[0]->id() == "application-1");
     DESTO_CHECK(runtime.cards()[1]->id() == "mapping-1");
     DESTO_CHECK(runtime.cards()[2]->id() == "todo-1");
+
+    const auto mappingRoot =
+        (std::filesystem::temp_directory_path() / "DestoRuntimeMappingSource").lexically_normal();
+    const auto mappingFolder = runtime.execute(SetMappingFolderSource{
+        .cardId = "mapping-1",
+        .sourceRoot = mappingRoot,
+    });
+    DESTO_CHECK(mappingFolder.status == CommandStatus::Applied);
+    const auto* mapping = static_cast<const MappingCard*>(runtime.findCard("mapping-1"));
+    DESTO_CHECK(mapping->mode() == MappingMode::Folder);
+    DESTO_CHECK(mapping->sourceRoot() == mappingRoot);
+    DESTO_CHECK(runtime.execute(SetMappingFolderSource{"mapping-1", mappingRoot / "."}).status
+                == CommandStatus::NoChange);
+
+    DESTO_CHECK(runtime.execute(CreateMappingCard{"mapping-2"}).status
+                == CommandStatus::Applied);
+    const auto duplicateMapping = runtime.execute(SetMappingFolderSource{
+        .cardId = "mapping-2",
+        .sourceRoot = mappingRoot / ".",
+    });
+    DESTO_CHECK(duplicateMapping.status == CommandStatus::Rejected);
+    DESTO_CHECK(duplicateMapping.error == CommandError::MappingSourceAlreadyMapped);
+
+    const std::vector<FileReference> references{
+        {"editor", mappingRoot / "Editor.exe"},
+        {"notes", mappingRoot / "Notes.txt"},
+    };
+    DESTO_CHECK(runtime.execute(SetMappingReferences{"mapping-1", references}).status
+                == CommandStatus::Applied);
+    DESTO_CHECK(mapping->mode() == MappingMode::References);
+    DESTO_CHECK(mapping->references() == references);
+    DESTO_CHECK(runtime.execute(SetMappingFolderSource{"mapping-2", mappingRoot}).status
+                == CommandStatus::Applied);
+    DESTO_CHECK(runtime.execute(SetMappingSourceMutation{"mapping-2", false}).status
+                == CommandStatus::Applied);
+    const auto* secondMapping = static_cast<const MappingCard*>(runtime.findCard("mapping-2"));
+    DESTO_CHECK(!secondMapping->allowsSourceMutation());
+    DESTO_CHECK(runtime.execute(SetMappingSourceMutation{"mapping-2", false}).status
+                == CommandStatus::NoChange);
+
+    const auto invalidReferences = runtime.execute(SetMappingReferences{
+        .cardId = "mapping-1",
+        .references = {{"", mappingRoot / "Invalid.txt"}},
+    });
+    DESTO_CHECK(invalidReferences.status == CommandStatus::Rejected);
+    DESTO_CHECK(invalidReferences.error == CommandError::InvalidCommand);
+    DESTO_CHECK(mapping->references() == references);
+    DESTO_CHECK(runtime.execute(ClearMappingSource{"mapping-2"}).status
+                == CommandStatus::Applied);
+    DESTO_CHECK(secondMapping->mode() == MappingMode::Empty);
+    DESTO_CHECK(runtime.execute(ClearMappingSource{"mapping-2"}).status
+                == CommandStatus::NoChange);
+
+    ApplicationRuntime duplicateRestoreRuntime;
+    const std::vector<CardSnapshot> duplicateMappingSnapshots{
+        {.id = "restored-mapping-1", .type = CardType::Mapping,
+         .mappingSourceRoot = mappingRoot},
+        {.id = "restored-mapping-2", .type = CardType::Mapping,
+         .mappingSourceRoot = mappingRoot / "."},
+    };
+    bool duplicateRestoreRejected = false;
+    try {
+        duplicateRestoreRuntime.restore(duplicateMappingSnapshots, {});
+    } catch (const std::invalid_argument&) {
+        duplicateRestoreRejected = true;
+    }
+    DESTO_CHECK(duplicateRestoreRejected);
+    DESTO_CHECK(duplicateRestoreRuntime.cards().empty());
 
     const auto contentChanged = runtime.execute(SetCardContentPreferences{
         .cardId = "application-1",
@@ -63,10 +133,11 @@ void RunTests() {
     DESTO_CHECK(application->sortMode() == ApplicationItemSortMode::Custom);
     DESTO_CHECK(application->itemPlacements()[1].column == 2);
 
+    const auto revisionBeforeDuplicate = runtime.revision();
     const auto duplicate = runtime.execute(CreateTodoCard{"todo-1"});
     DESTO_CHECK(duplicate.status == CommandStatus::Rejected);
     DESTO_CHECK(duplicate.error == CommandError::DuplicateCardId);
-    DESTO_CHECK(duplicate.revision == 5);
+    DESTO_CHECK(duplicate.revision == revisionBeforeDuplicate);
 
     const auto invalid = runtime.execute(CreateApplicationCard{
         .cardId = "invalid",
@@ -200,6 +271,18 @@ void RunTests() {
                 == CommandStatus::Applied);
     DESTO_CHECK(!runtime.pendingDeletion("mapping-1").has_value());
     DESTO_CHECK(runtime.findCard("mapping-1") != nullptr);
+
+    DESTO_CHECK(runtime.execute(SetMappingFolderSource{"mapping-2", mappingRoot}).status
+                == CommandStatus::Applied);
+    const auto secondMappingDeletion = runtime.execute(RequestCardDeletion{"mapping-2"});
+    DESTO_CHECK(secondMappingDeletion.status == CommandStatus::Applied);
+    DESTO_CHECK(runtime.execute(CommitCardDeletion{
+        "mapping-2", secondMappingDeletion.changes.deletionRequest->token}).status
+                == CommandStatus::Applied);
+    DESTO_CHECK(runtime.execute(CreateMappingCard{"mapping-3"}).status
+                == CommandStatus::Applied);
+    DESTO_CHECK(runtime.execute(SetMappingFolderSource{"mapping-3", mappingRoot}).status
+                == CommandStatus::Applied);
 
     const auto missingPlacement = runtime.execute(RemovePlacement{"missing"});
     DESTO_CHECK(missingPlacement.status == CommandStatus::Rejected);

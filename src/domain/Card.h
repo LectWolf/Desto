@@ -88,6 +88,8 @@ struct CardContentPreferences {
 struct FileReference {
     std::string id;
     std::filesystem::path path;
+
+    bool operator==(const FileReference&) const = default;
 };
 
 struct TodoItem {

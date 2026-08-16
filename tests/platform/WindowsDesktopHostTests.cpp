@@ -4,6 +4,7 @@
 #include <Windows.h>
 #include <CommCtrl.h>
 
+#include <thread>
 #include <vector>
 
 using namespace desto::domain;
@@ -32,7 +33,6 @@ HWND FindOwnedTooltip(HWND owner) {
 }
 
 void RunTests() {
-    WindowsDesktopHost host(L"Desto Host Test");
     const std::vector<DisplaySnapshot> displays{
         {
             .id = "display-test",
@@ -49,6 +49,8 @@ void RunTests() {
             .effectiveDpi = 144,
         },
     };
+    {
+    WindowsDesktopHost host(L"Desto Host Test");
     const std::vector<PlacementProjection> projections{{
         .placementId = "placement-test",
         .cardId = "card-test",
@@ -270,6 +272,61 @@ void RunTests() {
     DESTO_CHECK(changed.width == 256);
     DESTO_CHECK(GetWindowRect(window, &windowRect));
     DESTO_CHECK(windowRect.right - windowRect.left == 384);
+
+    const auto refreshesBeforeQueuedRequest = refreshCount;
+    host.setCardItemsRefreshCallback(
+        [&](const CardId& cardId, CardItemSize itemSize) {
+            DESTO_CHECK(cardId == "card-test");
+            DESTO_CHECK(itemSize == CardItemSize::Large);
+            ++refreshCount;
+            host.requestClose();
+            return adaptiveItems;
+        });
+    std::thread refreshRequester([&] {
+        host.requestCardItemsRefresh("card-test");
+        host.requestCardItemsRefresh("card-test");
+    });
+    refreshRequester.join();
+    host.run();
+    DESTO_CHECK(refreshCount == refreshesBeforeQueuedRequest + 1);
+    }
+
+    const std::vector<PlacementProjection> mappingProjections{1, {
+        .placementId = "mapping-placement",
+        .cardId = "mapping-card",
+        .displayId = "display-test",
+        .rect = {400, 48, 320, 220},
+    }};
+    const std::vector<CardView> mappingCards{1, {
+        .id = "mapping-card",
+        .type = CardType::Mapping,
+        .title = L"Mapping",
+        .typeLabel = L"Mapping",
+        .mappingMode = MappingMode::Empty,
+    }};
+    {
+        WindowsDesktopHost emptyMappingHost(L"Desto Empty Mapping Host Test");
+        emptyMappingHost.present(mappingProjections, displays, mappingCards);
+        const auto mappingWindow = FindWindowW(
+            L"DestoDesktopHostSurface", L"Desto Empty Mapping Host Test");
+        DESTO_CHECK(mappingWindow != nullptr);
+        RECT mappingWindowRect{};
+        DESTO_CHECK(GetWindowRect(mappingWindow, &mappingWindowRect));
+        DESTO_CHECK(mappingWindowRect.bottom - mappingWindowRect.top == 127);
+        DESTO_CHECK(RevokeDragDrop(mappingWindow) == S_OK);
+    }
+
+    auto immutableCards = mappingCards;
+    immutableCards.front().mappingMode = MappingMode::Folder;
+    immutableCards.front().mappingAllowsSourceMutation = false;
+    {
+        WindowsDesktopHost immutableMappingHost(L"Desto Immutable Mapping Host Test");
+        immutableMappingHost.present(mappingProjections, displays, immutableCards);
+        const auto immutableWindow = FindWindowW(
+            L"DestoDesktopHostSurface", L"Desto Immutable Mapping Host Test");
+        DESTO_CHECK(immutableWindow != nullptr);
+        DESTO_CHECK(RevokeDragDrop(immutableWindow) == DRAGDROP_E_NOTREGISTERED);
+    }
 }
 
 } // namespace

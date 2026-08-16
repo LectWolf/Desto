@@ -112,6 +112,8 @@ native input
 
 `ApplicationRuntime` 是 Card 与 Workspace 状态变更的应用层模块。它只公开一个命令入口，应用循环必须串行调用；模块自身不创建线程，也不直接访问窗口、文件系统或平台接口。
 
+MappingCard 的来源切换也经过 `ApplicationRuntime`。领域级 `MappingSourceRegistry` 与 Card 集合一起原子恢复，统一保证外部目录唯一占用；Storage 和 UI 不复制这条规则。Windows 侧用单个 IO completion port 线程监听所有文件夹来源，事件合并后只把 Card ID 投递到宿主消息循环，Shell 枚举和窗口更新不跨线程执行。完整行为见 [MAPPING_CARD.md](MAPPING_CARD.md)。
+
 每条命令返回 `CommandResult`，明确区分：
 
 - 已应用、无变化和被拒绝。

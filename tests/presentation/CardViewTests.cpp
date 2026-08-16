@@ -40,6 +40,13 @@ void RunTests() {
     DESTO_CHECK(applicationView.cornerRadius == 28.0);
     DESTO_CHECK(applicationView.content.itemSize == CardItemSize::Small);
     DESTO_CHECK(!applicationView.content.showItemNames);
+
+    MappingCard mapping("mapping-1");
+    mapping.setFolderSource(std::filesystem::temp_directory_path() / "DestoMappingView");
+    mapping.setAllowsSourceMutation(false);
+    const auto mappingView = MakeCardView(mapping);
+    DESTO_CHECK(mappingView.mappingMode == MappingMode::Folder);
+    DESTO_CHECK(!mappingView.mappingAllowsSourceMutation);
 }
 
 } // namespace

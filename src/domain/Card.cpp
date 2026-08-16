@@ -167,22 +167,34 @@ MappingMode MappingCard::mode() const noexcept {
 }
 
 void MappingCard::setFolderSource(std::filesystem::path sourceRoot) {
-    if (sourceRoot.empty()) {
-        throw std::invalid_argument("Mapping folder source must not be empty.");
+    if (sourceRoot.empty() || !sourceRoot.is_absolute()) {
+        throw std::invalid_argument("Mapping folder source must be an absolute path.");
     }
     references_.clear();
-    sourceRoot_ = std::move(sourceRoot);
+    sourceRoot_ = sourceRoot.lexically_normal();
 }
 
 void MappingCard::setReferences(std::vector<FileReference> references) {
-    references.erase(
-        std::remove_if(
-            references.begin(),
+    for (const auto& reference : references) {
+        if (reference.id.empty() || reference.path.empty() || !reference.path.is_absolute()) {
+            throw std::invalid_argument(
+                "Mapping references must have an id and an absolute path.");
+        }
+    }
+    for (std::size_t index = 0; index < references.size(); ++index) {
+        const auto duplicate = std::find_if(
+            references.begin() + static_cast<std::ptrdiff_t>(index + 1),
             references.end(),
-            [](const FileReference& reference) {
-                return reference.id.empty() || reference.path.empty();
-            }),
-        references.end());
+            [&](const FileReference& candidate) {
+                return candidate.id == references[index].id
+                    || candidate.path.lexically_normal()
+                        == references[index].path.lexically_normal();
+            });
+        if (duplicate != references.end()) {
+            throw std::invalid_argument("Mapping references must be unique.");
+        }
+        references[index].path = references[index].path.lexically_normal();
+    }
     sourceRoot_.clear();
     references_ = std::move(references);
 }

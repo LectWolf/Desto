@@ -59,7 +59,7 @@ MappingCard 删除时不移动外部文件，只删除映射或引用关系。
 
 ## Mapping Exclusivity
 
-一个外部源文件夹在同一 Desto 配置中只能被一个 MappingCard 占用。这个约束由存储/卡片注册模块统一检查，不能依赖界面层阻止重复创建。
+一个外部源文件夹在同一 Desto 配置中只能被一个 MappingCard 占用。这个约束由领域级来源注册表和 ApplicationRuntime 统一检查，配置恢复、运行时切换和删除使用同一规则，不能依赖界面层阻止重复创建。
 
 ## All-card Deletion Confirmation
 

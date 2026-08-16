@@ -40,6 +40,10 @@ CardView MakeCardView(const domain::Card& card) {
         const auto& application = static_cast<const domain::ApplicationCard&>(card);
         result.applicationSortMode = application.sortMode();
         result.applicationItemPlacements = application.itemPlacements();
+    } else if (card.type() == domain::CardType::Mapping) {
+        const auto& mapping = static_cast<const domain::MappingCard&>(card);
+        result.mappingMode = mapping.mode();
+        result.mappingAllowsSourceMutation = mapping.allowsSourceMutation();
     }
     return result;
 }

@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "Card.h"
+#include "MappingSourceRegistry.h"
 #include "WorkspaceLayout.h"
 
 namespace desto::application {
@@ -48,6 +49,25 @@ struct SetApplicationCardLayout {
     std::vector<domain::ApplicationItemPlacement> itemPlacements;
 };
 
+struct SetMappingFolderSource {
+    domain::CardId cardId;
+    std::filesystem::path sourceRoot;
+};
+
+struct SetMappingReferences {
+    domain::CardId cardId;
+    std::vector<domain::FileReference> references;
+};
+
+struct SetMappingSourceMutation {
+    domain::CardId cardId;
+    bool allowed;
+};
+
+struct ClearMappingSource {
+    domain::CardId cardId;
+};
+
 struct SetPlacement {
     domain::CardPlacement placement;
 };
@@ -82,6 +102,10 @@ using ApplicationCommand = std::variant<
     SetCardExpanded,
     SetCardContentPreferences,
     SetApplicationCardLayout,
+    SetMappingFolderSource,
+    SetMappingReferences,
+    SetMappingSourceMutation,
+    ClearMappingSource,
     SetPlacement,
     RemovePlacement,
     UpdateDisplayTopology,
@@ -103,6 +127,7 @@ enum class CommandError {
     DeletionAlreadyPending,
     DeletionNotPending,
     DeletionTokenMismatch,
+    MappingSourceAlreadyMapped,
     InvalidCommand,
 };
 
@@ -172,6 +197,10 @@ private:
     [[nodiscard]] CommandResult handle(const SetCardExpanded& command);
     [[nodiscard]] CommandResult handle(const SetCardContentPreferences& command);
     [[nodiscard]] CommandResult handle(const SetApplicationCardLayout& command);
+    [[nodiscard]] CommandResult handle(const SetMappingFolderSource& command);
+    [[nodiscard]] CommandResult handle(const SetMappingReferences& command);
+    [[nodiscard]] CommandResult handle(const SetMappingSourceMutation& command);
+    [[nodiscard]] CommandResult handle(const ClearMappingSource& command);
     [[nodiscard]] CommandResult handle(const SetPlacement& command);
     [[nodiscard]] CommandResult handle(const RemovePlacement& command);
     [[nodiscard]] CommandResult handle(const UpdateDisplayTopology& command);
@@ -185,6 +214,7 @@ private:
     [[nodiscard]] bool refreshProjections();
 
     std::unordered_map<domain::CardId, std::unique_ptr<domain::Card>> cards_;
+    domain::MappingSourceRegistry mappingSources_;
     domain::WorkspaceLayout workspace_;
     std::vector<domain::DisplaySnapshot> displays_;
     std::vector<domain::PlacementProjection> projections_;

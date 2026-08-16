@@ -3,12 +3,15 @@ add_library(desto_storage STATIC
     ApplicationCardImport.h
     ApplicationCardReturn.cpp
     ApplicationCardReturn.h
+    DirectoryImportPlanner.cpp
+    DirectoryImportPlanner.h
     FileMoveTransaction.cpp
     FileMoveTransaction.h
     JsonConfigStore.cpp
     JsonConfigStore.h
-    MappingRegistry.cpp
     MappingRegistry.h
+    MappingCardImport.cpp
+    MappingCardImport.h
     StorageRoot.cpp
     StorageRoot.h
     StorageRootMigration.cpp

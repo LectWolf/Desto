@@ -1,4 +1,5 @@
 #include "ApplicationCardImport.h"
+#include "MappingCardImport.h"
 #include "TestSupport.h"
 
 #include <chrono>
@@ -51,6 +52,35 @@ void RunTests() {
         rejectedAncestor = true;
     }
     DESTO_CHECK(rejectedAncestor);
+
+    const auto mappingRoot = root / "mapped";
+    std::filesystem::create_directories(mappingRoot);
+    std::ofstream(sourceDirectory / "Mapped.txt") << "mapped";
+    std::ofstream(mappingRoot / "Mapped.txt") << "existing";
+    MappingCard mapping("mapping-1");
+    mapping.setFolderSource(mappingRoot);
+    MappingCardImportService mappingService;
+    const std::vector<std::filesystem::path> alreadyMapped{mappingRoot / "Mapped.txt"};
+    const auto mappingPlan = mappingService.plan(mapping, alreadyMapped);
+    DESTO_CHECK(mappingPlan.moves.empty());
+    const std::vector<std::filesystem::path> mappingSources{
+        sourceDirectory / "Mapped.txt",
+    };
+    const auto mappingMovePlan = mappingService.plan(mapping, mappingSources);
+    DESTO_CHECK(mappingMovePlan.moves.size() == 1);
+    DESTO_CHECK(mappingMovePlan.moves.front().destination.filename() == "Mapped (1).txt");
+    DESTO_CHECK(mappingService.execute(mappingMovePlan).succeeded);
+    DESTO_CHECK(std::filesystem::exists(mappingRoot / "Mapped (1).txt"));
+    DESTO_CHECK(!std::filesystem::exists(mappingSources.front()));
+
+    mapping.setAllowsSourceMutation(false);
+    bool mutationRejected = false;
+    try {
+        (void)mappingService.plan(mapping, mappingSources);
+    } catch (const std::invalid_argument&) {
+        mutationRejected = true;
+    }
+    DESTO_CHECK(mutationRejected);
 
     std::filesystem::remove_all(root);
 }

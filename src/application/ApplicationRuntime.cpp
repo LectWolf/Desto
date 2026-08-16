@@ -203,8 +203,22 @@ void ApplicationRuntime::restore(
         }
     }
 
+    domain::MappingSourceRegistry restoredMappingSources;
+    for (const auto& [cardId, card] : restoredCards) {
+        if (card->type() != domain::CardType::Mapping) {
+            continue;
+        }
+        const auto* mapping = static_cast<const domain::MappingCard*>(card.get());
+        if (mapping->mode() == domain::MappingMode::Folder
+            && !restoredMappingSources.tryRegister(cardId, mapping->sourceRoot())) {
+            throw std::invalid_argument(
+                "Mapping folder sources must be unique across Mapping Cards.");
+        }
+    }
+
     auto nextProjections = workspace.project(displays_);
     cards_ = std::move(restoredCards);
+    mappingSources_ = std::move(restoredMappingSources);
     workspace_ = workspace;
     projections_ = std::move(nextProjections);
     pendingDeletions_.clear();
@@ -328,6 +342,80 @@ CommandResult ApplicationRuntime::handle(const SetApplicationCardLayout& command
     });
 }
 
+CommandResult ApplicationRuntime::handle(const SetMappingFolderSource& command) {
+    auto card = cards_.find(command.cardId);
+    if (card == cards_.end() || card->second->type() != domain::CardType::Mapping) {
+        return rejected(CommandError::CardNotFound);
+    }
+    auto* mapping = static_cast<domain::MappingCard*>(card->second.get());
+    const auto owner = mappingSources_.ownerOf(command.sourceRoot);
+    if (mapping->mode() == domain::MappingMode::Folder
+        && owner.has_value() && *owner == command.cardId) {
+        return noChange();
+    }
+    if (!mappingSources_.tryRegister(command.cardId, command.sourceRoot)) {
+        return rejected(
+            CommandError::MappingSourceAlreadyMapped,
+            "The mapping folder source is already assigned to another Card.");
+    }
+    mapping->setFolderSource(command.sourceRoot);
+    return applied({
+        .changedCards = {command.cardId},
+        .persistence = PersistenceUrgency::Deferred,
+    });
+}
+
+CommandResult ApplicationRuntime::handle(const SetMappingReferences& command) {
+    auto card = cards_.find(command.cardId);
+    if (card == cards_.end() || card->second->type() != domain::CardType::Mapping) {
+        return rejected(CommandError::CardNotFound);
+    }
+    auto* mapping = static_cast<domain::MappingCard*>(card->second.get());
+    if (mapping->mode() != domain::MappingMode::Folder
+        && mapping->references() == command.references) {
+        return noChange();
+    }
+    mapping->setReferences(command.references);
+    mappingSources_.unregister(command.cardId);
+    return applied({
+        .changedCards = {command.cardId},
+        .persistence = PersistenceUrgency::Deferred,
+    });
+}
+
+CommandResult ApplicationRuntime::handle(const SetMappingSourceMutation& command) {
+    auto card = cards_.find(command.cardId);
+    if (card == cards_.end() || card->second->type() != domain::CardType::Mapping) {
+        return rejected(CommandError::CardNotFound);
+    }
+    auto* mapping = static_cast<domain::MappingCard*>(card->second.get());
+    if (mapping->allowsSourceMutation() == command.allowed) {
+        return noChange();
+    }
+    mapping->setAllowsSourceMutation(command.allowed);
+    return applied({
+        .changedCards = {command.cardId},
+        .persistence = PersistenceUrgency::Deferred,
+    });
+}
+
+CommandResult ApplicationRuntime::handle(const ClearMappingSource& command) {
+    auto card = cards_.find(command.cardId);
+    if (card == cards_.end() || card->second->type() != domain::CardType::Mapping) {
+        return rejected(CommandError::CardNotFound);
+    }
+    auto* mapping = static_cast<domain::MappingCard*>(card->second.get());
+    if (mapping->mode() == domain::MappingMode::Empty) {
+        return noChange();
+    }
+    mapping->clearSource();
+    mappingSources_.unregister(command.cardId);
+    return applied({
+        .changedCards = {command.cardId},
+        .persistence = PersistenceUrgency::Deferred,
+    });
+}
+
 CommandResult ApplicationRuntime::handle(const SetPlacement& command) {
     if (!cards_.contains(command.placement.cardId)) {
         return rejected(CommandError::CardNotFound);
@@ -434,6 +522,7 @@ CommandResult ApplicationRuntime::handle(const CommitCardDeletion& command) {
         return rejected(CommandError::CardNotFound);
     }
 
+    mappingSources_.unregister(command.cardId);
     cards_.erase(command.cardId);
     pendingDeletions_.erase(pending);
     const auto removedPlacements = workspace_.removeCard(command.cardId);

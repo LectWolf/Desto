@@ -5,6 +5,8 @@ add_library(desto_platform_windows STATIC
     WindowsShellItemCatalog.h
     WindowsDisplayChangeSource.cpp
     WindowsDisplayChangeSource.h
+    WindowsDirectoryChangeSource.cpp
+    WindowsDirectoryChangeSource.h
     WindowsDesktopHost.cpp
     WindowsDesktopHost.h
     WindowsFileDragDrop.cpp
