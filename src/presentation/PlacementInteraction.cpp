@@ -7,17 +7,21 @@
 namespace desto::presentation {
 namespace {
 
+template <typename Anchor>
 void Consider(
     double candidate,
     double current,
     double guide,
+    Anchor candidateAnchor,
     double threshold,
     double& bestDelta,
-    std::optional<double>& bestGuide) {
+    std::optional<double>& bestGuide,
+    Anchor& bestAnchor) {
     const auto delta = candidate - current;
     if (std::abs(delta) <= threshold && std::abs(delta) < std::abs(bestDelta)) {
         bestDelta = delta;
         bestGuide = guide;
+        bestAnchor = candidateAnchor;
     }
 }
 
@@ -39,10 +43,22 @@ PlacementInteractionResult ResolvePlacementInteractionDetailed(
         throw std::invalid_argument("Placement interaction settings must be positive and finite.");
     }
 
-    proposed.width = std::clamp(proposed.width, settings.minimumWidth, workAreaWidth);
-    proposed.height = std::clamp(proposed.height, settings.minimumHeight, workAreaHeight);
-    proposed.left = std::clamp(proposed.left, 0.0, workAreaWidth - proposed.width);
-    proposed.top = std::clamp(proposed.top, 0.0, workAreaHeight - proposed.height);
+    const auto horizontalInset = workAreaWidth > settings.visualGap * 2.0
+        ? settings.visualGap
+        : 0.0;
+    const auto verticalInset = workAreaHeight > settings.visualGap * 2.0
+        ? settings.visualGap
+        : 0.0;
+    const auto maximumWidth = workAreaWidth - horizontalInset * 2.0;
+    const auto maximumHeight = workAreaHeight - verticalInset * 2.0;
+    proposed.width = std::clamp(
+        proposed.width, std::min(settings.minimumWidth, maximumWidth), maximumWidth);
+    proposed.height = std::clamp(
+        proposed.height, std::min(settings.minimumHeight, maximumHeight), maximumHeight);
+    proposed.left = std::clamp(
+        proposed.left, horizontalInset, workAreaWidth - horizontalInset - proposed.width);
+    proposed.top = std::clamp(
+        proposed.top, verticalInset, workAreaHeight - verticalInset - proposed.height);
     if (bypassSnapping) {
         return {.rect = proposed};
     }
@@ -51,66 +67,84 @@ PlacementInteractionResult ResolvePlacementInteractionDetailed(
     auto verticalDelta = settings.threshold + 1.0;
     std::optional<double> verticalGuide;
     std::optional<double> horizontalGuide;
-    Consider(0.0, proposed.left, 0.0, settings.threshold, horizontalDelta, verticalGuide);
-    Consider(workAreaWidth, proposed.left + proposed.width, workAreaWidth,
-             settings.threshold, horizontalDelta, verticalGuide);
+    auto horizontalAnchor = domain::PlacementHorizontalAnchor::Free;
+    auto verticalAnchor = domain::PlacementVerticalAnchor::Free;
+    Consider(horizontalInset, proposed.left, horizontalInset,
+             domain::PlacementHorizontalAnchor::Left,
+             settings.threshold, horizontalDelta, verticalGuide, horizontalAnchor);
+    Consider(workAreaWidth - horizontalInset, proposed.left + proposed.width,
+             workAreaWidth - horizontalInset,
+             domain::PlacementHorizontalAnchor::Right,
+             settings.threshold, horizontalDelta, verticalGuide, horizontalAnchor);
     Consider(workAreaWidth / 2.0, proposed.left + proposed.width / 2.0,
-             workAreaWidth / 2.0, settings.threshold, horizontalDelta, verticalGuide);
-    Consider(0.0, proposed.top, 0.0, settings.threshold, verticalDelta, horizontalGuide);
-    Consider(workAreaHeight, proposed.top + proposed.height, workAreaHeight,
-             settings.threshold, verticalDelta, horizontalGuide);
+             workAreaWidth / 2.0, domain::PlacementHorizontalAnchor::Center,
+             settings.threshold, horizontalDelta, verticalGuide, horizontalAnchor);
+    Consider(verticalInset, proposed.top, verticalInset,
+             domain::PlacementVerticalAnchor::Top,
+             settings.threshold, verticalDelta, horizontalGuide, verticalAnchor);
+    Consider(workAreaHeight - verticalInset, proposed.top + proposed.height,
+             workAreaHeight - verticalInset,
+             domain::PlacementVerticalAnchor::Bottom,
+             settings.threshold, verticalDelta, horizontalGuide, verticalAnchor);
     Consider(workAreaHeight / 2.0, proposed.top + proposed.height / 2.0,
-             workAreaHeight / 2.0, settings.threshold, verticalDelta, horizontalGuide);
+             workAreaHeight / 2.0, domain::PlacementVerticalAnchor::Center,
+             settings.threshold, verticalDelta, horizontalGuide, verticalAnchor);
 
     for (const auto& other : otherCards) {
-        Consider(other.left, proposed.left, other.left, settings.threshold,
-                 horizontalDelta, verticalGuide);
+        Consider(other.left, proposed.left, other.left,
+                 domain::PlacementHorizontalAnchor::Free,
+                 settings.threshold, horizontalDelta, verticalGuide, horizontalAnchor);
         Consider(other.left + other.width,
                  proposed.left + proposed.width,
                  other.left + other.width,
+                 domain::PlacementHorizontalAnchor::Free,
                  settings.threshold,
                  horizontalDelta,
-                 verticalGuide);
-        Consider(other.left, proposed.left + proposed.width, other.left,
-                 settings.threshold, horizontalDelta, verticalGuide);
-        Consider(other.left + other.width, proposed.left, other.left + other.width,
-                 settings.threshold, horizontalDelta, verticalGuide);
+                 verticalGuide,
+                 horizontalAnchor);
         Consider(other.left + other.width + settings.visualGap,
                  proposed.left,
                  other.left + other.width + settings.visualGap / 2.0,
+                 domain::PlacementHorizontalAnchor::Free,
                  settings.threshold,
                  horizontalDelta,
-                 verticalGuide);
+                 verticalGuide,
+                 horizontalAnchor);
         Consider(other.left - settings.visualGap,
                  proposed.left + proposed.width,
                  other.left - settings.visualGap / 2.0,
+                 domain::PlacementHorizontalAnchor::Free,
                  settings.threshold,
                  horizontalDelta,
-                 verticalGuide);
-        Consider(other.top, proposed.top, other.top, settings.threshold,
-                 verticalDelta, horizontalGuide);
+                 verticalGuide,
+                 horizontalAnchor);
+        Consider(other.top, proposed.top, other.top,
+                 domain::PlacementVerticalAnchor::Free,
+                 settings.threshold, verticalDelta, horizontalGuide, verticalAnchor);
         Consider(other.top + other.height,
                  proposed.top + proposed.height,
                  other.top + other.height,
+                 domain::PlacementVerticalAnchor::Free,
                  settings.threshold,
                  verticalDelta,
-                 horizontalGuide);
-        Consider(other.top, proposed.top + proposed.height, other.top,
-                 settings.threshold, verticalDelta, horizontalGuide);
-        Consider(other.top + other.height, proposed.top, other.top + other.height,
-                 settings.threshold, verticalDelta, horizontalGuide);
+                 horizontalGuide,
+                 verticalAnchor);
         Consider(other.top + other.height + settings.visualGap,
                  proposed.top,
                  other.top + other.height + settings.visualGap / 2.0,
+                 domain::PlacementVerticalAnchor::Free,
                  settings.threshold,
                  verticalDelta,
-                 horizontalGuide);
+                 horizontalGuide,
+                 verticalAnchor);
         Consider(other.top - settings.visualGap,
                  proposed.top + proposed.height,
                  other.top - settings.visualGap / 2.0,
+                 domain::PlacementVerticalAnchor::Free,
                  settings.threshold,
                  verticalDelta,
-                 horizontalGuide);
+                 horizontalGuide,
+                 verticalAnchor);
     }
 
     if (std::abs(horizontalDelta) <= settings.threshold) {
@@ -119,12 +153,16 @@ PlacementInteractionResult ResolvePlacementInteractionDetailed(
     if (std::abs(verticalDelta) <= settings.threshold) {
         proposed.top += verticalDelta;
     }
-    proposed.left = std::clamp(proposed.left, 0.0, workAreaWidth - proposed.width);
-    proposed.top = std::clamp(proposed.top, 0.0, workAreaHeight - proposed.height);
+    proposed.left = std::clamp(
+        proposed.left, horizontalInset, workAreaWidth - horizontalInset - proposed.width);
+    proposed.top = std::clamp(
+        proposed.top, verticalInset, workAreaHeight - verticalInset - proposed.height);
     return {
         .rect = proposed,
         .verticalGuide = verticalGuide,
         .horizontalGuide = horizontalGuide,
+        .horizontalAnchor = horizontalAnchor,
+        .verticalAnchor = verticalAnchor,
     };
 }
 

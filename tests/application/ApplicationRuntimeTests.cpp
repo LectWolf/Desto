@@ -137,13 +137,13 @@ void RunTests() {
     DESTO_CHECK(missingCardPlacement.status == CommandStatus::Rejected);
     DESTO_CHECK(missingCardPlacement.error == CommandError::CardNotFound);
 
-    const auto fallbackTopology = runtime.execute(UpdateDisplayTopology{{
+    const auto disconnectedTopology = runtime.execute(UpdateDisplayTopology{{
         {.id = "display-b", .workAreaWidth = 1920, .workAreaHeight = 1040, .primary = true},
     }});
-    DESTO_CHECK(fallbackTopology.status == CommandStatus::Applied);
-    DESTO_CHECK(fallbackTopology.changes.projectionsChanged);
-    DESTO_CHECK(runtime.projections().front().fallback);
-    DESTO_CHECK(runtime.projections().front().displayId == "display-b");
+    DESTO_CHECK(disconnectedTopology.status == CommandStatus::Applied);
+    DESTO_CHECK(disconnectedTopology.changes.projectionsChanged);
+    DESTO_CHECK(runtime.projections().empty());
+    DESTO_CHECK(runtime.workspace().unavailablePlacements(runtime.displays()).size() == 1);
     DESTO_CHECK(runtime.workspace().placements().front().target.displayId() == "display-a");
 
     const auto revisionBeforeRepeatedTopology = runtime.revision();
@@ -182,7 +182,7 @@ void RunTests() {
     DESTO_CHECK(committed.status == CommandStatus::Applied);
     DESTO_CHECK(committed.changes.removedCards == std::vector<CardId>{"application-1"});
     DESTO_CHECK(committed.changes.layoutChanged);
-    DESTO_CHECK(committed.changes.projectionsChanged);
+    DESTO_CHECK(!committed.changes.projectionsChanged);
     DESTO_CHECK(committed.changes.persistence == PersistenceUrgency::Immediate);
     DESTO_CHECK(runtime.findCard("application-1") == nullptr);
     DESTO_CHECK(runtime.workspace().placements().empty());

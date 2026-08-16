@@ -22,6 +22,16 @@ void ValidatePlacement(const CardPlacement& placement) {
         throw std::invalid_argument("Placement and card ids must not be empty.");
     }
     ValidateRect(placement.rect);
+    const auto hasReferenceWidth = placement.referenceWorkAreaWidth > 0;
+    const auto hasReferenceHeight = placement.referenceWorkAreaHeight > 0;
+    if (!std::isfinite(placement.referenceWorkAreaWidth)
+        || !std::isfinite(placement.referenceWorkAreaHeight)
+        || hasReferenceWidth != hasReferenceHeight
+        || placement.referenceWorkAreaWidth < 0
+        || placement.referenceWorkAreaHeight < 0) {
+        throw std::invalid_argument(
+            "Placement reference work area must be absent or have positive finite dimensions.");
+    }
 }
 
 void ValidateDisplays(std::span<const DisplaySnapshot> displays) {
@@ -48,10 +58,46 @@ void ValidateDisplays(std::span<const DisplaySnapshot> displays) {
     }
 }
 
-PlacementRect FitToDisplay(const PlacementRect& source, const DisplaySnapshot& display) {
-    PlacementRect result = source;
+double ReflowAxis(
+    double position,
+    double size,
+    double referenceExtent,
+    double currentExtent,
+    bool startAnchored,
+    bool centerAnchored,
+    bool endAnchored) {
+    if (referenceExtent <= 0 || referenceExtent == currentExtent) return position;
+    if (startAnchored) return position;
+    if (endAnchored) return currentExtent - size - (referenceExtent - position - size);
+    if (centerAnchored) {
+        return currentExtent / 2.0 - size / 2.0
+            + (position + size / 2.0 - referenceExtent / 2.0);
+    }
+    const auto oldTravel = std::max(0.0, referenceExtent - size);
+    const auto newTravel = std::max(0.0, currentExtent - size);
+    return oldTravel <= 0 ? 0.0 : std::clamp(position / oldTravel, 0.0, 1.0) * newTravel;
+}
+
+PlacementRect FitToDisplay(const CardPlacement& placement, const DisplaySnapshot& display) {
+    PlacementRect result = placement.rect;
     result.width = std::min(result.width, display.workAreaWidth);
     result.height = std::min(result.height, display.workAreaHeight);
+    result.left = ReflowAxis(
+        result.left,
+        result.width,
+        placement.referenceWorkAreaWidth,
+        display.workAreaWidth,
+        placement.horizontalAnchor == PlacementHorizontalAnchor::Left,
+        placement.horizontalAnchor == PlacementHorizontalAnchor::Center,
+        placement.horizontalAnchor == PlacementHorizontalAnchor::Right);
+    result.top = ReflowAxis(
+        result.top,
+        result.height,
+        placement.referenceWorkAreaHeight,
+        display.workAreaHeight,
+        placement.verticalAnchor == PlacementVerticalAnchor::Top,
+        placement.verticalAnchor == PlacementVerticalAnchor::Center,
+        placement.verticalAnchor == PlacementVerticalAnchor::Bottom);
     result.left = std::clamp(result.left, 0.0, display.workAreaWidth - result.width);
     result.top = std::clamp(result.top, 0.0, display.workAreaHeight - result.height);
     return result;
@@ -72,6 +118,26 @@ DisplayTarget DisplayTarget::specific(DisplayId displayId) {
 
 DisplayTarget DisplayTarget::all() noexcept {
     return DisplayTarget(DisplayTargetKind::AllDisplays, {});
+}
+
+std::string_view ToString(PlacementHorizontalAnchor anchor) noexcept {
+    switch (anchor) {
+    case PlacementHorizontalAnchor::Free: return "free";
+    case PlacementHorizontalAnchor::Left: return "left";
+    case PlacementHorizontalAnchor::Center: return "center";
+    case PlacementHorizontalAnchor::Right: return "right";
+    }
+    return "free";
+}
+
+std::string_view ToString(PlacementVerticalAnchor anchor) noexcept {
+    switch (anchor) {
+    case PlacementVerticalAnchor::Free: return "free";
+    case PlacementVerticalAnchor::Top: return "top";
+    case PlacementVerticalAnchor::Center: return "center";
+    case PlacementVerticalAnchor::Bottom: return "bottom";
+    }
+    return "free";
 }
 
 void WorkspaceLayout::setPlacement(CardPlacement placement) {
@@ -139,18 +205,9 @@ std::vector<PlacementProjection> WorkspaceLayout::project(
             return left->id < right->id;
         });
 
-    const auto primary = std::find_if(
-        orderedDisplays.begin(),
-        orderedDisplays.end(),
-        [](const DisplaySnapshot* display) { return display->primary; });
-    const auto* fallbackDisplay = primary == orderedDisplays.end()
-        ? orderedDisplays.front()
-        : *primary;
-
     std::map<std::pair<CardId, DisplayId>, PlacementProjection> projections;
     const auto addProjection = [&](const CardPlacement& placement,
-                                   const DisplaySnapshot& display,
-                                   bool fallback) {
+                                   const DisplaySnapshot& display) {
         PlacementProjection candidate{
             .placementId = placement.id,
             .cardId = placement.cardId,
@@ -158,16 +215,16 @@ std::vector<PlacementProjection> WorkspaceLayout::project(
                 ? std::optional<DisplayId>(placement.target.displayId())
                 : std::nullopt,
             .displayId = display.id,
-            .rect = FitToDisplay(placement.rect, display),
+            .rect = FitToDisplay(placement, display),
             .zIndex = placement.zIndex,
-            .fallback = fallback,
+            .horizontalAnchor = placement.horizontalAnchor,
+            .verticalAnchor = placement.verticalAnchor,
+            .fallback = false,
         };
         const auto key = std::pair(candidate.cardId, candidate.displayId);
         const auto existing = projections.find(key);
         if (existing == projections.end()
-            || (existing->second.fallback && !candidate.fallback)
-            || (existing->second.fallback == candidate.fallback
-                && candidate.placementId < existing->second.placementId)) {
+            || candidate.placementId < existing->second.placementId) {
             projections.insert_or_assign(std::move(key), std::move(candidate));
         }
     };
@@ -175,7 +232,7 @@ std::vector<PlacementProjection> WorkspaceLayout::project(
     for (const auto& placement : placements_) {
         if (placement.target.kind() == DisplayTargetKind::AllDisplays) {
             for (const auto* display : orderedDisplays) {
-                addProjection(placement, *display, false);
+                addProjection(placement, *display);
             }
             continue;
         }
@@ -186,10 +243,9 @@ std::vector<PlacementProjection> WorkspaceLayout::project(
             [&](const DisplaySnapshot* display) {
                 return display->id == placement.target.displayId();
             });
-        addProjection(
-            placement,
-            requested == orderedDisplays.end() ? *fallbackDisplay : **requested,
-            requested == orderedDisplays.end());
+        if (requested != orderedDisplays.end()) {
+            addProjection(placement, **requested);
+        }
     }
 
     std::vector<PlacementProjection> result;
@@ -204,6 +260,21 @@ std::vector<PlacementProjection> WorkspaceLayout::project(
             return std::tie(left.displayId, left.zIndex, left.placementId)
                 < std::tie(right.displayId, right.zIndex, right.placementId);
         });
+    return result;
+}
+
+std::vector<CardPlacement> WorkspaceLayout::unavailablePlacements(
+    std::span<const DisplaySnapshot> displays) const {
+    ValidateDisplays(displays);
+    std::vector<CardPlacement> result;
+    for (const auto& placement : placements_) {
+        if (placement.target.kind() != DisplayTargetKind::SpecificDisplay) continue;
+        const auto available = std::ranges::any_of(displays, [&](const auto& display) {
+            return display.id == placement.target.displayId();
+        });
+        if (!available) result.push_back(placement);
+    }
+    std::ranges::sort(result, {}, &CardPlacement::id);
     return result;
 }
 

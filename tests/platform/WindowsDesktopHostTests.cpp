@@ -53,15 +53,29 @@ void RunTests() {
         .typeLabel = L"Application",
     }};
     PlacementRect changed{};
+    auto horizontalAnchor = PlacementHorizontalAnchor::Free;
+    auto verticalAnchor = PlacementVerticalAnchor::Free;
+    double referenceWorkAreaWidth = 0;
+    double referenceWorkAreaHeight = 0;
     bool callbackCalled = false;
     bool expansionCallbackCalled = false;
     bool expanded = true;
     bool itemActivated = false;
     host.setPlacementChangedCallback(
-        [&](const PlacementId& placementId, const CardId& cardId, const PlacementRect& rect) {
+        [&](const PlacementId& placementId,
+            const CardId& cardId,
+            const PlacementRect& rect,
+            PlacementHorizontalAnchor horizontal,
+            PlacementVerticalAnchor vertical,
+            double referenceWidth,
+            double referenceHeight) {
             DESTO_CHECK(placementId == "placement-test");
             DESTO_CHECK(cardId == "card-test");
             changed = rect;
+            horizontalAnchor = horizontal;
+            verticalAnchor = vertical;
+            referenceWorkAreaWidth = referenceWidth;
+            referenceWorkAreaHeight = referenceHeight;
             callbackCalled = true;
         });
     host.setCardExpandedChangedCallback([&](const CardId& cardId, bool value) {
@@ -88,33 +102,40 @@ void RunTests() {
 
     RECT windowRect{};
     DESTO_CHECK(GetWindowRect(window, &windowRect));
+    DESTO_CHECK(windowRect.right - windowRect.left == 304);
+    DESTO_CHECK(windowRect.bottom - windowRect.top == 120);
     const auto captionHit = SendMessageW(
         window,
         WM_NCHITTEST,
         0,
         MAKELPARAM(windowRect.left + 50, windowRect.top + 20));
     DESTO_CHECK(captionHit == HTCAPTION);
+    const auto cornerHit = SendMessageW(
+        window,
+        WM_NCHITTEST,
+        0,
+        MAKELPARAM(windowRect.left + 2, windowRect.top + 2));
+    DESTO_CHECK(cornerHit == HTCAPTION);
 
-    MINMAXINFO minimums{};
-    SendMessageW(window, WM_GETMINMAXINFO, 0, reinterpret_cast<LPARAM>(&minimums));
-    DESTO_CHECK(minimums.ptMinTrackSize.x == 160);
-    DESTO_CHECK(minimums.ptMinTrackSize.y == 80);
-
-    RECT movingRect{7, 9, 307, 209};
+    RECT movingRect{7, 9, 311, 129};
     SendMessageW(window, WM_MOVING, 0, reinterpret_cast<LPARAM>(&movingRect));
     const auto guide = FindWindowW(L"DestoAlignmentGuide", nullptr);
     DESTO_CHECK(guide != nullptr);
     DESTO_CHECK(IsWindowVisible(guide));
     DESTO_CHECK((GetWindowLongPtrW(guide, GWL_EXSTYLE) & WS_EX_TRANSPARENT) != 0);
 
-    DESTO_CHECK(SetWindowPos(window, nullptr, 7, 9, 300, 200, SWP_NOACTIVATE | SWP_NOZORDER));
+    DESTO_CHECK(SetWindowPos(window, nullptr, 7, 9, 304, 120, SWP_NOACTIVATE | SWP_NOZORDER));
     SendMessageW(window, WM_EXITSIZEMOVE, 0, 0);
     DESTO_CHECK(!IsWindowVisible(guide));
     DESTO_CHECK(callbackCalled);
-    DESTO_CHECK(changed.left == 0);
-    DESTO_CHECK(changed.top == 0);
-    DESTO_CHECK(changed.width == 300);
-    DESTO_CHECK(changed.height == 200);
+    DESTO_CHECK(changed.left == 8);
+    DESTO_CHECK(changed.top == 8);
+    DESTO_CHECK(changed.width == 304);
+    DESTO_CHECK(changed.height == 120);
+    DESTO_CHECK(horizontalAnchor == PlacementHorizontalAnchor::Left);
+    DESTO_CHECK(verticalAnchor == PlacementVerticalAnchor::Top);
+    DESTO_CHECK(referenceWorkAreaWidth == 1920);
+    DESTO_CHECK(referenceWorkAreaHeight == 1040);
 
     host.updateCardItems("card-test", {{
         .id = L"example",
@@ -125,6 +146,9 @@ void RunTests() {
     host.updateCardContentPreferences(
         "card-test",
         {.itemSize = CardItemSize::Large, .showItemNames = false});
+    DESTO_CHECK(GetWindowRect(window, &windowRect));
+    DESTO_CHECK(windowRect.right - windowRect.left == 352);
+    DESTO_CHECK(windowRect.bottom - windowRect.top == 148);
     const auto tooltip = FindOwnedTooltip(window);
     DESTO_CHECK(tooltip != nullptr);
     SendMessageW(window, WM_MOUSEMOVE, 0, MAKELPARAM(56, 82));
@@ -135,8 +159,28 @@ void RunTests() {
     SendMessageW(window, WM_LBUTTONDBLCLK, MK_LBUTTON, MAKELPARAM(56, 82));
     DESTO_CHECK(itemActivated);
 
-    SendMessageW(window, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(278, 24));
-    SendMessageW(window, WM_LBUTTONUP, 0, MAKELPARAM(278, 24));
+    host.updateCardContentPreferences(
+        "card-test",
+        {
+            .itemSize = CardItemSize::Medium,
+            .showItemNames = false,
+            .sizeMode = CardSizeMode::Fixed,
+            .fixedColumns = 2,
+            .fixedRows = 3,
+        });
+    DESTO_CHECK(GetWindowRect(window, &windowRect));
+    DESTO_CHECK(windowRect.right - windowRect.left == 180);
+    DESTO_CHECK(windowRect.bottom - windowRect.top == 280);
+
+    host.updateCardContentPreferences(
+        "card-test",
+        {.itemSize = CardItemSize::Large, .showItemNames = false});
+    DESTO_CHECK(GetWindowRect(window, &windowRect));
+    DESTO_CHECK(windowRect.right - windowRect.left == 352);
+    DESTO_CHECK(windowRect.bottom - windowRect.top == 148);
+
+    SendMessageW(window, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(328, 24));
+    SendMessageW(window, WM_LBUTTONUP, 0, MAKELPARAM(328, 24));
     DESTO_CHECK(expansionCallbackCalled);
     DESTO_CHECK(!expanded);
     DESTO_CHECK(SendMessageW(

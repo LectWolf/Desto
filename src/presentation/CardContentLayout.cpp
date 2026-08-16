@@ -13,23 +13,27 @@ CardContentLayoutSettings ResolveCardContentLayoutSettings(
     case domain::CardItemSize::Small:
         result.itemWidth = 52.0;
         result.iconSize = 28.0;
+        result.preferredColumns = 5;
         break;
     case domain::CardItemSize::Medium:
         result.itemWidth = 64.0;
         result.iconSize = 40.0;
+        result.preferredColumns = 4;
         break;
     case domain::CardItemSize::Large:
         result.itemWidth = 76.0;
         result.iconSize = 52.0;
+        result.preferredColumns = 4;
         break;
     case domain::CardItemSize::ExtraLarge:
         result.itemWidth = 96.0;
         result.iconSize = 68.0;
+        result.preferredColumns = 3;
         break;
     }
     result.itemHeight = preferences.showItemNames
-        ? result.iconSize + 32.0
-        : result.iconSize + 12.0;
+        ? result.itemWidth + 24.0
+        : result.itemWidth;
     return result;
 }
 
@@ -47,7 +51,9 @@ CardContentLayout ResolveCardContentLayout(
         || !std::isfinite(settings.horizontalGap) || settings.horizontalGap < 0
         || !std::isfinite(settings.verticalGap) || settings.verticalGap < 0
         || settings.minimumColumns == 0
-        || settings.maximumColumns < settings.minimumColumns) {
+        || settings.maximumColumns < settings.minimumColumns
+        || settings.preferredColumns < settings.minimumColumns
+        || settings.preferredColumns > settings.maximumColumns) {
         throw std::invalid_argument("Card content layout settings must be finite and valid.");
     }
 

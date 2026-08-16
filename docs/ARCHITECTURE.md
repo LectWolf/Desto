@@ -85,7 +85,7 @@ application default
 
 Application Card 的目录所有权、Shell 解析和失败语义记录在 [APPLICATION_CARD.md](APPLICATION_CARD.md)。Explorer 文件交换由独立 OLE Adapter 处理 `CF_HDROP`、`IDataObject` 与 `IDropTarget`；宿主只计算插入槽位和发出命令。Storage Adapter 先完成可回滚移动，再重新生成项目视图；窗口消息过程不直接修改领域状态或执行零散文件操作。
 
-拖动和缩放由 Win32 非客户区命中测试发起，操作结束后把物理像素转换为显示器工作区相对 DIP。`presentation::ResolvePlacementInteraction` 在不依赖 HWND 的情况下完成边缘、中心和 Card 对齐吸附；Ctrl 只绕过吸附，工作区夹取和最小尺寸仍保留。宿主同步更新同一 Placement 的所有显示器 Surface，再通过回调将最终矩形提交给 `ApplicationRuntime::SetPlacement`。
+拖动由 Win32 标题区命中测试发起，窗口边缘始终返回内容命中，不提供鼠标自由缩放。Card 尺寸由实例内容偏好计算：自适应模式使用图标规格对应的建议列数和实际内容行数，固定模式使用明确格数；尺寸变化先在离屏位图完成，再以一次 Layered Window 提交更新。`presentation::ResolvePlacementInteraction` 在不依赖 HWND 的情况下完成屏幕边缘、中心和 Card 等距吸附；Ctrl 只绕过吸附，8 DIP 安全间隔和工作区夹取仍保留。操作结束后，宿主把最终矩形、横纵锚点和参考工作区提交给 `ApplicationRuntime::SetPlacement`。
 
 Windows 平台当前提供 `DisplayTopologyProvider` 的两个 Adapter：生产环境的 `WindowsDisplayTopology` 和测试使用的 `MemoryDisplayTopologyProvider`。`DisplayTopologyMonitor` 负责快照差异和防抖，`WindowsDisplayChangeSource` 负责系统消息输入。接口只暴露 `DisplaySnapshot`，不暴露 Win32 句柄、RECT 或 DPI API。
 

@@ -133,7 +133,7 @@ void RunTests() {
   }]
 })";
         const auto migratedThree = JsonConfigStore(schemaThreePath).load();
-        DESTO_CHECK(migratedThree.schemaVersion == 4);
+        DESTO_CHECK(migratedThree.schemaVersion == ApplicationConfig::CurrentSchemaVersion);
         DESTO_CHECK(migratedThree.cards.front().applicationSortMode
                     == ApplicationItemSortMode::Custom);
         DESTO_CHECK(migratedThree.cards.front().applicationItemPlacements.size() == 3);
@@ -168,6 +168,12 @@ void RunTests() {
             },
         };
         loadedConfig.storageRoot = testRoot / "new-storage";
+        auto anchoredPlacement = loadedConfig.workspace.placements().front();
+        anchoredPlacement.horizontalAnchor = PlacementHorizontalAnchor::Right;
+        anchoredPlacement.verticalAnchor = PlacementVerticalAnchor::Bottom;
+        anchoredPlacement.referenceWorkAreaWidth = 1920;
+        anchoredPlacement.referenceWorkAreaHeight = 1040;
+        loadedConfig.workspace.setPlacement(std::move(anchoredPlacement));
         configStore.save(loadedConfig);
         std::ifstream savedConfig(configPath);
         const std::string savedText{
@@ -177,6 +183,8 @@ void RunTests() {
         DESTO_CHECK(savedText.find("futureFeature") != std::string::npos);
         DESTO_CHECK(savedText.find("futureWorkspaceField") != std::string::npos);
         DESTO_CHECK(savedText.find("futurePlacementField") != std::string::npos);
+        DESTO_CHECK(savedText.find("horizontalAnchor") != std::string::npos);
+        DESTO_CHECK(savedText.find("referenceWorkArea") != std::string::npos);
         DESTO_CHECK(savedText.find("new-storage") != std::string::npos);
         for (const auto& entry : std::filesystem::directory_iterator(configPath.parent_path())) {
             DESTO_CHECK(entry.path().filename().wstring().find(L"settings.json.tmp-") == std::wstring::npos);
@@ -200,6 +208,12 @@ void RunTests() {
         DESTO_CHECK(!reloadedConfig.cards[1].mappingAllowsSourceMutation);
         DESTO_CHECK(reloadedConfig.cards[2].todoItems.size() == 1);
         DESTO_CHECK(reloadedConfig.cards[2].todoItems.front().completed);
+        DESTO_CHECK(reloadedConfig.workspace.placements().front().horizontalAnchor
+                    == PlacementHorizontalAnchor::Right);
+        DESTO_CHECK(reloadedConfig.workspace.placements().front().verticalAnchor
+                    == PlacementVerticalAnchor::Bottom);
+        DESTO_CHECK(reloadedConfig.workspace.placements().front().referenceWorkAreaWidth == 1920);
+        DESTO_CHECK(reloadedConfig.workspace.placements().front().referenceWorkAreaHeight == 1040);
 
         ApplicationRuntime restoredRuntime;
         restoredRuntime.restore(reloadedConfig.cards, reloadedConfig.workspace);

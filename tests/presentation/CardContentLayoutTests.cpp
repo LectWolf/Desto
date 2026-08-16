@@ -18,8 +18,8 @@ void RunTests() {
     DESTO_CHECK(compact.columns == 4);
     DESTO_CHECK(compact.rows == 2);
     DESTO_CHECK(compact.contentWidth == 280.0);
-    DESTO_CHECK(compact.contentHeight == 160.0);
-    DESTO_CHECK(compact.idealHeight == 232.0);
+    DESTO_CHECK(compact.contentHeight == 136.0);
+    DESTO_CHECK(compact.idealHeight == 208.0);
 
     const auto narrow = ResolveCardContentLayout(3, 150.0);
     DESTO_CHECK(narrow.columns == 1);
@@ -37,10 +37,18 @@ void RunTests() {
         .itemSize = CardItemSize::ExtraLarge,
         .showItemNames = true,
     });
+    const auto medium = ResolveCardContentLayoutSettings({
+        .itemSize = CardItemSize::Medium,
+        .showItemNames = false,
+    });
     DESTO_CHECK(small.iconSize == 28.0);
-    DESTO_CHECK(small.itemHeight == 40.0);
+    DESTO_CHECK(small.itemWidth == small.itemHeight);
+    DESTO_CHECK(small.preferredColumns == 5);
+    DESTO_CHECK(medium.itemWidth == medium.itemHeight);
+    DESTO_CHECK(medium.preferredColumns == 4);
     DESTO_CHECK(extraLarge.iconSize == 68.0);
-    DESTO_CHECK(extraLarge.itemHeight == 100.0);
+    DESTO_CHECK(extraLarge.itemHeight == extraLarge.itemWidth + 24.0);
+    DESTO_CHECK(extraLarge.preferredColumns == 3);
 
     DESTO_CHECK(ResolveCardInsertionIndex(7, 320.0, 36.0, 64.0) == 0);
     DESTO_CHECK(ResolveCardInsertionIndex(7, 320.0, 110.0, 64.0) == 1);
@@ -50,7 +58,7 @@ void RunTests() {
     DESTO_CHECK(ResolveCardSlotIndex(320.0, 0.0, 64.0).value() == 0);
     DESTO_CHECK(ResolveCardSlotIndex(320.0, 88.0, 64.0).value() == 0);
     DESTO_CHECK(ResolveCardSlotIndex(320.0, 319.0, 64.0).value() == 3);
-    DESTO_CHECK(ResolveCardSlotIndex(320.0, 36.0, 140.0).value() == 0);
+    DESTO_CHECK(ResolveCardSlotIndex(320.0, 36.0, 140.0).value() == 4);
     DESTO_CHECK(ResolveCardSlotIndex(320.0, 36.0, 219.0, {}, 2).value() == 4);
 
     bool rejected = false;

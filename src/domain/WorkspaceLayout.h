@@ -4,6 +4,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "Card.h"
@@ -41,12 +42,33 @@ struct PlacementRect {
     double height = 220;
 };
 
+enum class PlacementHorizontalAnchor {
+    Free,
+    Left,
+    Center,
+    Right,
+};
+
+enum class PlacementVerticalAnchor {
+    Free,
+    Top,
+    Center,
+    Bottom,
+};
+
+[[nodiscard]] std::string_view ToString(PlacementHorizontalAnchor anchor) noexcept;
+[[nodiscard]] std::string_view ToString(PlacementVerticalAnchor anchor) noexcept;
+
 struct CardPlacement {
     PlacementId id;
     CardId cardId;
-    DisplayTarget target = DisplayTarget::all();
+    DisplayTarget target;
     PlacementRect rect;
     std::int32_t zIndex = 0;
+    PlacementHorizontalAnchor horizontalAnchor = PlacementHorizontalAnchor::Free;
+    PlacementVerticalAnchor verticalAnchor = PlacementVerticalAnchor::Free;
+    double referenceWorkAreaWidth = 0;
+    double referenceWorkAreaHeight = 0;
 };
 
 struct DisplaySnapshot {
@@ -66,6 +88,8 @@ struct PlacementProjection {
     DisplayId displayId;
     PlacementRect rect;
     std::int32_t zIndex = 0;
+    PlacementHorizontalAnchor horizontalAnchor = PlacementHorizontalAnchor::Free;
+    PlacementVerticalAnchor verticalAnchor = PlacementVerticalAnchor::Free;
     bool fallback = false;
 };
 
@@ -79,6 +103,8 @@ public:
     [[nodiscard]] bool removePlacement(const PlacementId& placementId);
     [[nodiscard]] std::size_t removeCard(const CardId& cardId);
     [[nodiscard]] std::vector<PlacementProjection> project(
+        std::span<const DisplaySnapshot> displays) const;
+    [[nodiscard]] std::vector<CardPlacement> unavailablePlacements(
         std::span<const DisplaySnapshot> displays) const;
 
 private:

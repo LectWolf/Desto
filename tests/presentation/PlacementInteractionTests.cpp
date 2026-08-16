@@ -10,8 +10,8 @@ namespace {
 
 void RunTests() {
     auto rect = ResolvePlacementInteraction({7, 9, 300, 200}, 1920, 1040, {}, false);
-    DESTO_CHECK(rect.left == 0);
-    DESTO_CHECK(rect.top == 0);
+    DESTO_CHECK(rect.left == 8);
+    DESTO_CHECK(rect.top == 8);
 
     rect = ResolvePlacementInteraction({807, 419, 300, 200}, 1920, 1040, {}, false);
     DESTO_CHECK(rect.left == 810);
@@ -23,14 +23,18 @@ void RunTests() {
     DESTO_CHECK(rect.top == 300);
 
     rect = ResolvePlacementInteraction({7, 9, 300, 200}, 1920, 1040, {}, true);
-    DESTO_CHECK(rect.left == 7);
+    DESTO_CHECK(rect.left == 8);
     DESTO_CHECK(rect.top == 9);
 
     rect = ResolvePlacementInteraction({1900, 1000, 20, 20}, 1920, 1040, {}, true);
     DESTO_CHECK(rect.width == 160);
     DESTO_CHECK(rect.height == 80);
-    DESTO_CHECK(rect.left == 1760);
-    DESTO_CHECK(rect.top == 960);
+    DESTO_CHECK(rect.left == 1752);
+    DESTO_CHECK(rect.top == 952);
+
+    rect = ResolvePlacementInteraction({1620, 840, 300, 200}, 1920, 1040, {}, false);
+    DESTO_CHECK(rect.left == 1612);
+    DESTO_CHECK(rect.top == 832);
 
     const auto detailed = ResolvePlacementInteractionDetailed(
         {193, 302, 300, 200}, 1920, 1040, others, false);
@@ -42,6 +46,10 @@ void RunTests() {
     DESTO_CHECK(spaced.rect.top == 488);
     DESTO_CHECK(spaced.verticalGuide == 744);
     DESTO_CHECK(spaced.horizontalGuide == 484);
+    const auto formerlyFlush = ResolvePlacementInteractionDetailed(
+        {200, 300, 300, 180}, 1920, 1040, others, false);
+    DESTO_CHECK(formerlyFlush.rect.left == 192);
+    DESTO_CHECK(formerlyFlush.rect.top == 300);
     const auto bypassed = ResolvePlacementInteractionDetailed(
         {193, 302, 300, 200}, 1920, 1040, others, true);
     DESTO_CHECK(!bypassed.verticalGuide.has_value());

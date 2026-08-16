@@ -18,6 +18,10 @@ struct PlacementInteractionResult {
     domain::PlacementRect rect;
     std::optional<double> verticalGuide;
     std::optional<double> horizontalGuide;
+    domain::PlacementHorizontalAnchor horizontalAnchor =
+        domain::PlacementHorizontalAnchor::Free;
+    domain::PlacementVerticalAnchor verticalAnchor =
+        domain::PlacementVerticalAnchor::Free;
 };
 
 [[nodiscard]] PlacementInteractionResult ResolvePlacementInteractionDetailed(

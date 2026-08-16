@@ -133,12 +133,6 @@ struct WindowsDesktopHost::Impl {
             return MA_NOACTIVATE;
         case WM_NCHITTEST:
             return instance == nullptr ? HTCLIENT : instance->hitTest(window, lParam);
-        case WM_GETMINMAXINFO:
-            if (instance != nullptr) {
-                instance->setMinimumTrackSize(window, lParam);
-                return 0;
-            }
-            break;
         case WM_ENTERSIZEMOVE:
             if (instance != nullptr) {
                 instance->hideGuides();
@@ -146,7 +140,6 @@ struct WindowsDesktopHost::Impl {
             }
             break;
         case WM_MOVING:
-        case WM_SIZING:
             if (instance != nullptr) {
                 try {
                     instance->updateInteractionGuides(
@@ -314,6 +307,7 @@ struct WindowsDesktopHost::Impl {
         if (surface.card.content.sizeMode == domain::CardSizeMode::Fixed) {
             settings.minimumColumns = surface.card.content.fixedColumns;
             settings.maximumColumns = surface.card.content.fixedColumns;
+            settings.preferredColumns = surface.card.content.fixedColumns;
         } else if (surface.card.applicationSortMode
                    == domain::ApplicationItemSortMode::Custom) {
             for (const auto& placement : surface.card.applicationItemPlacements) {
@@ -322,8 +316,66 @@ struct WindowsDesktopHost::Impl {
             }
             settings.maximumColumns = std::max(
                 settings.maximumColumns, settings.minimumColumns);
+            settings.preferredColumns = std::max(
+                settings.preferredColumns, settings.minimumColumns);
         }
         return settings;
+    }
+
+    static std::size_t contentSlotCount(const Surface& surface) noexcept {
+        if (surface.card.content.sizeMode == domain::CardSizeMode::Fixed) {
+            return static_cast<std::size_t>(surface.card.content.fixedColumns)
+                * surface.card.content.fixedRows;
+        }
+        auto result = surface.card.items.size();
+        if (surface.card.applicationSortMode == domain::ApplicationItemSortMode::Custom) {
+            const auto columns = itemLayoutSettings(surface).preferredColumns;
+            for (const auto& placement : surface.card.applicationItemPlacements) {
+                result = std::max(
+                    result,
+                    static_cast<std::size_t>(placement.row) * columns
+                        + placement.column + 1);
+            }
+        }
+        return result;
+    }
+
+    static domain::PlacementRect contentDrivenRect(const Surface& surface) {
+        const auto settings = itemLayoutSettings(surface);
+        const auto columns = settings.preferredColumns;
+        const auto width = std::max(
+            180.0,
+            settings.horizontalPadding * 2.0
+                + columns * settings.itemWidth
+                + (columns - 1) * settings.horizontalGap);
+        const auto layout = presentation::ResolveCardContentLayout(
+            contentSlotCount(surface), width, settings);
+        auto rect = surface.projection.rect;
+        const auto right = rect.left + rect.width;
+        const auto horizontalCenter = rect.left + rect.width / 2.0;
+        const auto bottom = rect.top + rect.height;
+        const auto verticalCenter = rect.top + rect.height / 2.0;
+        rect.width = std::min(width, surface.display.workAreaWidth);
+        rect.height = std::min(
+            std::max(120.0, layout.idealHeight), surface.display.workAreaHeight);
+        if (surface.projection.horizontalAnchor == domain::PlacementHorizontalAnchor::Right) {
+            rect.left = right - rect.width;
+        } else if (surface.projection.horizontalAnchor
+                   == domain::PlacementHorizontalAnchor::Center) {
+            rect.left = horizontalCenter - rect.width / 2.0;
+        }
+        if (surface.projection.verticalAnchor == domain::PlacementVerticalAnchor::Bottom) {
+            rect.top = bottom - rect.height;
+        } else if (surface.projection.verticalAnchor
+                   == domain::PlacementVerticalAnchor::Center) {
+            rect.top = verticalCenter - rect.height / 2.0;
+        }
+        return presentation::ResolvePlacementInteraction(
+            rect,
+            surface.display.workAreaWidth,
+            surface.display.workAreaHeight,
+            {},
+            true);
     }
 
     static presentation::CardContentLayout itemLayout(
@@ -447,34 +499,10 @@ struct WindowsDesktopHost::Impl {
         if (y < 0 || y >= surface->interactiveHeight) {
             return HTTRANSPARENT;
         }
-        const auto resizeBorder = dipToPixels(6.0, *surface);
-        const auto left = x < resizeBorder;
-        const auto right = x >= surface->width - resizeBorder;
-        const auto top = y < resizeBorder;
-        const auto bottom = y >= surface->interactiveHeight - resizeBorder;
-        if (top && left) return HTTOPLEFT;
-        if (top && right) return HTTOPRIGHT;
-        if (bottom && left) return HTBOTTOMLEFT;
-        if (bottom && right) return HTBOTTOMRIGHT;
-        if (left) return HTLEFT;
-        if (right) return HTRIGHT;
-        if (bottom) return HTBOTTOM;
-        if (top) return HTTOP;
         if (y < dipToPixels(48.0, *surface) && !isCollapseControlHit(*surface, x, y)) {
             return HTCAPTION;
         }
         return HTCLIENT;
-    }
-
-    void setMinimumTrackSize(HWND window, LPARAM lParam) noexcept {
-        const auto* surface = findSurface(window);
-        if (surface == nullptr) {
-            return;
-        }
-        auto* bounds = reinterpret_cast<MINMAXINFO*>(lParam);
-        const auto scale = surface->display.effectiveDpi / 96.0;
-        bounds->ptMinTrackSize.x = static_cast<LONG>(std::lround(160.0 * scale));
-        bounds->ptMinTrackSize.y = static_cast<LONG>(std::lround(80.0 * scale));
     }
 
     void destroyGuides() noexcept {
@@ -952,27 +980,58 @@ struct WindowsDesktopHost::Impl {
         surfaces.clear();
     }
 
-    void createBitmap(Surface& surface) {
-        surface.memoryDc = CreateCompatibleDC(nullptr);
-        if (surface.memoryDc == nullptr) {
+    void replaceBitmap(Surface& surface, int width, int height) {
+        auto memoryDc = CreateCompatibleDC(nullptr);
+        if (memoryDc == nullptr) {
             throw std::runtime_error("CreateCompatibleDC failed for desktop host.");
         }
         BITMAPINFO bitmapInfo{};
         bitmapInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-        bitmapInfo.bmiHeader.biWidth = surface.width;
-        bitmapInfo.bmiHeader.biHeight = -surface.height;
+        bitmapInfo.bmiHeader.biWidth = width;
+        bitmapInfo.bmiHeader.biHeight = -height;
         bitmapInfo.bmiHeader.biPlanes = 1;
         bitmapInfo.bmiHeader.biBitCount = 32;
         bitmapInfo.bmiHeader.biCompression = BI_RGB;
         void* bits = nullptr;
-        surface.bitmap = CreateDIBSection(
-            surface.memoryDc, &bitmapInfo, DIB_RGB_COLORS, &bits, nullptr, 0);
-        if (surface.bitmap == nullptr) {
+        auto bitmap = CreateDIBSection(
+            memoryDc, &bitmapInfo, DIB_RGB_COLORS, &bits, nullptr, 0);
+        if (bitmap == nullptr) {
+            DeleteDC(memoryDc);
             throw std::runtime_error("CreateDIBSection failed for desktop host.");
         }
+        const auto previousBitmap = static_cast<HBITMAP>(SelectObject(memoryDc, bitmap));
+        if (previousBitmap == nullptr || previousBitmap == HGDI_ERROR) {
+            DeleteObject(bitmap);
+            DeleteDC(memoryDc);
+            throw std::runtime_error("SelectObject failed for desktop host bitmap.");
+        }
+
+        destroyBitmap(surface);
+        surface.memoryDc = memoryDc;
+        surface.bitmap = bitmap;
+        surface.previousBitmap = previousBitmap;
         surface.pixels = static_cast<std::uint32_t*>(bits);
-        surface.previousBitmap = static_cast<HBITMAP>(
-            SelectObject(surface.memoryDc, surface.bitmap));
+        surface.width = width;
+        surface.height = height;
+    }
+
+    void createBitmap(Surface& surface) {
+        replaceBitmap(surface, surface.width, surface.height);
+    }
+
+    void resizeSurfaceForContent(Surface& surface, bool allocateBitmap) {
+        const auto rect = contentDrivenRect(surface);
+        const auto scale = surface.display.effectiveDpi / 96.0;
+        const auto width = std::max(1, static_cast<int>(std::lround(rect.width * scale)));
+        const auto height = std::max(1, static_cast<int>(std::lround(rect.height * scale)));
+        surface.projection.rect = rect;
+        if (width == surface.width && height == surface.height) return;
+        if (allocateBitmap) {
+            replaceBitmap(surface, width, height);
+        } else {
+            surface.width = width;
+            surface.height = height;
+        }
     }
 
     void createSurface(Surface& surface) {
@@ -1178,6 +1237,9 @@ struct WindowsDesktopHost::Impl {
             const auto iconSize = std::max(
                 1,
                 static_cast<int>(std::lround(settings.iconSize * scale)));
+            const auto iconRegionSize = std::max(
+                1,
+                static_cast<int>(std::lround(settings.itemWidth * scale)));
             const auto projection = projectedItems(surface);
             auto visualSlotCount = projectedSlotCount(surface, projection);
             if (surface.dropInsertionIndex.has_value()) {
@@ -1296,7 +1358,7 @@ struct WindowsDesktopHost::Impl {
                 const auto& item = card.items[projected.itemIndex];
                 if (!item.icon.empty()) {
                     const auto iconLeft = slot.left + ((slot.right - slot.left) - iconSize) / 2;
-                    const auto iconTop = slot.top;
+                    const auto iconTop = slot.top + (iconRegionSize - iconSize) / 2;
                     for (int targetY = 0; targetY < iconSize; ++targetY) {
                         const auto sourceY = std::min(
                             item.icon.height - 1,
@@ -1352,7 +1414,7 @@ struct WindowsDesktopHost::Impl {
                             : (darkSurface ? RGB(148, 153, 162) : RGB(121, 126, 135)));
                     RECT labelRect{
                         slot.left,
-                        slot.top + iconSize + dipToPixels(3.0, surface),
+                        slot.top + iconRegionSize,
                         slot.right,
                         std::min<LONG>(slot.bottom, visibleBottom),
                     };
@@ -1462,13 +1524,20 @@ struct WindowsDesktopHost::Impl {
         if (screen == nullptr) {
             throw std::runtime_error("GetDC failed for desktop host.");
         }
+        const auto scale = surface.display.effectiveDpi / 96.0;
+        POINT destination{
+            static_cast<LONG>(std::lround(
+                (surface.display.workAreaLeft + surface.projection.rect.left) * scale)),
+            static_cast<LONG>(std::lround(
+                (surface.display.workAreaTop + surface.projection.rect.top) * scale)),
+        };
         POINT source{0, 0};
         SIZE size{surface.width, surface.height};
         BLENDFUNCTION blend{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
         const auto updated = UpdateLayeredWindow(
             surface.window,
             screen,
-            nullptr,
+            &destination,
             &size,
             surface.memoryDc,
             &source,
@@ -1504,7 +1573,7 @@ struct WindowsDesktopHost::Impl {
                 otherCards.push_back(surface.projection.rect);
             }
         }
-        const auto resolved = presentation::ResolvePlacementInteraction(
+        const auto resolved = presentation::ResolvePlacementInteractionDetailed(
             proposed,
             moved->display.workAreaWidth,
             moved->display.workAreaHeight,
@@ -1514,7 +1583,7 @@ struct WindowsDesktopHost::Impl {
         std::vector<Surface*> affected;
         for (auto& surface : surfaces) {
             if (surface.projection.placementId == moved->projection.placementId) {
-                surface.projection.rect = resolved;
+                surface.projection.rect = resolved.rect;
                 affected.push_back(&surface);
             }
         }
@@ -1524,8 +1593,10 @@ struct WindowsDesktopHost::Impl {
         }
         for (auto* surface : affected) {
             const auto surfaceScale = surface->display.effectiveDpi / 96.0;
-            const auto width = std::max(1, static_cast<int>(std::lround(resolved.width * surfaceScale)));
-            const auto height = std::max(1, static_cast<int>(std::lround(resolved.height * surfaceScale)));
+            const auto width = std::max(1, static_cast<int>(
+                std::lround(resolved.rect.width * surfaceScale)));
+            const auto height = std::max(1, static_cast<int>(
+                std::lround(resolved.rect.height * surfaceScale)));
             if (width != surface->width || height != surface->height) {
                 destroyBitmap(*surface);
                 surface->width = width;
@@ -1534,9 +1605,11 @@ struct WindowsDesktopHost::Impl {
                 render(*surface, surface->display, surface->card, surface->ordinal);
             }
             const auto left = static_cast<int>(std::lround(
-                surface->display.workAreaLeft * surfaceScale + resolved.left * surfaceScale));
+                surface->display.workAreaLeft * surfaceScale
+                + resolved.rect.left * surfaceScale));
             const auto top = static_cast<int>(std::lround(
-                surface->display.workAreaTop * surfaceScale + resolved.top * surfaceScale));
+                surface->display.workAreaTop * surfaceScale
+                + resolved.rect.top * surfaceScale));
             deferred = DeferWindowPos(
                 deferred,
                 surface->window,
@@ -1554,7 +1627,14 @@ struct WindowsDesktopHost::Impl {
             throw std::runtime_error("EndDeferWindowPos failed after Card interaction.");
         }
         if (placementChanged) {
-            placementChanged(moved->projection.placementId, moved->projection.cardId, resolved);
+            placementChanged(
+                moved->projection.placementId,
+                moved->projection.cardId,
+                resolved.rect,
+                resolved.horizontalAnchor,
+                resolved.verticalAnchor,
+                moved->display.workAreaWidth,
+                moved->display.workAreaHeight);
         }
     }
 
@@ -1595,6 +1675,7 @@ struct WindowsDesktopHost::Impl {
                 .height = std::max(1, static_cast<int>(std::lround(projection.rect.height * scale))),
             };
             try {
+                resizeSurfaceForContent(surface, false);
                 createSurface(surface);
                 render(surface, *display, *card, surface.ordinal);
                 surfaces.push_back(std::move(surface));
@@ -1650,6 +1731,7 @@ struct WindowsDesktopHost::Impl {
                     *surface.dropInsertionIndex,
                     surface.card.items.size());
             }
+            resizeSurfaceForContent(surface, true);
             render(surface, surface.display, surface.card, surface.ordinal);
         }
     }
@@ -1671,6 +1753,7 @@ struct WindowsDesktopHost::Impl {
                 surface.dropInsertionIndex = std::min(
                     *surface.dropInsertionIndex, surface.card.items.size());
             }
+            resizeSurfaceForContent(surface, true);
             render(surface, surface.display, surface.card, surface.ordinal, false);
             affected.push_back(&surface);
         }
@@ -1685,6 +1768,7 @@ struct WindowsDesktopHost::Impl {
                 continue;
             }
             surface.card.content = preferences;
+            resizeSurfaceForContent(surface, true);
             render(surface, surface.display, surface.card, surface.ordinal);
         }
     }

@@ -12,12 +12,13 @@ struct CardContentLayoutSettings {
     double horizontalPadding = 12.0;
     double verticalPadding = 12.0;
     double itemWidth = 64.0;
-    double itemHeight = 76.0;
+    double itemHeight = 64.0;
     double iconSize = 40.0;
     double horizontalGap = 8.0;
     double verticalGap = 8.0;
     std::size_t minimumColumns = 1;
     std::size_t maximumColumns = 8;
+    std::size_t preferredColumns = 4;
 };
 
 [[nodiscard]] CardContentLayoutSettings ResolveCardContentLayoutSettings(

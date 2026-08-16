@@ -256,6 +256,11 @@ int WINAPI wWinMain(
     try {
         WindowsDisplayTopology topology;
         const auto displays = topology.snapshot();
+        if (displays.empty()) {
+            throw std::runtime_error("A display is required to run the native prototype.");
+        }
+        const auto primary = std::ranges::find_if(displays, &DisplaySnapshot::primary);
+        const auto& targetDisplay = primary == displays.end() ? displays.front() : *primary;
         ApplicationRuntime runtime;
         const std::vector<CardId> ids{"prototype-1", "prototype-2", "prototype-3", "prototype-4"};
         for (std::size_t index = 0; index < ids.size(); ++index) {
@@ -270,9 +275,11 @@ int WINAPI wWinMain(
             const auto placement = runtime.execute(SetPlacement{{
                 .id = "placement-" + ids[index],
                 .cardId = ids[index],
-                .target = DisplayTarget::all(),
+                .target = DisplayTarget::specific(targetDisplay.id),
                 .rect = {40.0 + index * 40.0, 48.0 + index * 34.0, 320, 220},
                 .zIndex = static_cast<std::int32_t>(index),
+                .referenceWorkAreaWidth = targetDisplay.workAreaWidth,
+                .referenceWorkAreaHeight = targetDisplay.workAreaHeight,
             }});
             if (placement.status == CommandStatus::Rejected) {
                 throw std::runtime_error("Unable to create prototype Placement.");

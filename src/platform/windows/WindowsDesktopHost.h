@@ -17,7 +17,11 @@ public:
     using PlacementChangedCallback = std::function<void(
         const domain::PlacementId&,
         const domain::CardId&,
-        const domain::PlacementRect&)>;
+        const domain::PlacementRect&,
+        domain::PlacementHorizontalAnchor,
+        domain::PlacementVerticalAnchor,
+        double referenceWorkAreaWidth,
+        double referenceWorkAreaHeight)>;
     using CardExpandedChangedCallback = std::function<void(const domain::CardId&, bool)>;
     using ApplicationItemsDroppedCallback = std::function<bool(
         const domain::CardId&,

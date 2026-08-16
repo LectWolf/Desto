@@ -121,21 +121,12 @@ std::vector<std::filesystem::path> PlacementOrder(const ApplicationCard& card) {
     return result;
 }
 
-double CardWidth(const ApplicationRuntime& runtime, const CardId& cardId) {
-    const auto found = std::ranges::find_if(
-        runtime.workspace().placements(), [&](const CardPlacement& placement) {
-            return placement.cardId == cardId;
-        });
-    return found == runtime.workspace().placements().end() ? 320.0 : found->rect.width;
-}
-
-std::uint32_t CardColumns(const ApplicationRuntime& runtime, const ApplicationCard& card) {
+std::uint32_t CardColumns(const ApplicationRuntime&, const ApplicationCard& card) {
     if (card.content().sizeMode == CardSizeMode::Fixed) {
         return card.content().fixedColumns;
     }
     const auto settings = desto::presentation::ResolveCardContentLayoutSettings(card.content());
-    auto columns = static_cast<std::uint32_t>(desto::presentation::ResolveCardContentLayout(
-        0, CardWidth(runtime, card.id()), settings).columns);
+    auto columns = static_cast<std::uint32_t>(settings.preferredColumns);
     if (card.sortMode() == ApplicationItemSortMode::Custom) {
         for (const auto& placement : card.itemPlacements()) {
             columns = (std::max)(columns, placement.column + 1);
@@ -192,6 +183,11 @@ private:
 };
 
 void SeedPreview(ApplicationRuntime& runtime, const std::vector<DisplaySnapshot>& displays) {
+    if (displays.empty()) {
+        throw std::runtime_error("A display is required to seed preview Cards.");
+    }
+    const auto primary = std::ranges::find_if(displays, &DisplaySnapshot::primary);
+    const auto& targetDisplay = primary == displays.end() ? displays.front() : *primary;
     const std::vector<CardId> ids{
         "preview-application-1",
         "preview-application-2",
@@ -214,9 +210,11 @@ void SeedPreview(ApplicationRuntime& runtime, const std::vector<DisplaySnapshot>
         const auto placement = runtime.execute(SetPlacement{{
             .id = "preview-placement-" + ids[index],
             .cardId = ids[index],
-            .target = DisplayTarget::all(),
+            .target = DisplayTarget::specific(targetDisplay.id),
             .rect = {48.0 + index * 360.0, 56.0 + index * 32.0, 320.0, 220.0},
             .zIndex = static_cast<std::int32_t>(index),
+            .referenceWorkAreaWidth = targetDisplay.workAreaWidth,
+            .referenceWorkAreaHeight = targetDisplay.workAreaHeight,
         }});
         if (placement.status == CommandStatus::Rejected) {
             throw std::runtime_error("Unable to create preview Placement.");
@@ -300,7 +298,13 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
         }
         WindowsDesktopHost host;
         host.setPlacementChangedCallback(
-            [&](const PlacementId& placementId, const CardId& cardId, const PlacementRect& rect) {
+            [&](const PlacementId& placementId,
+                const CardId& cardId,
+                const PlacementRect& rect,
+                PlacementHorizontalAnchor horizontalAnchor,
+                PlacementVerticalAnchor verticalAnchor,
+                double referenceWorkAreaWidth,
+                double referenceWorkAreaHeight) {
                 const auto& placements = runtime.workspace().placements();
                 const auto found = std::find_if(
                     placements.begin(), placements.end(), [&](const CardPlacement& placement) {
@@ -312,6 +316,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                 }
                 auto updated = *found;
                 updated.rect = rect;
+                updated.horizontalAnchor = horizontalAnchor;
+                updated.verticalAnchor = verticalAnchor;
+                updated.referenceWorkAreaWidth = referenceWorkAreaWidth;
+                updated.referenceWorkAreaHeight = referenceWorkAreaHeight;
                 if (runtime.execute(SetPlacement{std::move(updated)}).status
                     == CommandStatus::Rejected) {
                     diagnostics.record(DiagnosticLevel::Warning, "desktop.placement_rejected");

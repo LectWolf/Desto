@@ -70,6 +70,22 @@ domain::CardSizeMode ParseCardSizeMode(const std::string& value) {
     throw std::runtime_error("Configuration card size mode is invalid.");
 }
 
+domain::PlacementHorizontalAnchor ParseHorizontalAnchor(const std::string& value) {
+    if (value == "free") return domain::PlacementHorizontalAnchor::Free;
+    if (value == "left") return domain::PlacementHorizontalAnchor::Left;
+    if (value == "center") return domain::PlacementHorizontalAnchor::Center;
+    if (value == "right") return domain::PlacementHorizontalAnchor::Right;
+    throw std::runtime_error("Configuration horizontal placement anchor is invalid.");
+}
+
+domain::PlacementVerticalAnchor ParseVerticalAnchor(const std::string& value) {
+    if (value == "free") return domain::PlacementVerticalAnchor::Free;
+    if (value == "top") return domain::PlacementVerticalAnchor::Top;
+    if (value == "center") return domain::PlacementVerticalAnchor::Center;
+    if (value == "bottom") return domain::PlacementVerticalAnchor::Bottom;
+    throw std::runtime_error("Configuration vertical placement anchor is invalid.");
+}
+
 domain::ApplicationItemSortMode ParseApplicationItemSortMode(const std::string& value) {
     if (value == "custom") return domain::ApplicationItemSortMode::Custom;
     if (value == "name") return domain::ApplicationItemSortMode::Name;
@@ -153,6 +169,22 @@ Json MigrateDocument(Json document) {
             }
             document["schemaVersion"] = 4;
             version = 4;
+            continue;
+        }
+        if (version == 4) {
+            // Schema 5 preserves display reflow intent and never projects offline displays elsewhere.
+            if (document.contains("workspace") && document["workspace"].is_object()
+                && document["workspace"].contains("placements")
+                && document["workspace"]["placements"].is_array()) {
+                for (auto& placement : document["workspace"]["placements"]) {
+                    if (!placement.is_object()) continue;
+                    placement["horizontalAnchor"] = "free";
+                    placement["verticalAnchor"] = "free";
+                    placement["referenceWorkArea"] = {{"width", 0}, {"height", 0}};
+                }
+            }
+            document["schemaVersion"] = 5;
+            version = 5;
             continue;
         }
         throw std::runtime_error("Configuration schema migration is unavailable.");
@@ -438,6 +470,16 @@ ApplicationConfig ParseDocument(const Json& document) {
             if (!rect.is_object()) {
                 throw std::runtime_error("Configuration placement rect is invalid.");
             }
+            double referenceWidth = 0;
+            double referenceHeight = 0;
+            if (value.contains("referenceWorkArea")) {
+                const auto& reference = value.at("referenceWorkArea");
+                if (!reference.is_object()) {
+                    throw std::runtime_error("Configuration placement reference work area is invalid.");
+                }
+                referenceWidth = reference.value("width", 0.0);
+                referenceHeight = reference.value("height", 0.0);
+            }
             result.workspace.setPlacement({
                 .id = value.at("id").get<domain::PlacementId>(),
                 .cardId = value.at("cardId").get<domain::CardId>(),
@@ -449,6 +491,12 @@ ApplicationConfig ParseDocument(const Json& document) {
                     .height = rect.at("height").get<double>(),
                 },
                 .zIndex = value.value("zIndex", 0),
+                .horizontalAnchor = ParseHorizontalAnchor(
+                    value.value("horizontalAnchor", std::string{"free"})),
+                .verticalAnchor = ParseVerticalAnchor(
+                    value.value("verticalAnchor", std::string{"free"})),
+                .referenceWorkAreaWidth = referenceWidth,
+                .referenceWorkAreaHeight = referenceHeight,
             });
         }
     }
@@ -701,6 +749,12 @@ void JsonConfigStore::save(const ApplicationConfig& config) const {
             {"height", placement.rect.height},
         };
         value["zIndex"] = placement.zIndex;
+        value["horizontalAnchor"] = domain::ToString(placement.horizontalAnchor);
+        value["verticalAnchor"] = domain::ToString(placement.verticalAnchor);
+        value["referenceWorkArea"] = {
+            {"width", placement.referenceWorkAreaWidth},
+            {"height", placement.referenceWorkAreaHeight},
+        };
         placements.push_back(std::move(value));
     }
     WriteAtomically(configPath_, document.dump(2) + "\n", usedBackup);

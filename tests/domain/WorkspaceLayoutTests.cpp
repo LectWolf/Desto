@@ -84,20 +84,48 @@ void RunTests() {
     DESTO_CHECK(!restored.front().fallback);
     DESTO_CHECK(layout.placements().front().target.displayId() == "display-a");
 
-    WorkspaceLayout fallbackLayout;
-    fallbackLayout.setPlacement({
+    WorkspaceLayout offlineLayout;
+    offlineLayout.setPlacement({
         .id = "missing-display",
         .cardId = "card-2",
         .target = DisplayTarget::specific("display-missing"),
         .rect = {1900, 1000, 500, 400},
     });
-    const auto fallback = fallbackLayout.project(onlyDisplayB);
-    DESTO_CHECK(fallback.size() == 1);
-    DESTO_CHECK(fallback.front().fallback);
-    DESTO_CHECK(fallback.front().requestedDisplayId == "display-missing");
-    DESTO_CHECK(fallback.front().displayId == "display-b");
-    DESTO_CHECK(fallback.front().rect.left == 1420);
-    DESTO_CHECK(fallback.front().rect.top == 640);
+    DESTO_CHECK(offlineLayout.project(onlyDisplayB).empty());
+    const auto offline = offlineLayout.unavailablePlacements(onlyDisplayB);
+    DESTO_CHECK(offline.size() == 1);
+    DESTO_CHECK(offline.front().target.displayId() == "display-missing");
+    auto transferred = offline.front();
+    transferred.target = DisplayTarget::specific("display-b");
+    transferred.rect = {80, 96, 500, 400};
+    offlineLayout.setPlacement(transferred);
+    const auto transferredProjection = offlineLayout.project(onlyDisplayB);
+    DESTO_CHECK(transferredProjection.size() == 1);
+    DESTO_CHECK(transferredProjection.front().displayId == "display-b");
+
+    WorkspaceLayout anchoredLayout;
+    anchoredLayout.setPlacement({
+        .id = "anchored",
+        .cardId = "card-anchored",
+        .target = DisplayTarget::specific("display-a"),
+        .rect = {1612, 832, 300, 200},
+        .horizontalAnchor = PlacementHorizontalAnchor::Right,
+        .verticalAnchor = PlacementVerticalAnchor::Bottom,
+        .referenceWorkAreaWidth = 1920,
+        .referenceWorkAreaHeight = 1040,
+    });
+    const std::vector<DisplaySnapshot> resizedDisplay{{
+        .id = "display-a",
+        .workAreaWidth = 1280,
+        .workAreaHeight = 720,
+        .primary = true,
+    }};
+    const auto reflowed = anchoredLayout.project(resizedDisplay);
+    DESTO_CHECK(reflowed.size() == 1);
+    DESTO_CHECK(reflowed.front().rect.left == 972);
+    DESTO_CHECK(reflowed.front().rect.top == 512);
+    DESTO_CHECK(reflowed.front().horizontalAnchor == PlacementHorizontalAnchor::Right);
+    DESTO_CHECK(reflowed.front().verticalAnchor == PlacementVerticalAnchor::Bottom);
 
     WorkspaceLayout allDisplaysLayout;
     allDisplaysLayout.setPlacement({

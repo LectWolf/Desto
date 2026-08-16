@@ -43,7 +43,10 @@ bool SameProjections(
             || a.requestedDisplayId != b.requestedDisplayId || a.displayId != b.displayId
             || a.rect.left != b.rect.left || a.rect.top != b.rect.top
             || a.rect.width != b.rect.width || a.rect.height != b.rect.height
-            || a.zIndex != b.zIndex || a.fallback != b.fallback) {
+            || a.zIndex != b.zIndex
+            || a.horizontalAnchor != b.horizontalAnchor
+            || a.verticalAnchor != b.verticalAnchor
+            || a.fallback != b.fallback) {
             return false;
         }
     }

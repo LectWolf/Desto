@@ -34,7 +34,7 @@
 
 ### 06. Workspace placement model [x]
 
-完成 DisplayTarget、Placement、WorkspaceLayout、断屏 Fallback Projection、重连恢复和工作区夹取。退出条件是布局不依赖显示器枚举序号，临时投影不改写原始位置。
+完成 DisplayTarget、Placement、WorkspaceLayout、稳定单屏默认绑定、离线屏幕保留、重连恢复、锚点重排和工作区夹取。退出条件是布局不依赖显示器枚举序号，断开的屏幕不会把 Card 投影到其他屏幕。
 
 ### 07. Windows display identity adapter [x]
 
@@ -90,7 +90,7 @@
 
 ### 19. Interaction, resize and snapping [x]
 
-实现拖动、缩放、边缘/中心/Card 吸附、Ctrl 绕过吸附、键盘操作和高 DPI 输入转换。退出条件是位置保存准确，吸附不会改变用户主动绕过的操作。
+实现拖动、内容驱动尺寸、边缘/中心/Card 等距吸附、Ctrl 绕过吸附和高 DPI 输入转换；禁用鼠标自由缩放。退出条件是位置与锚点保存准确，Card 和屏幕边缘保留统一间隔，吸附不会改变用户主动绕过的操作。
 
 ## Card Features
 
