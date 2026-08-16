@@ -4,6 +4,7 @@
 #include <stdexcept>
 
 using namespace desto::presentation;
+using namespace desto::domain;
 
 namespace {
 
@@ -27,6 +28,23 @@ void RunTests() {
     const auto capped = ResolveCardContentLayout(20, 2000.0);
     DESTO_CHECK(capped.columns == 8);
     DESTO_CHECK(capped.rows == 3);
+
+    const auto small = ResolveCardContentLayoutSettings({
+        .itemSize = CardItemSize::Small,
+        .showItemNames = false,
+    });
+    const auto extraLarge = ResolveCardContentLayoutSettings({
+        .itemSize = CardItemSize::ExtraLarge,
+        .showItemNames = true,
+    });
+    DESTO_CHECK(small.iconSize == 28.0);
+    DESTO_CHECK(small.itemHeight == 40.0);
+    DESTO_CHECK(extraLarge.iconSize == 68.0);
+    DESTO_CHECK(extraLarge.itemHeight == 100.0);
+
+    DESTO_CHECK(ResolveCardInsertionIndex(7, 320.0, 36.0, 64.0) == 0);
+    DESTO_CHECK(ResolveCardInsertionIndex(7, 320.0, 110.0, 64.0) == 1);
+    DESTO_CHECK(ResolveCardInsertionIndex(7, 320.0, 1000.0, 1000.0) == 7);
 
     bool rejected = false;
     try {

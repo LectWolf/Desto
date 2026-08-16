@@ -48,6 +48,22 @@ domain::CardType ParseCardType(const std::string& value) {
     throw std::runtime_error("Configuration card type is invalid.");
 }
 
+domain::CardItemSize ParseCardItemSize(const std::string& value) {
+    if (value == "small") {
+        return domain::CardItemSize::Small;
+    }
+    if (value == "medium") {
+        return domain::CardItemSize::Medium;
+    }
+    if (value == "large") {
+        return domain::CardItemSize::Large;
+    }
+    if (value == "extraLarge") {
+        return domain::CardItemSize::ExtraLarge;
+    }
+    throw std::runtime_error("Configuration card item size is invalid.");
+}
+
 Json ReadDocument(const std::filesystem::path& path) {
     if (!std::filesystem::exists(path)) {
         return Json::object();
@@ -85,6 +101,12 @@ Json MigrateDocument(Json document) {
             }
             document["schemaVersion"] = 2;
             version = 2;
+            continue;
+        }
+        if (version == 2) {
+            // Schema 3 adds optional per-Card content preferences and Application item order.
+            document["schemaVersion"] = 3;
+            version = 3;
             continue;
         }
         throw std::runtime_error("Configuration schema migration is unavailable.");
@@ -236,6 +258,15 @@ ApplicationConfig ParseDocument(const Json& document) {
                 card.appearance.opacity = appearance.value("opacity", 1.0);
                 card.appearance.cornerRadius = appearance.value("cornerRadius", 16.0);
             }
+            if (value.contains("content")) {
+                const auto& content = value.at("content");
+                if (!content.is_object()) {
+                    throw std::runtime_error("Configuration card content preferences are invalid.");
+                }
+                card.content.itemSize = ParseCardItemSize(
+                    content.value("itemSize", std::string{"medium"}));
+                card.content.showItemNames = content.value("showItemNames", true);
+            }
             switch (card.type) {
             case domain::CardType::Application: {
                 const auto& application = value.at("application");
@@ -244,6 +275,17 @@ ApplicationConfig ParseDocument(const Json& document) {
                     throw std::runtime_error("Configuration application card is invalid.");
                 }
                 card.applicationStoragePath = FromUtf8(application.at("storagePath").get<std::string>());
+                if (application.contains("itemOrder")) {
+                    if (!application.at("itemOrder").is_array()) {
+                        throw std::runtime_error("Configuration application item order is invalid.");
+                    }
+                    for (const auto& item : application.at("itemOrder")) {
+                        if (!item.is_string()) {
+                            throw std::runtime_error("Configuration application item order is invalid.");
+                        }
+                        card.applicationItemOrder.push_back(FromUtf8(item.get<std::string>()));
+                    }
+                }
                 break;
             }
             case domain::CardType::Mapping: {
@@ -403,6 +445,10 @@ void JsonConfigStore::save(const ApplicationConfig& config) const {
             if (card.applicationStoragePath.empty() || card.applicationStoragePath.is_absolute()) {
                 throw std::invalid_argument("Application card storage path must be relative and non-empty.");
             }
+            {
+                domain::ApplicationCard validated(card.id, card.applicationStoragePath);
+                validated.setItemOrder(card.applicationItemOrder);
+            }
             break;
         case domain::CardType::Mapping:
             if (!card.mappingSourceRoot.empty() && !card.mappingReferences.empty()) {
@@ -483,11 +529,19 @@ void JsonConfigStore::save(const ApplicationConfig& config) const {
             {"opacity", card.appearance.opacity},
             {"cornerRadius", card.appearance.cornerRadius},
         };
+        value["content"] = {
+            {"itemSize", domain::ToString(card.content.itemSize)},
+            {"showItemNames", card.content.showItemNames},
+        };
         switch (card.type) {
         case domain::CardType::Application:
             value.erase("mapping");
             value.erase("todo");
             value["application"]["storagePath"] = ToUtf8(card.applicationStoragePath);
+            value["application"]["itemOrder"] = Json::array();
+            for (const auto& item : card.applicationItemOrder) {
+                value["application"]["itemOrder"].push_back(ToUtf8(item));
+            }
             break;
         case domain::CardType::Mapping: {
             value.erase("application");

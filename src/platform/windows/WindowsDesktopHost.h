@@ -19,9 +19,12 @@ public:
         const domain::CardId&,
         const domain::PlacementRect&)>;
     using CardExpandedChangedCallback = std::function<void(const domain::CardId&, bool)>;
-    using ApplicationItemsDroppedCallback = std::function<void(
+    using ApplicationItemsDroppedCallback = std::function<bool(
         const domain::CardId&,
-        const std::vector<std::filesystem::path>&)>;
+        const std::vector<std::filesystem::path>&,
+        std::size_t insertionIndex)>;
+    using ApplicationItemDragCompletedCallback = std::function<void(
+        const domain::CardId&)>;
     using CardItemActivatedCallback = std::function<void(
         const domain::CardId&,
         const presentation::CardItemView&)>;
@@ -44,10 +47,14 @@ public:
     void setPlacementChangedCallback(PlacementChangedCallback callback);
     void setCardExpandedChangedCallback(CardExpandedChangedCallback callback);
     void setApplicationItemsDroppedCallback(ApplicationItemsDroppedCallback callback);
+    void setApplicationItemDragCompletedCallback(ApplicationItemDragCompletedCallback callback);
     void setCardItemActivatedCallback(CardItemActivatedCallback callback);
     void updateCardItems(
         const domain::CardId& cardId,
         std::vector<presentation::CardItemView> items);
+    void updateCardContentPreferences(
+        const domain::CardId& cardId,
+        domain::CardContentPreferences preferences);
 
 private:
     struct Impl;

@@ -61,6 +61,8 @@ std::unique_ptr<domain::Card> RestoreCard(const domain::CardSnapshot& snapshot) 
         card = std::make_unique<domain::ApplicationCard>(
             snapshot.id,
             snapshot.applicationStoragePath);
+        static_cast<domain::ApplicationCard*>(card.get())->setItemOrder(
+            snapshot.applicationItemOrder);
         break;
     case domain::CardType::Mapping: {
         if (!snapshot.mappingSourceRoot.empty() && !snapshot.mappingReferences.empty()) {
@@ -99,6 +101,7 @@ std::unique_ptr<domain::Card> RestoreCard(const domain::CardSnapshot& snapshot) 
     card->setExpanded(snapshot.expanded);
     card->setChrome(snapshot.chrome);
     card->setAppearance(snapshot.appearance);
+    card->setContent(snapshot.content);
     return card;
 }
 
@@ -147,11 +150,14 @@ std::vector<domain::CardSnapshot> ApplicationRuntime::cardSnapshots() const {
             .expanded = card->isExpanded(),
             .chrome = card->chrome(),
             .appearance = card->appearance(),
+            .content = card->content(),
         };
         switch (card->type()) {
         case domain::CardType::Application:
             snapshot.applicationStoragePath =
                 static_cast<const domain::ApplicationCard*>(card)->relativeStoragePath();
+            snapshot.applicationItemOrder =
+                static_cast<const domain::ApplicationCard*>(card)->itemOrder();
             break;
         case domain::CardType::Mapping: {
             const auto* mapping = static_cast<const domain::MappingCard*>(card);
@@ -270,6 +276,37 @@ CommandResult ApplicationRuntime::handle(const SetCardExpanded& command) {
         return noChange();
     }
     card->second->setExpanded(command.expanded);
+    return applied({
+        .changedCards = {command.cardId},
+        .persistence = PersistenceUrgency::Deferred,
+    });
+}
+
+CommandResult ApplicationRuntime::handle(const SetCardContentPreferences& command) {
+    auto card = cards_.find(command.cardId);
+    if (card == cards_.end()) {
+        return rejected(CommandError::CardNotFound);
+    }
+    if (card->second->content() == command.preferences) {
+        return noChange();
+    }
+    card->second->setContent(command.preferences);
+    return applied({
+        .changedCards = {command.cardId},
+        .persistence = PersistenceUrgency::Deferred,
+    });
+}
+
+CommandResult ApplicationRuntime::handle(const SetApplicationCardItemOrder& command) {
+    auto card = cards_.find(command.cardId);
+    if (card == cards_.end() || card->second->type() != domain::CardType::Application) {
+        return rejected(CommandError::CardNotFound);
+    }
+    auto* applicationCard = static_cast<domain::ApplicationCard*>(card->second.get());
+    if (applicationCard->itemOrder() == command.itemOrder) {
+        return noChange();
+    }
+    applicationCard->setItemOrder(command.itemOrder);
     return applied({
         .changedCards = {command.cardId},
         .persistence = PersistenceUrgency::Deferred,

@@ -1,10 +1,10 @@
 #include "WindowsDesktopHost.h"
 #include "CardContentLayout.h"
 #include "PlacementInteraction.h"
+#include "WindowsFileDragDrop.h"
 
 #include <Windows.h>
 #include <CommCtrl.h>
-#include <shellapi.h>
 #include <windowsx.h>
 
 #include <algorithm>
@@ -39,6 +39,11 @@ struct Surface {
     HWND tooltip = nullptr;
     std::optional<std::size_t> hoveredItem;
     std::wstring tooltipText;
+    IDropTarget* dropTarget = nullptr;
+    std::optional<std::size_t> dropInsertionIndex;
+    std::optional<std::size_t> pressedItem;
+    POINT itemDragStart{};
+    bool itemDragActive = false;
 };
 
 LRESULT CALLBACK GuideWindowProcedure(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
@@ -83,6 +88,9 @@ struct WindowsDesktopHost::Impl {
         if (guideBrush != nullptr) {
             DeleteObject(guideBrush);
         }
+        if (oleInitialized) {
+            OleUninitialize();
+        }
     }
 
     std::wstring title;
@@ -92,12 +100,14 @@ struct WindowsDesktopHost::Impl {
     bool windowClassRegistered = false;
     bool guideWindowClassRegistered = false;
     bool closeRequested = false;
+    bool oleInitialized = false;
     HWND verticalGuide = nullptr;
     HWND horizontalGuide = nullptr;
     HBRUSH guideBrush = nullptr;
     WindowsDesktopHost::PlacementChangedCallback placementChanged;
     WindowsDesktopHost::CardExpandedChangedCallback cardExpandedChanged;
     WindowsDesktopHost::ApplicationItemsDroppedCallback applicationItemsDropped;
+    WindowsDesktopHost::ApplicationItemDragCompletedCallback applicationItemDragCompleted;
     WindowsDesktopHost::CardItemActivatedCallback cardItemActivated;
     std::vector<Surface> surfaces;
 
@@ -160,6 +170,10 @@ struct WindowsDesktopHost::Impl {
                 && instance->beginCollapsePress(window, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) {
                 return 0;
             }
+            if (instance != nullptr
+                && instance->beginItemPress(window, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) {
+                return 0;
+            }
             break;
         case WM_LBUTTONDBLCLK:
             if (instance != nullptr
@@ -175,9 +189,19 @@ struct WindowsDesktopHost::Impl {
                 && instance->endCollapsePress(window, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) {
                 return 0;
             }
+            if (instance != nullptr && instance->endItemPress(window)) {
+                return 0;
+            }
             break;
         case WM_MOUSEMOVE:
             if (instance != nullptr) {
+                if (instance->updateItemDrag(
+                        window,
+                        GET_X_LPARAM(lParam),
+                        GET_Y_LPARAM(lParam),
+                        wParam)) {
+                    return 0;
+                }
                 instance->updateItemHover(
                     window,
                     GET_X_LPARAM(lParam),
@@ -190,16 +214,10 @@ struct WindowsDesktopHost::Impl {
                 return 0;
             }
             break;
-        case WM_DROPFILES:
-            if (instance != nullptr) {
-                instance->handleDroppedFiles(window, reinterpret_cast<HDROP>(wParam));
-                return 0;
-            }
-            DragFinish(reinterpret_cast<HDROP>(wParam));
-            return 0;
         case WM_CAPTURECHANGED:
             if (instance != nullptr) {
                 instance->cancelCollapsePress(window);
+                instance->cancelItemPress(window);
                 return 0;
             }
             break;
@@ -213,6 +231,11 @@ struct WindowsDesktopHost::Impl {
 
     void initialize() {
         module = GetModuleHandleW(nullptr);
+        const auto oleResult = OleInitialize(nullptr);
+        if (FAILED(oleResult)) {
+            throw std::runtime_error("OleInitialize failed for desktop host drag and drop.");
+        }
+        oleInitialized = true;
         INITCOMMONCONTROLSEX controls{
             .dwSize = sizeof(INITCOMMONCONTROLSEX),
             .dwICC = ICC_WIN95_CLASSES,
@@ -275,31 +298,27 @@ struct WindowsDesktopHost::Impl {
         return x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
     }
 
-    static presentation::CardContentLayoutSettings itemLayoutSettings() noexcept {
-        return {
-            .headerHeight = 48.0,
-            .horizontalPadding = 12.0,
-            .verticalPadding = 12.0,
-            .itemWidth = 64.0,
-            .itemHeight = 76.0,
-            .horizontalGap = 8.0,
-            .verticalGap = 8.0,
-            .minimumColumns = 1,
-            .maximumColumns = 8,
-        };
+    static presentation::CardContentLayoutSettings itemLayoutSettings(
+        const Surface& surface) noexcept {
+        return presentation::ResolveCardContentLayoutSettings(surface.card.content);
     }
 
-    static presentation::CardContentLayout itemLayout(const Surface& surface) {
+    static presentation::CardContentLayout itemLayout(
+        const Surface& surface,
+        std::size_t itemCount) {
         const auto scale = surface.display.effectiveDpi / 96.0;
         return presentation::ResolveCardContentLayout(
-            surface.card.items.size(),
+            itemCount,
             surface.width / scale,
-            itemLayoutSettings());
+            itemLayoutSettings(surface));
     }
 
-    static RECT itemRect(const Surface& surface, std::size_t index) {
-        const auto settings = itemLayoutSettings();
-        const auto layout = itemLayout(surface);
+    static RECT itemRect(
+        const Surface& surface,
+        std::size_t index,
+        std::size_t itemCount) {
+        const auto settings = itemLayoutSettings(surface);
+        const auto layout = itemLayout(surface, itemCount);
         const auto scale = surface.display.effectiveDpi / 96.0;
         const auto widthDip = surface.width / scale;
         const auto column = index % layout.columns;
@@ -321,8 +340,8 @@ struct WindowsDesktopHost::Impl {
             || y < dipToPixels(48.0, surface) || y >= surface.interactiveHeight) {
             return std::nullopt;
         }
-        const auto settings = itemLayoutSettings();
-        const auto layout = itemLayout(surface);
+        const auto settings = itemLayoutSettings(surface);
+        const auto layout = itemLayout(surface, surface.card.items.size());
         const auto scale = surface.display.effectiveDpi / 96.0;
         const auto xDip = x / scale;
         const auto yDip = y / scale;
@@ -564,6 +583,78 @@ struct WindowsDesktopHost::Impl {
         }
     }
 
+    bool beginItemPress(HWND window, int x, int y) noexcept {
+        auto* surface = findSurface(window);
+        if (surface == nullptr || surface->itemDragActive) {
+            return false;
+        }
+        const auto item = itemAt(*surface, x, y);
+        if (!item.has_value()) {
+            return false;
+        }
+        surface->pressedItem = item;
+        surface->itemDragStart = {x, y};
+        SetCapture(window);
+        return true;
+    }
+
+    bool endItemPress(HWND window) noexcept {
+        auto* surface = findSurface(window);
+        if (surface == nullptr || !surface->pressedItem.has_value()) {
+            return false;
+        }
+        surface->pressedItem.reset();
+        if (GetCapture() == window) {
+            ReleaseCapture();
+        }
+        return true;
+    }
+
+    void cancelItemPress(HWND window) noexcept {
+        auto* surface = findSurface(window);
+        if (surface != nullptr && !surface->itemDragActive) {
+            surface->pressedItem.reset();
+        }
+    }
+
+    bool updateItemDrag(HWND window, int x, int y, WPARAM keyState) noexcept {
+        auto* surface = findSurface(window);
+        if (surface == nullptr || surface->itemDragActive
+            || !surface->pressedItem.has_value()) {
+            return false;
+        }
+        if ((keyState & MK_LBUTTON) == 0) {
+            return endItemPress(window);
+        }
+        const auto thresholdX = GetSystemMetrics(SM_CXDRAG);
+        const auto thresholdY = GetSystemMetrics(SM_CYDRAG);
+        if (std::abs(x - surface->itemDragStart.x) < thresholdX
+            && std::abs(y - surface->itemDragStart.y) < thresholdY) {
+            return false;
+        }
+
+        const auto item = surface->card.items[*surface->pressedItem];
+        const auto cardId = surface->card.id;
+        surface->pressedItem.reset();
+        surface->itemDragActive = true;
+        clearItemHover(window);
+        if (GetCapture() == window) {
+            ReleaseCapture();
+        }
+        const auto result = BeginFileDrag({item.sourcePath});
+        if (auto* current = findSurface(window); current != nullptr) {
+            current->itemDragActive = false;
+        }
+        if (result.status == DRAGDROP_S_DROP && result.effect != DROPEFFECT_NONE
+            && applicationItemDragCompleted) {
+            try {
+                applicationItemDragCompleted(cardId);
+            } catch (...) {
+            }
+        }
+        return true;
+    }
+
     bool activateCardItem(HWND window, int x, int y) noexcept {
         auto* surface = findSurface(window);
         if (surface == nullptr) {
@@ -641,28 +732,74 @@ struct WindowsDesktopHost::Impl {
         SendMessageW(surface->tooltip, TTM_TRACKACTIVATE, TRUE, reinterpret_cast<LPARAM>(&tool));
     }
 
-    void handleDroppedFiles(HWND window, HDROP drop) noexcept {
+    DWORD updateDropPreview(HWND window, POINTL screenPoint, DWORD allowedEffect) noexcept {
         auto* surface = findSurface(window);
-        const auto cardId = surface == nullptr ? domain::CardId{} : surface->card.id;
-        std::vector<std::filesystem::path> paths;
-        if (surface != nullptr && surface->card.type == domain::CardType::Application) {
-            const auto count = DragQueryFileW(drop, 0xFFFFFFFFu, nullptr, 0);
-            paths.reserve(count);
-            for (UINT index = 0; index < count; ++index) {
-                const auto length = DragQueryFileW(drop, index, nullptr, 0);
-                std::wstring path(length + 1, L'\0');
-                if (DragQueryFileW(drop, index, path.data(), length + 1) != 0) {
-                    path.resize(length);
-                    paths.emplace_back(std::move(path));
-                }
+        if (surface == nullptr || surface->card.type != domain::CardType::Application
+            || !surface->card.expanded || (allowedEffect & DROPEFFECT_MOVE) == 0) {
+            clearDropPreview(window);
+            return DROPEFFECT_NONE;
+        }
+        POINT point{screenPoint.x, screenPoint.y};
+        if (!ScreenToClient(window, &point)
+            || point.y < dipToPixels(48.0, *surface)
+            || point.y >= surface->interactiveHeight) {
+            clearDropPreview(window);
+            return DROPEFFECT_NONE;
+        }
+        const auto scale = surface->display.effectiveDpi / 96.0;
+        const auto insertion = presentation::ResolveCardInsertionIndex(
+            surface->card.items.size(),
+            surface->width / scale,
+            point.x / scale,
+            point.y / scale,
+            itemLayoutSettings(*surface));
+        if (surface->dropInsertionIndex != insertion) {
+            surface->dropInsertionIndex = insertion;
+            try {
+                render(*surface, surface->display, surface->card, surface->ordinal);
+            } catch (...) {
+                surface->dropInsertionIndex.reset();
+                return DROPEFFECT_NONE;
             }
         }
-        DragFinish(drop);
-        if (!paths.empty() && applicationItemsDropped) {
-            try {
-                applicationItemsDropped(cardId, paths);
-            } catch (...) {
-            }
+        return DROPEFFECT_MOVE;
+    }
+
+    void clearDropPreview(HWND window) noexcept {
+        auto* surface = findSurface(window);
+        if (surface == nullptr || !surface->dropInsertionIndex.has_value()) {
+            return;
+        }
+        surface->dropInsertionIndex.reset();
+        try {
+            render(*surface, surface->display, surface->card, surface->ordinal);
+        } catch (...) {
+        }
+    }
+
+    DWORD completeFileDrop(
+        HWND window,
+        std::vector<std::filesystem::path> paths,
+        POINTL screenPoint,
+        DWORD allowedEffect) noexcept {
+        auto* surface = findSurface(window);
+        if (surface == nullptr || paths.empty()
+            || updateDropPreview(window, screenPoint, allowedEffect) == DROPEFFECT_NONE) {
+            clearDropPreview(window);
+            return DROPEFFECT_NONE;
+        }
+        const auto cardId = surface->card.id;
+        const auto insertion = surface->dropInsertionIndex.value_or(surface->card.items.size());
+        clearDropPreview(window);
+        if (!applicationItemsDropped) {
+            return DROPEFFECT_NONE;
+        }
+        try {
+            return applicationItemsDropped(cardId, paths, insertion)
+                ? DROPEFFECT_MOVE
+                : DROPEFFECT_NONE;
+        } catch (...) {
+            return DROPEFFECT_NONE;
         }
     }
 
@@ -683,6 +820,13 @@ struct WindowsDesktopHost::Impl {
     }
 
     void destroySurface(Surface& surface) noexcept {
+        if (surface.dropTarget != nullptr) {
+            if (surface.window != nullptr) {
+                RevokeDragDrop(surface.window);
+            }
+            surface.dropTarget->Release();
+            surface.dropTarget = nullptr;
+        }
         if (surface.tooltip != nullptr) {
             DestroyWindow(surface.tooltip);
             surface.tooltip = nullptr;
@@ -742,9 +886,26 @@ struct WindowsDesktopHost::Impl {
         if (surface.window == nullptr) {
             throw std::runtime_error("CreateWindowExW failed for desktop host surface.");
         }
-        DragAcceptFiles(
-            surface.window,
-            surface.card.type == domain::CardType::Application ? TRUE : FALSE);
+        if (surface.card.type == domain::CardType::Application) {
+            surface.dropTarget = CreateFileDropTarget({
+                .dragOver = [this, window = surface.window](POINTL point, DWORD allowed) {
+                    return updateDropPreview(window, point, allowed);
+                },
+                .dragLeave = [this, window = surface.window]() {
+                    clearDropPreview(window);
+                },
+                .drop = [this, window = surface.window](
+                            std::vector<std::filesystem::path> paths,
+                            POINTL point,
+                            DWORD allowed) {
+                    return completeFileDrop(window, std::move(paths), point, allowed);
+                },
+            });
+            if (surface.dropTarget == nullptr
+                || FAILED(RegisterDragDrop(surface.window, surface.dropTarget))) {
+                throw std::runtime_error("RegisterDragDrop failed for Application Card.");
+            }
+        }
         surface.tooltip = CreateWindowExW(
             WS_EX_TOPMOST | WS_EX_NOACTIVATE,
             TOOLTIPS_CLASSW,
@@ -901,9 +1062,14 @@ struct WindowsDesktopHost::Impl {
             };
             pixel = (mix(16) << 16) | (mix(8) << 8) | mix(0);
         };
-        if (card.expanded && !card.items.empty()) {
+        if (card.expanded && (!card.items.empty() || surface.dropInsertionIndex.has_value())) {
             const auto scale = display.effectiveDpi / 96.0;
-            const auto iconSize = std::max(1, static_cast<int>(std::lround(48.0 * scale)));
+            const auto settings = itemLayoutSettings(surface);
+            const auto iconSize = std::max(
+                1,
+                static_cast<int>(std::lround(settings.iconSize * scale)));
+            const auto visualItemCount = card.items.size()
+                + (surface.dropInsertionIndex.has_value() ? 1 : 0);
             const auto blendPremultiplied = [&](int x, int y, std::uint32_t foregroundPixel) {
                 if (x < 0 || y < 0 || x >= surface.width || y >= visibleBottom) {
                     return;
@@ -924,8 +1090,43 @@ struct WindowsDesktopHost::Impl {
                     | composite(0);
             };
 
+            if (surface.dropInsertionIndex.has_value()) {
+                auto preview = itemRect(
+                    surface,
+                    *surface.dropInsertionIndex,
+                    visualItemCount);
+                const auto inset = dipToPixels(3.0, surface);
+                preview.left += inset;
+                preview.top += inset;
+                preview.right -= inset;
+                preview.bottom -= inset;
+                const auto previewRadius = static_cast<double>(dipToPixels(9.0, surface));
+                const auto centerX = (preview.left + preview.right) / 2.0;
+                const auto centerY = (preview.top + preview.bottom) / 2.0;
+                const auto halfPreviewWidth = (preview.right - preview.left) / 2.0;
+                const auto halfPreviewHeight = (preview.bottom - preview.top) / 2.0;
+                for (int y = preview.top; y < preview.bottom; ++y) {
+                    for (int x = preview.left; x < preview.right; ++x) {
+                        const auto qx = std::abs(x + 0.5 - centerX)
+                            - (halfPreviewWidth - previewRadius);
+                        const auto qy = std::abs(y + 0.5 - centerY)
+                            - (halfPreviewHeight - previewRadius);
+                        const auto outsideX = std::max(qx, 0.0);
+                        const auto outsideY = std::max(qy, 0.0);
+                        const auto distance = std::sqrt(outsideX * outsideX + outsideY * outsideY)
+                            + std::min(std::max(qx, qy), 0.0) - previewRadius;
+                        const auto coverage = std::clamp(0.5 - distance, 0.0, 1.0);
+                        blendRgb(x, y, 0x004A84FFu, coverage * (darkSurface ? 0.28 : 0.17));
+                    }
+                }
+            }
+
             for (std::size_t index = 0; index < card.items.size(); ++index) {
-                const auto slot = itemRect(surface, index);
+                const auto visualIndex = surface.dropInsertionIndex.has_value()
+                        && index >= *surface.dropInsertionIndex
+                    ? index + 1
+                    : index;
+                const auto slot = itemRect(surface, visualIndex, visualItemCount);
                 if (slot.top >= visibleBottom) {
                     break;
                 }
@@ -951,7 +1152,9 @@ struct WindowsDesktopHost::Impl {
                 }
             }
 
-            const auto itemFont = CreateFontW(
+            const auto itemFont = !card.content.showItemNames
+                ? nullptr
+                : CreateFontW(
                 -dipToPixels(11.0, surface),
                 0,
                 0,
@@ -969,31 +1172,37 @@ struct WindowsDesktopHost::Impl {
             const auto previousItemFont = itemFont == nullptr
                 ? nullptr
                 : SelectObject(surface.memoryDc, itemFont);
-            for (std::size_t index = 0; index < card.items.size(); ++index) {
-                const auto slot = itemRect(surface, index);
-                if (slot.top >= visibleBottom) {
-                    break;
+            if (card.content.showItemNames) {
+                for (std::size_t index = 0; index < card.items.size(); ++index) {
+                    const auto visualIndex = surface.dropInsertionIndex.has_value()
+                            && index >= *surface.dropInsertionIndex
+                        ? index + 1
+                        : index;
+                    const auto slot = itemRect(surface, visualIndex, visualItemCount);
+                    if (slot.top >= visibleBottom) {
+                        break;
+                    }
+                    const auto& item = card.items[index];
+                    const auto ready = item.state == presentation::CardItemState::Ready
+                        || item.state == presentation::CardItemState::IconUnavailable;
+                    SetTextColor(
+                        surface.memoryDc,
+                        ready
+                            ? foreground
+                            : (darkSurface ? RGB(148, 153, 162) : RGB(121, 126, 135)));
+                    RECT labelRect{
+                        slot.left,
+                        slot.top + iconSize + dipToPixels(3.0, surface),
+                        slot.right,
+                        std::min<LONG>(slot.bottom, visibleBottom),
+                    };
+                    DrawTextW(
+                        surface.memoryDc,
+                        item.displayName.c_str(),
+                        -1,
+                        &labelRect,
+                        DT_CENTER | DT_WORDBREAK | DT_END_ELLIPSIS | DT_NOPREFIX);
                 }
-                const auto& item = card.items[index];
-                const auto ready = item.state == presentation::CardItemState::Ready
-                    || item.state == presentation::CardItemState::IconUnavailable;
-                SetTextColor(
-                    surface.memoryDc,
-                    ready
-                        ? foreground
-                        : (darkSurface ? RGB(148, 153, 162) : RGB(121, 126, 135)));
-                RECT labelRect{
-                    slot.left,
-                    slot.top + iconSize + dipToPixels(3.0, surface),
-                    slot.right,
-                    std::min<LONG>(slot.bottom, visibleBottom),
-                };
-                DrawTextW(
-                    surface.memoryDc,
-                    item.displayName.c_str(),
-                    -1,
-                    &labelRect,
-                    DT_CENTER | DT_WORDBREAK | DT_END_ELLIPSIS | DT_NOPREFIX);
             }
             if (previousItemFont != nullptr) {
                 SelectObject(surface.memoryDc, previousItemFont);
@@ -1272,6 +1481,23 @@ struct WindowsDesktopHost::Impl {
             }
             clearItemHover(surface.window);
             surface.card.items = items;
+            if (surface.dropInsertionIndex.has_value()) {
+                surface.dropInsertionIndex = std::min(
+                    *surface.dropInsertionIndex,
+                    surface.card.items.size());
+            }
+            render(surface, surface.display, surface.card, surface.ordinal);
+        }
+    }
+
+    void updateCardContentPreferences(
+        const domain::CardId& cardId,
+        domain::CardContentPreferences preferences) {
+        for (auto& surface : surfaces) {
+            if (surface.card.id != cardId) {
+                continue;
+            }
+            surface.card.content = preferences;
             render(surface, surface.display, surface.card, surface.ordinal);
         }
     }
@@ -1335,6 +1561,11 @@ void WindowsDesktopHost::setApplicationItemsDroppedCallback(
     impl_->applicationItemsDropped = std::move(callback);
 }
 
+void WindowsDesktopHost::setApplicationItemDragCompletedCallback(
+    ApplicationItemDragCompletedCallback callback) {
+    impl_->applicationItemDragCompleted = std::move(callback);
+}
+
 void WindowsDesktopHost::setCardItemActivatedCallback(CardItemActivatedCallback callback) {
     impl_->cardItemActivated = std::move(callback);
 }
@@ -1343,6 +1574,12 @@ void WindowsDesktopHost::updateCardItems(
     const domain::CardId& cardId,
     std::vector<presentation::CardItemView> items) {
     impl_->updateCardItems(cardId, items);
+}
+
+void WindowsDesktopHost::updateCardContentPreferences(
+    const domain::CardId& cardId,
+    domain::CardContentPreferences preferences) {
+    impl_->updateCardContentPreferences(cardId, preferences);
 }
 
 } // namespace desto::platform::windows

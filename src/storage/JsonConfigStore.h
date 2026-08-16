@@ -9,7 +9,7 @@
 namespace desto::storage {
 
 struct ApplicationConfig {
-    static constexpr int CurrentSchemaVersion = 2;
+    static constexpr int CurrentSchemaVersion = 3;
 
     int schemaVersion = CurrentSchemaVersion;
     std::filesystem::path storageRoot;

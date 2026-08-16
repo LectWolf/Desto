@@ -1,5 +1,6 @@
 #include "ApplicationLifecycle.h"
 #include "ApplicationCardImport.h"
+#include "ApplicationCardOrdering.h"
 #include "ApplicationRuntime.h"
 #include "Diagnostics.h"
 #include "CardView.h"
@@ -67,6 +68,16 @@ const ApplicationCard* FindApplicationCard(
             return card->id() == cardId && card->type() == CardType::Application;
         });
     return found == cards.end() ? nullptr : static_cast<const ApplicationCard*>(*found);
+}
+
+std::vector<std::filesystem::path> ItemFileNames(
+    const std::vector<desto::presentation::CardItemView>& items) {
+    std::vector<std::filesystem::path> result;
+    result.reserve(items.size());
+    for (const auto& item : items) {
+        result.push_back(item.sourcePath.filename());
+    }
+    return result;
 }
 
 void SeedPreview(ApplicationRuntime& runtime, const std::vector<DisplaySnapshot>& displays) {
@@ -144,7 +155,16 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                 const auto directory = storageRoot.resolveCardPath(
                     applicationCard->relativeStoragePath());
                 std::filesystem::create_directories(directory);
-                view.items = shellItems.enumerate(directory);
+                view.items = shellItems.enumerate(directory, applicationCard->itemOrder());
+                const auto reconciled = ReconcileApplicationItemOrder(
+                    applicationCard->itemOrder(),
+                    ItemFileNames(view.items));
+                if (reconciled != applicationCard->itemOrder()) {
+                    (void)runtime.execute(SetApplicationCardItemOrder{
+                        applicationCard->id(),
+                        reconciled,
+                    });
+                }
             }
             cardViews.push_back(std::move(view));
         }
@@ -175,26 +195,72 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                 }
             });
         host.setApplicationItemsDroppedCallback(
-            [&](const CardId& cardId, const std::vector<std::filesystem::path>& paths) {
+            [&](const CardId& cardId,
+                const std::vector<std::filesystem::path>& paths,
+                std::size_t insertionIndex) {
                 const auto* card = FindApplicationCard(runtime, cardId);
                 if (card == nullptr) {
                     diagnostics.record(DiagnosticLevel::Warning, "desktop.import_card_missing");
-                    return;
+                    return false;
                 }
                 try {
-                    const auto result = importService.execute(importService.plan(*card, paths));
+                    const auto directory = storageRoot.resolveCardPath(card->relativeStoragePath());
+                    const auto before = shellItems.enumerate(directory, card->itemOrder());
+                    const auto plan = importService.plan(*card, paths);
+                    const auto result = importService.execute(plan);
                     if (!result.succeeded) {
                         diagnostics.record(DiagnosticLevel::Warning, "desktop.import_failed");
-                        return;
+                        return false;
                     }
-                    host.updateCardItems(
+                    std::vector<std::filesystem::path> movedNames;
+                    for (const auto& source : paths) {
+                        const auto normalized = source.lexically_normal();
+                        const auto completed = std::find_if(
+                            result.completedMoves.begin(),
+                            result.completedMoves.end(),
+                            [&](const FileMove& move) { return move.source == normalized; });
+                        if (completed != result.completedMoves.end()) {
+                            movedNames.push_back(completed->destination.filename());
+                        } else if (normalized.parent_path() == directory.lexically_normal()) {
+                            movedNames.push_back(normalized.filename());
+                        }
+                    }
+                    auto order = MoveApplicationItemsToIndex(
+                        ItemFileNames(before),
+                        movedNames,
+                        insertionIndex);
+                    auto items = shellItems.enumerate(directory, order);
+                    order = ReconcileApplicationItemOrder(order, ItemFileNames(items));
+                    const auto orderResult = runtime.execute(SetApplicationCardItemOrder{
                         cardId,
-                        shellItems.enumerate(
-                            storageRoot.resolveCardPath(card->relativeStoragePath())));
+                        std::move(order),
+                    });
+                    if (orderResult.status == CommandStatus::Rejected) {
+                        diagnostics.record(DiagnosticLevel::Warning, "desktop.item_order_rejected");
+                        return false;
+                    }
+                    host.updateCardItems(cardId, std::move(items));
+                    return true;
                 } catch (...) {
                     diagnostics.record(DiagnosticLevel::Warning, "desktop.import_rejected");
+                    return false;
                 }
             });
+        host.setApplicationItemDragCompletedCallback([&](const CardId& cardId) {
+            const auto* card = FindApplicationCard(runtime, cardId);
+            if (card == nullptr) {
+                return;
+            }
+            const auto directory = storageRoot.resolveCardPath(card->relativeStoragePath());
+            auto items = shellItems.enumerate(directory, card->itemOrder());
+            auto order = ReconcileApplicationItemOrder(card->itemOrder(), ItemFileNames(items));
+            if (runtime.execute(SetApplicationCardItemOrder{cardId, std::move(order)}).status
+                == CommandStatus::Rejected) {
+                diagnostics.record(DiagnosticLevel::Warning, "desktop.item_order_rejected");
+                return;
+            }
+            host.updateCardItems(cardId, std::move(items));
+        });
         host.setCardItemActivatedCallback(
             [&](const CardId&, const desto::presentation::CardItemView& item) {
                 if (!shellItems.launch(item)) {

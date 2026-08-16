@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <stdexcept>
+#include <unordered_set>
 
 namespace desto::domain {
 namespace {
@@ -54,6 +55,19 @@ void ApplicationCard::setRelativeStoragePath(std::filesystem::path relativeStora
         throw std::invalid_argument("Application card storage path must be relative and non-empty.");
     }
     relativeStoragePath_ = std::move(relativeStoragePath);
+}
+
+void ApplicationCard::setItemOrder(std::vector<std::filesystem::path> itemOrder) {
+    std::unordered_set<std::filesystem::path> unique;
+    for (auto& item : itemOrder) {
+        item = item.lexically_normal();
+        if (item.empty() || item.is_absolute() || item != item.filename()
+            || item == "." || item == ".." || !unique.insert(item).second) {
+            throw std::invalid_argument(
+                "Application card item order must contain unique relative file names.");
+        }
+    }
+    itemOrder_ = std::move(itemOrder);
 }
 
 MappingCard::MappingCard(CardId id)
@@ -119,6 +133,20 @@ std::string_view ToString(CardType type) noexcept {
         return "todo";
     }
     return "unknown";
+}
+
+std::string_view ToString(CardItemSize size) noexcept {
+    switch (size) {
+    case CardItemSize::Small:
+        return "small";
+    case CardItemSize::Medium:
+        return "medium";
+    case CardItemSize::Large:
+        return "large";
+    case CardItemSize::ExtraLarge:
+        return "extraLarge";
+    }
+    return "medium";
 }
 
 } // namespace desto::domain

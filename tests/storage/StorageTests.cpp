@@ -125,7 +125,9 @@ void RunTests() {
                 .expanded = true,
                 .chrome = {.showCollapseControl = false, .showCloseControl = true, .showTitle = false},
                 .appearance = {.preset = "compact", .opacity = 0.8},
+                .content = {.itemSize = CardItemSize::Large, .showItemNames = false},
                 .applicationStoragePath = "cards/application-1",
+                .applicationItemOrder = {"Editor.lnk", "Browser.lnk"},
             },
             {
                 .id = "mapping-1",
@@ -161,8 +163,12 @@ void RunTests() {
         DESTO_CHECK(reloadedConfig.cards[0].id == "card-1");
         DESTO_CHECK(!reloadedConfig.cards[0].visible);
         DESTO_CHECK(reloadedConfig.cards[0].appearance.preset == "compact");
+        DESTO_CHECK(reloadedConfig.cards[0].content.itemSize == CardItemSize::Large);
+        DESTO_CHECK(!reloadedConfig.cards[0].content.showItemNames);
         DESTO_CHECK(reloadedConfig.cards[0].applicationStoragePath
                     == std::filesystem::path("cards/application-1"));
+        DESTO_CHECK(reloadedConfig.cards[0].applicationItemOrder
+                    == std::vector<std::filesystem::path>({"Editor.lnk", "Browser.lnk"}));
         DESTO_CHECK(reloadedConfig.cards[1].mappingSourceRoot
                     == testRoot / "external-projects");
         DESTO_CHECK(!reloadedConfig.cards[1].mappingAllowsSourceMutation);
@@ -174,6 +180,7 @@ void RunTests() {
         DESTO_CHECK(restoredRuntime.cards().size() == 3);
         DESTO_CHECK(!restoredRuntime.findCard("card-1")->isVisible());
         DESTO_CHECK(restoredRuntime.findCard("card-1")->appearance().preset == "compact");
+        DESTO_CHECK(restoredRuntime.findCard("card-1")->content().itemSize == CardItemSize::Large);
         DESTO_CHECK(restoredRuntime.workspace().placements().size() == 1);
 
         auto invalidCardConfig = reloadedConfig;

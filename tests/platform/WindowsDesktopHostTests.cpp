@@ -63,7 +63,8 @@ void RunTests() {
     DESTO_CHECK((styles & WS_EX_LAYERED) != 0);
     DESTO_CHECK((styles & WS_EX_TOOLWINDOW) != 0);
     DESTO_CHECK((styles & WS_EX_NOACTIVATE) != 0);
-    DESTO_CHECK((styles & WS_EX_ACCEPTFILES) != 0);
+    DESTO_CHECK((styles & WS_EX_ACCEPTFILES) == 0);
+    DESTO_CHECK(RevokeDragDrop(window) == S_OK);
 
     RECT windowRect{};
     DESTO_CHECK(GetWindowRect(window, &windowRect));
@@ -101,6 +102,9 @@ void RunTests() {
         .sourcePath = L"C:\\Example.exe",
         .state = CardItemState::IconUnavailable,
     }});
+    host.updateCardContentPreferences(
+        "card-test",
+        {.itemSize = CardItemSize::Large, .showItemNames = false});
     SendMessageW(window, WM_LBUTTONDBLCLK, MK_LBUTTON, MAKELPARAM(56, 82));
     DESTO_CHECK(itemActivated);
 

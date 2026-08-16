@@ -34,6 +34,7 @@ CardView MakeCardView(const domain::Card& card) {
         .appearancePreset = appearance.preset,
         .opacity = appearance.opacity,
         .cornerRadius = appearance.cornerRadius,
+        .content = card.content(),
     };
 }
 

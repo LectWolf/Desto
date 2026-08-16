@@ -251,7 +251,8 @@ presentation::CardItemView WindowsShellItemCatalog::inspect(
 }
 
 std::vector<presentation::CardItemView> WindowsShellItemCatalog::enumerate(
-    const std::filesystem::path& directory) const {
+    const std::filesystem::path& directory,
+    std::span<const std::filesystem::path> preferredOrder) const {
     std::vector<presentation::CardItemView> result;
     std::error_code error;
     if (!std::filesystem::exists(directory, error)) {
@@ -262,10 +263,25 @@ std::vector<presentation::CardItemView> WindowsShellItemCatalog::enumerate(
          iterator.increment(error)) {
         result.push_back(inspect(iterator->path()));
     }
-    std::sort(
+    const auto rank = [&](const presentation::CardItemView& item) {
+        const auto name = item.sourcePath.filename().wstring();
+        const auto found = std::find_if(
+            preferredOrder.begin(), preferredOrder.end(), [&](const std::filesystem::path& preferred) {
+                return _wcsicmp(name.c_str(), preferred.filename().c_str()) == 0;
+            });
+        return found == preferredOrder.end()
+            ? preferredOrder.size()
+            : static_cast<std::size_t>(std::distance(preferredOrder.begin(), found));
+    };
+    std::stable_sort(
         result.begin(),
         result.end(),
-        [](const presentation::CardItemView& left, const presentation::CardItemView& right) {
+        [&](const presentation::CardItemView& left, const presentation::CardItemView& right) {
+            const auto leftRank = rank(left);
+            const auto rightRank = rank(right);
+            if (leftRank != rightRank) {
+                return leftRank < rightRank;
+            }
             return _wcsicmp(left.displayName.c_str(), right.displayName.c_str()) < 0;
         });
     return result;

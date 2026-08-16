@@ -37,6 +37,16 @@ struct SetCardExpanded {
     bool expanded;
 };
 
+struct SetCardContentPreferences {
+    domain::CardId cardId;
+    domain::CardContentPreferences preferences;
+};
+
+struct SetApplicationCardItemOrder {
+    domain::CardId cardId;
+    std::vector<std::filesystem::path> itemOrder;
+};
+
 struct SetPlacement {
     domain::CardPlacement placement;
 };
@@ -69,6 +79,8 @@ using ApplicationCommand = std::variant<
     CreateTodoCard,
     SetCardVisibility,
     SetCardExpanded,
+    SetCardContentPreferences,
+    SetApplicationCardItemOrder,
     SetPlacement,
     RemovePlacement,
     UpdateDisplayTopology,
@@ -157,6 +169,8 @@ private:
     [[nodiscard]] CommandResult handle(const CreateTodoCard& command);
     [[nodiscard]] CommandResult handle(const SetCardVisibility& command);
     [[nodiscard]] CommandResult handle(const SetCardExpanded& command);
+    [[nodiscard]] CommandResult handle(const SetCardContentPreferences& command);
+    [[nodiscard]] CommandResult handle(const SetApplicationCardItemOrder& command);
     [[nodiscard]] CommandResult handle(const SetPlacement& command);
     [[nodiscard]] CommandResult handle(const RemovePlacement& command);
     [[nodiscard]] CommandResult handle(const UpdateDisplayTopology& command);

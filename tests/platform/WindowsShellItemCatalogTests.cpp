@@ -100,6 +100,9 @@ void RunTests() {
         [](const CardItemView& item) {
             return item.displayName.find(L"zeta") != std::wstring::npos;
         }));
+    const std::vector<std::filesystem::path> preferredOrder{"zeta.txt"};
+    const auto preferred = catalog.enumerate(root, preferredOrder);
+    DESTO_CHECK(preferred.front().sourcePath.filename() == "zeta.txt");
 
     std::filesystem::remove_all(root);
     CoUninitialize();

@@ -53,6 +53,7 @@ struct CardView {
     std::string appearancePreset = "default";
     double opacity = 1.0;
     double cornerRadius = 16.0;
+    domain::CardContentPreferences content;
     std::vector<CardItemView> items;
 };
 

@@ -1,4 +1,6 @@
 add_library(desto_application STATIC
+    ApplicationCardOrdering.cpp
+    ApplicationCardOrdering.h
     ApplicationLifecycle.cpp
     ApplicationLifecycle.h
     ApplicationRuntime.cpp

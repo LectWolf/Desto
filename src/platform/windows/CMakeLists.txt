@@ -7,6 +7,8 @@ add_library(desto_platform_windows STATIC
     WindowsDisplayChangeSource.h
     WindowsDesktopHost.cpp
     WindowsDesktopHost.h
+    WindowsFileDragDrop.cpp
+    WindowsFileDragDrop.h
     WindowsDisplayTopology.cpp
     WindowsDisplayTopology.h
 )

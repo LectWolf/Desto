@@ -18,6 +18,14 @@ Windows Adapter 枚举 Card 目录并生成不可变项目视图：
 
 悬停提示只显示项目名称；失效项目追加简短状态，不显示完整文件路径。双击通过 Windows Shell 打开原始项目。
 
+## Drag And Ordering
+
+宿主使用 OLE `IDropTarget` 接收 Explorer 的 `CF_HDROP`，在 `DragOver` 阶段把指针转换为内容网格插入索引。预选槽位占据真实布局位置并让后续项目即时让位；只有插入索引变化时才重绘。Drop 成功后先完成文件事务，再把相对文件名顺序提交给 `ApplicationRuntime`。
+
+项目按下后必须超过 Windows 系统拖动阈值才进入 `DoDragDrop`，因此单击和双击启动不会被误判为拖出。数据源提供 `CF_HDROP` 和首选移动效果；拖到 Explorer 后按返回效果重新枚举源 Card，同一卡片内 Drop 则复用同一路径完成排序。取消拖动不改变文件和顺序。
+
+图标规格和名称显隐属于每个 Card 的内容偏好，不属于全局渲染常量。设置入口由事项 23 的主界面提供；当前宿主与快照已经消费并持久化这两个值。
+
 ## Rendering And Cost
 
 Shell 图标在目录枚举时按需解析为 64x64 预乘 Alpha 像素，Card 的多屏 Projection 共享同一像素所有权，不重复保存图标位图。当前版本在启动和拖入后刷新；目录实时监听、增量失效和大目录缓存属于事项 27。

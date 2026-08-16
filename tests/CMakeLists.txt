@@ -67,6 +67,19 @@ if(WIN32)
 
     add_test(NAME desto_windows_desktop_host_tests COMMAND desto_windows_desktop_host_tests)
 
+    add_executable(desto_windows_file_drag_drop_tests
+        platform/WindowsFileDragDropTests.cpp
+    )
+
+    target_include_directories(desto_windows_file_drag_drop_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+    target_link_libraries(desto_windows_file_drag_drop_tests
+        PRIVATE
+            desto_platform_windows
+    )
+
+    add_test(NAME desto_windows_file_drag_drop_tests COMMAND desto_windows_file_drag_drop_tests)
+
     add_executable(desto_windows_shell_item_catalog_tests
         platform/WindowsShellItemCatalogTests.cpp
     )

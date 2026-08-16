@@ -1,4 +1,5 @@
 #include "ApplicationRuntime.h"
+#include "ApplicationCardOrdering.h"
 #include "TestSupport.h"
 
 using namespace desto::application;
@@ -25,10 +26,37 @@ void RunTests() {
     DESTO_CHECK(runtime.cards()[1]->id() == "mapping-1");
     DESTO_CHECK(runtime.cards()[2]->id() == "todo-1");
 
+    const auto contentChanged = runtime.execute(SetCardContentPreferences{
+        .cardId = "application-1",
+        .preferences = {.itemSize = CardItemSize::ExtraLarge, .showItemNames = false},
+    });
+    DESTO_CHECK(contentChanged.status == CommandStatus::Applied);
+    DESTO_CHECK(runtime.findCard("application-1")->content().itemSize
+                == CardItemSize::ExtraLarge);
+    DESTO_CHECK(!runtime.findCard("application-1")->content().showItemNames);
+    DESTO_CHECK(runtime.execute(SetApplicationCardItemOrder{
+        "application-1", {"Editor.lnk", "Browser.lnk"}}).status == CommandStatus::Applied);
+    const auto* application = static_cast<const ApplicationCard*>(
+        runtime.findCard("application-1"));
+    DESTO_CHECK(application->itemOrder().front() == "Editor.lnk");
+
+    const std::vector<std::filesystem::path> actual{
+        "Browser.lnk", "Editor.lnk", "Terminal.lnk"};
+    const auto reconciled = ReconcileApplicationItemOrder(application->itemOrder(), actual);
+    DESTO_CHECK(reconciled == std::vector<std::filesystem::path>(
+        {"Editor.lnk", "Browser.lnk", "Terminal.lnk"}));
+    const std::vector<std::filesystem::path> browserOnly{actual[0]};
+    const auto moved = MoveApplicationItemsToIndex(reconciled, browserOnly, 3);
+    DESTO_CHECK(moved == std::vector<std::filesystem::path>(
+        {"Editor.lnk", "Terminal.lnk", "Browser.lnk"}));
+    const auto movedToFront = MoveApplicationItemsToIndex(reconciled, browserOnly, 0);
+    DESTO_CHECK(movedToFront == std::vector<std::filesystem::path>(
+        {"Browser.lnk", "Editor.lnk", "Terminal.lnk"}));
+
     const auto duplicate = runtime.execute(CreateTodoCard{"todo-1"});
     DESTO_CHECK(duplicate.status == CommandStatus::Rejected);
     DESTO_CHECK(duplicate.error == CommandError::DuplicateCardId);
-    DESTO_CHECK(duplicate.revision == 3);
+    DESTO_CHECK(duplicate.revision == 5);
 
     const auto invalid = runtime.execute(CreateApplicationCard{
         .cardId = "invalid",

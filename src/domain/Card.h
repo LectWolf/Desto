@@ -26,6 +26,13 @@ enum class MappingMode {
     References,
 };
 
+enum class CardItemSize {
+    Small,
+    Medium,
+    Large,
+    ExtraLarge,
+};
+
 struct CardDeletionPreview {
     CardId cardId;
     CardType cardType;
@@ -44,6 +51,13 @@ struct CardAppearancePreferences {
     std::string preset = "default";
     double opacity = 1.0;
     double cornerRadius = 16.0;
+};
+
+struct CardContentPreferences {
+    CardItemSize itemSize = CardItemSize::Medium;
+    bool showItemNames = true;
+
+    bool operator==(const CardContentPreferences&) const = default;
 };
 
 struct FileReference {
@@ -65,7 +79,9 @@ struct CardSnapshot {
     bool expanded = true;
     CardChromePreferences chrome;
     CardAppearancePreferences appearance;
+    CardContentPreferences content;
     std::filesystem::path applicationStoragePath;
+    std::vector<std::filesystem::path> applicationItemOrder;
     std::filesystem::path mappingSourceRoot;
     std::vector<FileReference> mappingReferences;
     bool mappingAllowsSourceMutation = true;
@@ -82,6 +98,7 @@ public:
     [[nodiscard]] bool isExpanded() const noexcept { return expanded_; }
     [[nodiscard]] const CardChromePreferences& chrome() const noexcept { return chrome_; }
     [[nodiscard]] const CardAppearancePreferences& appearance() const noexcept { return appearance_; }
+    [[nodiscard]] const CardContentPreferences& content() const noexcept { return content_; }
     [[nodiscard]] bool requiresDeletionConfirmation() const noexcept { return true; }
     [[nodiscard]] CardDeletionPreview deletionPreview() const noexcept;
     [[nodiscard]] virtual CardDeletionEffect deletionEffect() const noexcept = 0;
@@ -90,6 +107,7 @@ public:
     void setExpanded(bool expanded) noexcept { expanded_ = expanded; }
     void setChrome(CardChromePreferences preferences);
     void setAppearance(CardAppearancePreferences preferences);
+    void setContent(CardContentPreferences preferences) noexcept { content_ = preferences; }
 
 protected:
     Card(CardId id, CardType type);
@@ -101,6 +119,7 @@ private:
     bool expanded_ = true;
     CardChromePreferences chrome_;
     CardAppearancePreferences appearance_;
+    CardContentPreferences content_;
 };
 
 class ApplicationCard final : public Card {
@@ -111,10 +130,13 @@ public:
         return CardDeletionEffect::ReturnManagedItemsToDesktop;
     }
     [[nodiscard]] const std::filesystem::path& relativeStoragePath() const noexcept { return relativeStoragePath_; }
+    [[nodiscard]] const std::vector<std::filesystem::path>& itemOrder() const noexcept { return itemOrder_; }
     void setRelativeStoragePath(std::filesystem::path relativeStoragePath);
+    void setItemOrder(std::vector<std::filesystem::path> itemOrder);
 
 private:
     std::filesystem::path relativeStoragePath_;
+    std::vector<std::filesystem::path> itemOrder_;
 };
 
 class MappingCard final : public Card {
@@ -155,5 +177,6 @@ private:
 };
 
 [[nodiscard]] std::string_view ToString(CardType type) noexcept;
+[[nodiscard]] std::string_view ToString(CardItemSize size) noexcept;
 
 } // namespace desto::domain
