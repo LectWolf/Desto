@@ -20,6 +20,7 @@ target_link_libraries(desto_platform_windows
     PUBLIC
         desto_platform
         desto_application
+        desto_presentation
         Shcore
         User32
         Kernel32
