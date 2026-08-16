@@ -1,9 +1,11 @@
 #pragma once
 
 #include <functional>
+#include <filesystem>
 #include <memory>
 #include <span>
 #include <string>
+#include <vector>
 
 #include "CardView.h"
 #include "WorkspaceLayout.h"
@@ -17,6 +19,12 @@ public:
         const domain::CardId&,
         const domain::PlacementRect&)>;
     using CardExpandedChangedCallback = std::function<void(const domain::CardId&, bool)>;
+    using ApplicationItemsDroppedCallback = std::function<void(
+        const domain::CardId&,
+        const std::vector<std::filesystem::path>&)>;
+    using CardItemActivatedCallback = std::function<void(
+        const domain::CardId&,
+        const presentation::CardItemView&)>;
 
     explicit WindowsDesktopHost(std::wstring title = L"Desto");
     ~WindowsDesktopHost();
@@ -35,6 +43,11 @@ public:
     void requestClose() noexcept;
     void setPlacementChangedCallback(PlacementChangedCallback callback);
     void setCardExpandedChangedCallback(CardExpandedChangedCallback callback);
+    void setApplicationItemsDroppedCallback(ApplicationItemsDroppedCallback callback);
+    void setCardItemActivatedCallback(CardItemActivatedCallback callback);
+    void updateCardItems(
+        const domain::CardId& cardId,
+        std::vector<presentation::CardItemView> items);
 
 private:
     struct Impl;

@@ -12,4 +12,5 @@ target_link_libraries(desto_desktop_host
     PRIVATE
         desto_application
         desto_platform_windows
+        desto_storage
 )

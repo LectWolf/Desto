@@ -94,7 +94,7 @@
 
 ## Card Features
 
-### 20. ApplicationCard shell integration
+### 20. ApplicationCard shell integration [x]
 
 接入 Explorer 拖放、原生文件名、快捷方式解析、Shell 图标、商店应用身份和失效状态。退出条件是解析失败可解释，不伪造错误类型或静默显示错误文件。
 

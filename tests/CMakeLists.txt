@@ -66,6 +66,19 @@ if(WIN32)
     )
 
     add_test(NAME desto_windows_desktop_host_tests COMMAND desto_windows_desktop_host_tests)
+
+    add_executable(desto_windows_shell_item_catalog_tests
+        platform/WindowsShellItemCatalogTests.cpp
+    )
+
+    target_include_directories(desto_windows_shell_item_catalog_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+    target_link_libraries(desto_windows_shell_item_catalog_tests
+        PRIVATE
+            desto_platform_windows
+    )
+
+    add_test(NAME desto_windows_shell_item_catalog_tests COMMAND desto_windows_shell_item_catalog_tests)
 endif()
 
 add_test(NAME desto_display_topology_tests COMMAND desto_display_topology_tests)
@@ -109,6 +122,19 @@ target_link_libraries(desto_storage_tests
 )
 
 add_test(NAME desto_storage_tests COMMAND desto_storage_tests)
+
+add_executable(desto_application_card_import_tests
+    storage/ApplicationCardImportTests.cpp
+)
+
+target_include_directories(desto_application_card_import_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+target_link_libraries(desto_application_card_import_tests
+    PRIVATE
+        desto_storage
+)
+
+add_test(NAME desto_application_card_import_tests COMMAND desto_application_card_import_tests)
 
 add_executable(desto_card_view_tests
     presentation/CardViewTests.cpp

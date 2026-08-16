@@ -47,7 +47,7 @@ WorkspaceLayout
 
 `cards` 保存 Card 身份、类型、可见/展开状态、Chrome 入口偏好、外观偏好和类型专属内容；`workspace.placements` 只保存原始布局。当前显示器拓扑与 Projection 不写入配置，启动后由平台适配器重新提供。
 
-Card 外观当前保存 `preset`、`opacity` 和 DIP 单位的 `cornerRadius`。预设至少包含纯白、透明黑和珍珠粉；设置界面必须用可见色块展示预设，文字只作为辅助名称或无障碍标签，不能用文本列表代替色块选择。圆角半径按 Card 实例保存，并限制在 0-128 DIP。
+Card 外观当前保存 `preset`、`opacity` 和 DIP 单位的 `cornerRadius`。预设至少包含纯白、透明黑和珠宝炫彩；`jewel` 是珠宝炫彩的稳定名称，旧的 `pearl-pink` 作为兼容别名使用同一渲染。设置界面必须用可见色块展示预设，文字只作为辅助名称或无障碍标签，不能用文本列表代替色块选择。圆角半径按 Card 实例保存，并限制在 0-128 DIP。
 
 `workspace.placements` 保存 Placement 的稳定 ID、Card ID、Display Target、相对工作区矩形和层级。当前只接受 schema version 2；旧版本必须通过显式迁移后才能写回，未来版本直接拒绝，不能让旧版本猜测新结构。
 

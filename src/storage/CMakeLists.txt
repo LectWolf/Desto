@@ -1,4 +1,6 @@
 add_library(desto_storage STATIC
+    ApplicationCardImport.cpp
+    ApplicationCardImport.h
     ApplicationCardReturn.cpp
     ApplicationCardReturn.h
     FileMoveTransaction.cpp

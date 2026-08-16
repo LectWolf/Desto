@@ -74,6 +74,8 @@ Debug 同一场景的私有工作集为 0.69/0.95/2.79/0.93 MB，启动为 0.828
 
 事项 19 加入按需对齐线、抗锯齿圆角、Chevron 按下反馈和自适应排版计算后，同一 3 Card Release 宿主稳定采样为 3.56 MB 私有内存、4 个线程；10 秒定时退出后无残留进程。对齐线仅在拖动或缩放期间显示，空闲时不运行计时器或渲染循环。
 
+事项 20 加入 Shell 元数据 Adapter、Explorer 拖入、项目 Tooltip 和空 Application Card 后，同一 3 Card Release 宿主稳定采样为 4.05 MB 私有内存、16.10 MB 工作集、4 个线程；8 秒定时退出码为 0 且无残留进程。每个成功解析的 64x64 Shell 图标增加约 16 KiB 像素数据，多屏 Projection 通过共享所有权复用该数据；目录实时监视和长期图标缓存尚未启用。
+
 Qt/qmake 未安装在当前构建环境，因此事项 15 采用 Windows SDK 自带 DirectComposition 作为可构建候选。事项 16 需要结合这组数据和输入、DPI、桌面层级、发布依赖等维度做技术选择，不能只按渲染效果判断。
 
 ## Initial Targets

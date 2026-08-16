@@ -1,0 +1,62 @@
+#include "ApplicationCardImport.h"
+#include "TestSupport.h"
+
+#include <chrono>
+#include <fstream>
+
+using namespace desto::domain;
+using namespace desto::storage;
+
+namespace {
+
+void RunTests() {
+    const auto token = std::to_string(
+        std::chrono::steady_clock::now().time_since_epoch().count());
+    const auto root = std::filesystem::temp_directory_path() / ("desto-import-" + token);
+    const auto sourceDirectory = root / "incoming";
+    const auto storageDirectory = root / "storage";
+    std::filesystem::create_directories(sourceDirectory);
+    std::ofstream(sourceDirectory / "App.lnk") << "first";
+    std::ofstream(sourceDirectory / "Second.lnk") << "second";
+    std::filesystem::create_directories(storageDirectory / "cards" / "application-1");
+    std::ofstream(storageDirectory / "cards" / "application-1" / "App.lnk") << "existing";
+
+    ApplicationCard card("application-1", "cards/application-1");
+    ApplicationCardImportService service{StorageRoot(storageDirectory)};
+    const std::vector<std::filesystem::path> sources{
+        sourceDirectory / "App.lnk",
+        sourceDirectory / "Second.lnk",
+        sourceDirectory / "Second.lnk",
+    };
+    const auto plan = service.plan(card, sources);
+    DESTO_CHECK(plan.moves.size() == 2);
+    DESTO_CHECK(plan.moves[0].destination.filename() == "App (1).lnk");
+    const auto result = service.execute(plan);
+    DESTO_CHECK(result.succeeded);
+    DESTO_CHECK(result.completedMoves.size() == 2);
+    DESTO_CHECK(std::filesystem::exists(plan.cardDirectory / "App (1).lnk"));
+    DESTO_CHECK(std::filesystem::exists(plan.cardDirectory / "Second.lnk"));
+    DESTO_CHECK(!std::filesystem::exists(sources[0]));
+
+    const std::vector<std::filesystem::path> alreadyStored{
+        plan.cardDirectory / "Second.lnk",
+    };
+    DESTO_CHECK(service.plan(card, alreadyStored).moves.empty());
+
+    bool rejectedAncestor = false;
+    try {
+        const std::vector<std::filesystem::path> ancestor{storageDirectory};
+        (void)service.plan(card, ancestor);
+    } catch (const std::invalid_argument&) {
+        rejectedAncestor = true;
+    }
+    DESTO_CHECK(rejectedAncestor);
+
+    std::filesystem::remove_all(root);
+}
+
+} // namespace
+
+int main() {
+    return desto::test::Run(RunTests);
+}

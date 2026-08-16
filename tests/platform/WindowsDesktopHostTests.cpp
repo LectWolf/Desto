@@ -36,6 +36,7 @@ void RunTests() {
     bool callbackCalled = false;
     bool expansionCallbackCalled = false;
     bool expanded = true;
+    bool itemActivated = false;
     host.setPlacementChangedCallback(
         [&](const PlacementId& placementId, const CardId& cardId, const PlacementRect& rect) {
             DESTO_CHECK(placementId == "placement-test");
@@ -48,6 +49,12 @@ void RunTests() {
         expansionCallbackCalled = true;
         expanded = value;
     });
+    host.setCardItemActivatedCallback(
+        [&](const CardId& cardId, const CardItemView& item) {
+            DESTO_CHECK(cardId == "card-test");
+            DESTO_CHECK(item.displayName == L"Example");
+            itemActivated = true;
+        });
     host.present(projections, displays, cards);
 
     const auto window = FindWindowW(L"DestoDesktopHostSurface", L"Desto Host Test");
@@ -56,6 +63,7 @@ void RunTests() {
     DESTO_CHECK((styles & WS_EX_LAYERED) != 0);
     DESTO_CHECK((styles & WS_EX_TOOLWINDOW) != 0);
     DESTO_CHECK((styles & WS_EX_NOACTIVATE) != 0);
+    DESTO_CHECK((styles & WS_EX_ACCEPTFILES) != 0);
 
     RECT windowRect{};
     DESTO_CHECK(GetWindowRect(window, &windowRect));
@@ -86,6 +94,15 @@ void RunTests() {
     DESTO_CHECK(changed.top == 0);
     DESTO_CHECK(changed.width == 300);
     DESTO_CHECK(changed.height == 200);
+
+    host.updateCardItems("card-test", {{
+        .id = L"example",
+        .displayName = L"Example",
+        .sourcePath = L"C:\\Example.exe",
+        .state = CardItemState::IconUnavailable,
+    }});
+    SendMessageW(window, WM_LBUTTONDBLCLK, MK_LBUTTON, MAKELPARAM(56, 82));
+    DESTO_CHECK(itemActivated);
 
     SendMessageW(window, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(278, 24));
     SendMessageW(window, WM_LBUTTONUP, 0, MAKELPARAM(278, 24));

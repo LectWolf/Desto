@@ -1,6 +1,8 @@
 add_library(desto_platform_windows STATIC
     WindowsSingleInstanceGate.cpp
     WindowsSingleInstanceGate.h
+    WindowsShellItemCatalog.cpp
+    WindowsShellItemCatalog.h
     WindowsDisplayChangeSource.cpp
     WindowsDisplayChangeSource.h
     WindowsDesktopHost.cpp
@@ -21,8 +23,12 @@ target_link_libraries(desto_platform_windows
         desto_platform
         desto_application
         desto_presentation
+        Comctl32
         Shcore
         User32
         Kernel32
         Gdi32
+        Ole32
+        Propsys
+        Shell32
 )

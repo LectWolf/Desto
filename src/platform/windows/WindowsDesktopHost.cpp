@@ -1,7 +1,10 @@
 #include "WindowsDesktopHost.h"
+#include "CardContentLayout.h"
 #include "PlacementInteraction.h"
 
 #include <Windows.h>
+#include <CommCtrl.h>
+#include <shellapi.h>
 #include <windowsx.h>
 
 #include <algorithm>
@@ -33,6 +36,9 @@ struct Surface {
     int height = 0;
     int interactiveHeight = 0;
     bool collapsePressed = false;
+    HWND tooltip = nullptr;
+    std::optional<std::size_t> hoveredItem;
+    std::wstring tooltipText;
 };
 
 LRESULT CALLBACK GuideWindowProcedure(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
@@ -91,6 +97,8 @@ struct WindowsDesktopHost::Impl {
     HBRUSH guideBrush = nullptr;
     WindowsDesktopHost::PlacementChangedCallback placementChanged;
     WindowsDesktopHost::CardExpandedChangedCallback cardExpandedChanged;
+    WindowsDesktopHost::ApplicationItemsDroppedCallback applicationItemsDropped;
+    WindowsDesktopHost::CardItemActivatedCallback cardItemActivated;
     std::vector<Surface> surfaces;
 
     static LRESULT CALLBACK WindowProcedure(
@@ -153,12 +161,42 @@ struct WindowsDesktopHost::Impl {
                 return 0;
             }
             break;
+        case WM_LBUTTONDBLCLK:
+            if (instance != nullptr
+                && instance->activateCardItem(
+                    window,
+                    GET_X_LPARAM(lParam),
+                    GET_Y_LPARAM(lParam))) {
+                return 0;
+            }
+            break;
         case WM_LBUTTONUP:
             if (instance != nullptr
                 && instance->endCollapsePress(window, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) {
                 return 0;
             }
             break;
+        case WM_MOUSEMOVE:
+            if (instance != nullptr) {
+                instance->updateItemHover(
+                    window,
+                    GET_X_LPARAM(lParam),
+                    GET_Y_LPARAM(lParam));
+            }
+            break;
+        case WM_MOUSELEAVE:
+            if (instance != nullptr) {
+                instance->clearItemHover(window);
+                return 0;
+            }
+            break;
+        case WM_DROPFILES:
+            if (instance != nullptr) {
+                instance->handleDroppedFiles(window, reinterpret_cast<HDROP>(wParam));
+                return 0;
+            }
+            DragFinish(reinterpret_cast<HDROP>(wParam));
+            return 0;
         case WM_CAPTURECHANGED:
             if (instance != nullptr) {
                 instance->cancelCollapsePress(window);
@@ -175,7 +213,15 @@ struct WindowsDesktopHost::Impl {
 
     void initialize() {
         module = GetModuleHandleW(nullptr);
+        INITCOMMONCONTROLSEX controls{
+            .dwSize = sizeof(INITCOMMONCONTROLSEX),
+            .dwICC = ICC_WIN95_CLASSES,
+        };
+        if (!InitCommonControlsEx(&controls)) {
+            throw std::runtime_error("InitCommonControlsEx failed for desktop host.");
+        }
         WNDCLASSW windowClass{};
+        windowClass.style = CS_DBLCLKS;
         windowClass.lpfnWndProc = &WindowProcedure;
         windowClass.hInstance = module;
         windowClass.lpszClassName = className.c_str();
@@ -227,6 +273,78 @@ struct WindowsDesktopHost::Impl {
 
     static bool pointInside(const RECT& rect, int x, int y) noexcept {
         return x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
+    }
+
+    static presentation::CardContentLayoutSettings itemLayoutSettings() noexcept {
+        return {
+            .headerHeight = 48.0,
+            .horizontalPadding = 12.0,
+            .verticalPadding = 12.0,
+            .itemWidth = 64.0,
+            .itemHeight = 76.0,
+            .horizontalGap = 8.0,
+            .verticalGap = 8.0,
+            .minimumColumns = 1,
+            .maximumColumns = 8,
+        };
+    }
+
+    static presentation::CardContentLayout itemLayout(const Surface& surface) {
+        const auto scale = surface.display.effectiveDpi / 96.0;
+        return presentation::ResolveCardContentLayout(
+            surface.card.items.size(),
+            surface.width / scale,
+            itemLayoutSettings());
+    }
+
+    static RECT itemRect(const Surface& surface, std::size_t index) {
+        const auto settings = itemLayoutSettings();
+        const auto layout = itemLayout(surface);
+        const auto scale = surface.display.effectiveDpi / 96.0;
+        const auto widthDip = surface.width / scale;
+        const auto column = index % layout.columns;
+        const auto row = index / layout.columns;
+        const auto contentLeft = (widthDip - layout.contentWidth) / 2.0;
+        const auto left = contentLeft + column * (settings.itemWidth + settings.horizontalGap);
+        const auto top = settings.headerHeight + settings.verticalPadding
+            + row * (settings.itemHeight + settings.verticalGap);
+        return {
+            static_cast<LONG>(std::lround(left * scale)),
+            static_cast<LONG>(std::lround(top * scale)),
+            static_cast<LONG>(std::lround((left + settings.itemWidth) * scale)),
+            static_cast<LONG>(std::lround((top + settings.itemHeight) * scale)),
+        };
+    }
+
+    static std::optional<std::size_t> itemAt(const Surface& surface, int x, int y) {
+        if (!surface.card.expanded || surface.card.items.empty()
+            || y < dipToPixels(48.0, surface) || y >= surface.interactiveHeight) {
+            return std::nullopt;
+        }
+        const auto settings = itemLayoutSettings();
+        const auto layout = itemLayout(surface);
+        const auto scale = surface.display.effectiveDpi / 96.0;
+        const auto xDip = x / scale;
+        const auto yDip = y / scale;
+        const auto contentLeft = (surface.width / scale - layout.contentWidth) / 2.0;
+        const auto localX = xDip - contentLeft;
+        const auto localY = yDip - settings.headerHeight - settings.verticalPadding;
+        if (localX < 0 || localY < 0) {
+            return std::nullopt;
+        }
+        const auto column = static_cast<std::size_t>(
+            localX / (settings.itemWidth + settings.horizontalGap));
+        const auto row = static_cast<std::size_t>(
+            localY / (settings.itemHeight + settings.verticalGap));
+        if (column >= layout.columns
+            || std::fmod(localX, settings.itemWidth + settings.horizontalGap) >= settings.itemWidth
+            || std::fmod(localY, settings.itemHeight + settings.verticalGap) >= settings.itemHeight) {
+            return std::nullopt;
+        }
+        const auto index = row * layout.columns + column;
+        return index < surface.card.items.size()
+            ? std::optional<std::size_t>(index)
+            : std::nullopt;
     }
 
     bool isCollapseControlHit(const Surface& surface, int x, int y) const noexcept {
@@ -446,6 +564,108 @@ struct WindowsDesktopHost::Impl {
         }
     }
 
+    bool activateCardItem(HWND window, int x, int y) noexcept {
+        auto* surface = findSurface(window);
+        if (surface == nullptr) {
+            return false;
+        }
+        const auto index = itemAt(*surface, x, y);
+        if (!index.has_value()) {
+            return false;
+        }
+        const auto& item = surface->card.items[*index];
+        if (item.state == presentation::CardItemState::Missing
+            || item.state == presentation::CardItemState::UnresolvedShortcut) {
+            return true;
+        }
+        if (cardItemActivated) {
+            try {
+                cardItemActivated(surface->card.id, item);
+            } catch (...) {
+            }
+        }
+        return true;
+    }
+
+    void clearItemHover(HWND window) noexcept {
+        auto* surface = findSurface(window);
+        if (surface == nullptr || surface->tooltip == nullptr) {
+            return;
+        }
+        TOOLINFOW tool{.cbSize = sizeof(TOOLINFOW), .hwnd = surface->window, .uId = 1};
+        SendMessageW(surface->tooltip, TTM_TRACKACTIVATE, FALSE, reinterpret_cast<LPARAM>(&tool));
+        surface->hoveredItem.reset();
+    }
+
+    void updateItemHover(HWND window, int x, int y) noexcept {
+        auto* surface = findSurface(window);
+        if (surface == nullptr) {
+            return;
+        }
+        TRACKMOUSEEVENT tracking{
+            .cbSize = sizeof(TRACKMOUSEEVENT),
+            .dwFlags = TME_LEAVE,
+            .hwndTrack = window,
+        };
+        TrackMouseEvent(&tracking);
+        const auto index = itemAt(*surface, x, y);
+        if (index == surface->hoveredItem) {
+            return;
+        }
+        clearItemHover(window);
+        if (!index.has_value() || surface->tooltip == nullptr) {
+            return;
+        }
+        surface->hoveredItem = index;
+        const auto& item = surface->card.items[*index];
+        surface->tooltipText = item.displayName;
+        if (item.state == presentation::CardItemState::Missing) {
+            surface->tooltipText += L"\n(Item is missing)";
+        } else if (item.state == presentation::CardItemState::UnresolvedShortcut) {
+            surface->tooltipText += L"\n(Shortcut is unavailable)";
+        }
+        TOOLINFOW tool{
+            .cbSize = sizeof(TOOLINFOW),
+            .hwnd = surface->window,
+            .uId = 1,
+            .lpszText = surface->tooltipText.data(),
+        };
+        SendMessageW(surface->tooltip, TTM_UPDATETIPTEXTW, 0, reinterpret_cast<LPARAM>(&tool));
+        POINT cursor{};
+        GetCursorPos(&cursor);
+        SendMessageW(
+            surface->tooltip,
+            TTM_TRACKPOSITION,
+            0,
+            MAKELPARAM(cursor.x + 12, cursor.y + 18));
+        SendMessageW(surface->tooltip, TTM_TRACKACTIVATE, TRUE, reinterpret_cast<LPARAM>(&tool));
+    }
+
+    void handleDroppedFiles(HWND window, HDROP drop) noexcept {
+        auto* surface = findSurface(window);
+        const auto cardId = surface == nullptr ? domain::CardId{} : surface->card.id;
+        std::vector<std::filesystem::path> paths;
+        if (surface != nullptr && surface->card.type == domain::CardType::Application) {
+            const auto count = DragQueryFileW(drop, 0xFFFFFFFFu, nullptr, 0);
+            paths.reserve(count);
+            for (UINT index = 0; index < count; ++index) {
+                const auto length = DragQueryFileW(drop, index, nullptr, 0);
+                std::wstring path(length + 1, L'\0');
+                if (DragQueryFileW(drop, index, path.data(), length + 1) != 0) {
+                    path.resize(length);
+                    paths.emplace_back(std::move(path));
+                }
+            }
+        }
+        DragFinish(drop);
+        if (!paths.empty() && applicationItemsDropped) {
+            try {
+                applicationItemsDropped(cardId, paths);
+            } catch (...) {
+            }
+        }
+    }
+
     void destroyBitmap(Surface& surface) noexcept {
         if (surface.previousBitmap != nullptr && surface.memoryDc != nullptr) {
             SelectObject(surface.memoryDc, surface.previousBitmap);
@@ -463,6 +683,10 @@ struct WindowsDesktopHost::Impl {
     }
 
     void destroySurface(Surface& surface) noexcept {
+        if (surface.tooltip != nullptr) {
+            DestroyWindow(surface.tooltip);
+            surface.tooltip = nullptr;
+        }
         if (surface.window != nullptr) {
             DestroyWindow(surface.window);
             surface.window = nullptr;
@@ -518,6 +742,34 @@ struct WindowsDesktopHost::Impl {
         if (surface.window == nullptr) {
             throw std::runtime_error("CreateWindowExW failed for desktop host surface.");
         }
+        DragAcceptFiles(
+            surface.window,
+            surface.card.type == domain::CardType::Application ? TRUE : FALSE);
+        surface.tooltip = CreateWindowExW(
+            WS_EX_TOPMOST | WS_EX_NOACTIVATE,
+            TOOLTIPS_CLASSW,
+            nullptr,
+            WS_POPUP | TTS_NOPREFIX | TTS_ALWAYSTIP,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            surface.window,
+            nullptr,
+            module,
+            nullptr);
+        if (surface.tooltip == nullptr) {
+            throw std::runtime_error("CreateWindowExW failed for Card item tooltip.");
+        }
+        TOOLINFOW tool{
+            .cbSize = sizeof(TOOLINFOW),
+            .uFlags = TTF_TRACK | TTF_ABSOLUTE,
+            .hwnd = surface.window,
+            .uId = 1,
+            .lpszText = const_cast<wchar_t*>(L""),
+        };
+        SendMessageW(surface.tooltip, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&tool));
+        SendMessageW(surface.tooltip, TTM_SETMAXTIPWIDTH, 0, dipToPixels(280.0, surface));
     }
 
     void render(
@@ -649,6 +901,108 @@ struct WindowsDesktopHost::Impl {
             };
             pixel = (mix(16) << 16) | (mix(8) << 8) | mix(0);
         };
+        if (card.expanded && !card.items.empty()) {
+            const auto scale = display.effectiveDpi / 96.0;
+            const auto iconSize = std::max(1, static_cast<int>(std::lround(48.0 * scale)));
+            const auto blendPremultiplied = [&](int x, int y, std::uint32_t foregroundPixel) {
+                if (x < 0 || y < 0 || x >= surface.width || y >= visibleBottom) {
+                    return;
+                }
+                const auto alpha = (foregroundPixel >> 24) & 0xFFu;
+                if (alpha == 0) {
+                    return;
+                }
+                auto& backgroundPixel = surface.pixels[y * surface.width + x];
+                const auto inverse = 255u - alpha;
+                const auto composite = [&](int shift) {
+                    const auto foreground = (foregroundPixel >> shift) & 0xFFu;
+                    const auto background = (backgroundPixel >> shift) & 0xFFu;
+                    return std::min(255u, foreground + background * inverse / 255u);
+                };
+                backgroundPixel = (composite(16) << 16)
+                    | (composite(8) << 8)
+                    | composite(0);
+            };
+
+            for (std::size_t index = 0; index < card.items.size(); ++index) {
+                const auto slot = itemRect(surface, index);
+                if (slot.top >= visibleBottom) {
+                    break;
+                }
+                const auto& item = card.items[index];
+                if (!item.icon.empty()) {
+                    const auto iconLeft = slot.left + ((slot.right - slot.left) - iconSize) / 2;
+                    const auto iconTop = slot.top;
+                    for (int targetY = 0; targetY < iconSize; ++targetY) {
+                        const auto sourceY = std::min(
+                            item.icon.height - 1,
+                            targetY * item.icon.height / iconSize);
+                        for (int targetX = 0; targetX < iconSize; ++targetX) {
+                            const auto sourceX = std::min(
+                                item.icon.width - 1,
+                                targetX * item.icon.width / iconSize);
+                            blendPremultiplied(
+                                iconLeft + targetX,
+                                iconTop + targetY,
+                                (*item.icon.premultipliedPixels)[
+                                    sourceY * item.icon.width + sourceX]);
+                        }
+                    }
+                }
+            }
+
+            const auto itemFont = CreateFontW(
+                -dipToPixels(11.0, surface),
+                0,
+                0,
+                0,
+                FW_NORMAL,
+                FALSE,
+                FALSE,
+                FALSE,
+                DEFAULT_CHARSET,
+                OUT_DEFAULT_PRECIS,
+                CLIP_DEFAULT_PRECIS,
+                CLEARTYPE_QUALITY,
+                DEFAULT_PITCH | FF_DONTCARE,
+                L"Segoe UI Variable Text");
+            const auto previousItemFont = itemFont == nullptr
+                ? nullptr
+                : SelectObject(surface.memoryDc, itemFont);
+            for (std::size_t index = 0; index < card.items.size(); ++index) {
+                const auto slot = itemRect(surface, index);
+                if (slot.top >= visibleBottom) {
+                    break;
+                }
+                const auto& item = card.items[index];
+                const auto ready = item.state == presentation::CardItemState::Ready
+                    || item.state == presentation::CardItemState::IconUnavailable;
+                SetTextColor(
+                    surface.memoryDc,
+                    ready
+                        ? foreground
+                        : (darkSurface ? RGB(148, 153, 162) : RGB(121, 126, 135)));
+                RECT labelRect{
+                    slot.left,
+                    slot.top + iconSize + dipToPixels(3.0, surface),
+                    slot.right,
+                    std::min<LONG>(slot.bottom, visibleBottom),
+                };
+                DrawTextW(
+                    surface.memoryDc,
+                    item.displayName.c_str(),
+                    -1,
+                    &labelRect,
+                    DT_CENTER | DT_WORDBREAK | DT_END_ELLIPSIS | DT_NOPREFIX);
+            }
+            if (previousItemFont != nullptr) {
+                SelectObject(surface.memoryDc, previousItemFont);
+            }
+            if (itemFont != nullptr) {
+                DeleteObject(itemFont);
+            }
+            SetTextColor(surface.memoryDc, foreground);
+        }
         if (card.showCollapseControl) {
             const auto centerX = (control.left + control.right) / 2.0;
             const auto centerY = (control.top + control.bottom) / 2.0;
@@ -909,6 +1263,19 @@ struct WindowsDesktopHost::Impl {
         }
     }
 
+    void updateCardItems(
+        const domain::CardId& cardId,
+        const std::vector<presentation::CardItemView>& items) {
+        for (auto& surface : surfaces) {
+            if (surface.card.id != cardId) {
+                continue;
+            }
+            clearItemHover(surface.window);
+            surface.card.items = items;
+            render(surface, surface.display, surface.card, surface.ordinal);
+        }
+    }
+
     int run(int durationMilliseconds) {
         UINT_PTR timer = 0;
         if (durationMilliseconds > 0) {
@@ -961,6 +1328,21 @@ void WindowsDesktopHost::setPlacementChangedCallback(PlacementChangedCallback ca
 
 void WindowsDesktopHost::setCardExpandedChangedCallback(CardExpandedChangedCallback callback) {
     impl_->cardExpandedChanged = std::move(callback);
+}
+
+void WindowsDesktopHost::setApplicationItemsDroppedCallback(
+    ApplicationItemsDroppedCallback callback) {
+    impl_->applicationItemsDropped = std::move(callback);
+}
+
+void WindowsDesktopHost::setCardItemActivatedCallback(CardItemActivatedCallback callback) {
+    impl_->cardItemActivated = std::move(callback);
+}
+
+void WindowsDesktopHost::updateCardItems(
+    const domain::CardId& cardId,
+    std::vector<presentation::CardItemView> items) {
+    impl_->updateCardItems(cardId, items);
 }
 
 } // namespace desto::platform::windows

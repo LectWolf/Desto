@@ -1,12 +1,16 @@
 #include "ApplicationLifecycle.h"
+#include "ApplicationCardImport.h"
 #include "ApplicationRuntime.h"
 #include "Diagnostics.h"
 #include "CardView.h"
+#include "StorageRoot.h"
 #include "WindowsDesktopHost.h"
 #include "WindowsDisplayTopology.h"
+#include "WindowsShellItemCatalog.h"
 #include "WindowsSingleInstanceGate.h"
 
 #include <Windows.h>
+#include <shlobj.h>
 
 #include <algorithm>
 #include <filesystem>
@@ -19,6 +23,7 @@
 using namespace desto::application;
 using namespace desto::domain;
 using namespace desto::platform::windows;
+using namespace desto::storage;
 
 namespace {
 
@@ -34,6 +39,34 @@ int DurationMilliseconds(std::wstring_view commandLine) {
     } catch (...) {
         return 0;
     }
+}
+
+std::filesystem::path DefaultStorageRoot() {
+    wchar_t* localApplicationData = nullptr;
+    if (FAILED(SHGetKnownFolderPath(
+            FOLDERID_LocalAppData,
+            KF_FLAG_DEFAULT,
+            nullptr,
+            &localApplicationData))
+        || localApplicationData == nullptr) {
+        throw std::runtime_error("Unable to resolve the local application data directory.");
+    }
+    const auto result = std::filesystem::path(localApplicationData) / "Desto" / "Data";
+    CoTaskMemFree(localApplicationData);
+    return result;
+}
+
+const ApplicationCard* FindApplicationCard(
+    const ApplicationRuntime& runtime,
+    const CardId& cardId) {
+    const auto cards = runtime.cards();
+    const auto found = std::find_if(
+        cards.begin(),
+        cards.end(),
+        [&](const Card* card) {
+            return card->id() == cardId && card->type() == CardType::Application;
+        });
+    return found == cards.end() ? nullptr : static_cast<const ApplicationCard*>(*found);
 }
 
 void SeedPreview(ApplicationRuntime& runtime, const std::vector<DisplaySnapshot>& displays) {
@@ -69,7 +102,7 @@ void SeedPreview(ApplicationRuntime& runtime, const std::vector<DisplaySnapshot>
             card.appearance = {.preset = "black", .opacity = 0.82, .cornerRadius = 24.0};
             break;
         case CardType::Todo:
-            card.appearance = {.preset = "pearl-pink", .opacity = 0.92, .cornerRadius = 30.0};
+            card.appearance = {.preset = "jewel", .opacity = 0.92, .cornerRadius = 30.0};
             break;
         }
     }
@@ -99,9 +132,21 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
         const auto displays = topology.snapshot();
         ApplicationRuntime runtime;
         SeedPreview(runtime, displays);
+        StorageRoot storageRoot(DefaultStorageRoot());
+        storageRoot.ensureExists();
+        ApplicationCardImportService importService(storageRoot);
+        WindowsShellItemCatalog shellItems;
         std::vector<desto::presentation::CardView> cardViews;
         for (const auto* card : runtime.cards()) {
-            cardViews.push_back(desto::presentation::MakeCardView(*card));
+            auto view = desto::presentation::MakeCardView(*card);
+            if (card->type() == CardType::Application) {
+                const auto* applicationCard = static_cast<const ApplicationCard*>(card);
+                const auto directory = storageRoot.resolveCardPath(
+                    applicationCard->relativeStoragePath());
+                std::filesystem::create_directories(directory);
+                view.items = shellItems.enumerate(directory);
+            }
+            cardViews.push_back(std::move(view));
         }
         WindowsDesktopHost host;
         host.setPlacementChangedCallback(
@@ -127,6 +172,33 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
                 if (runtime.execute(SetCardExpanded{cardId, expanded}).status
                     == CommandStatus::Rejected) {
                     diagnostics.record(DiagnosticLevel::Warning, "desktop.expansion_rejected");
+                }
+            });
+        host.setApplicationItemsDroppedCallback(
+            [&](const CardId& cardId, const std::vector<std::filesystem::path>& paths) {
+                const auto* card = FindApplicationCard(runtime, cardId);
+                if (card == nullptr) {
+                    diagnostics.record(DiagnosticLevel::Warning, "desktop.import_card_missing");
+                    return;
+                }
+                try {
+                    const auto result = importService.execute(importService.plan(*card, paths));
+                    if (!result.succeeded) {
+                        diagnostics.record(DiagnosticLevel::Warning, "desktop.import_failed");
+                        return;
+                    }
+                    host.updateCardItems(
+                        cardId,
+                        shellItems.enumerate(
+                            storageRoot.resolveCardPath(card->relativeStoragePath())));
+                } catch (...) {
+                    diagnostics.record(DiagnosticLevel::Warning, "desktop.import_rejected");
+                }
+            });
+        host.setCardItemActivatedCallback(
+            [&](const CardId&, const desto::presentation::CardItemView& item) {
+                if (!shellItems.launch(item)) {
+                    diagnostics.record(DiagnosticLevel::Warning, "desktop.item_launch_failed");
                 }
             });
         host.present(runtime.projections(), displays, cardViews);
