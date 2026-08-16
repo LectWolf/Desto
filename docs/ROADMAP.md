@@ -88,7 +88,7 @@
 
 实现 Card 标题、图标、展开/收起、关闭/固定入口、实例级入口可见性和外观配置。退出条件是能力、入口和视觉表现分离，关闭入口后对应资源确实停止使用。
 
-### 19. Interaction, resize and snapping
+### 19. Interaction, resize and snapping [x]
 
 实现拖动、缩放、边缘/中心/Card 吸附、Ctrl 绕过吸附、键盘操作和高 DPI 输入转换。退出条件是位置保存准确，吸附不会改变用户主动绕过的操作。
 

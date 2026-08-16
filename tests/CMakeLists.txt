@@ -53,6 +53,19 @@ if(WIN32)
     )
 
     add_test(NAME desto_windows_single_instance_tests COMMAND desto_windows_single_instance_tests)
+
+    add_executable(desto_windows_desktop_host_tests
+        platform/WindowsDesktopHostTests.cpp
+    )
+
+    target_include_directories(desto_windows_desktop_host_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+    target_link_libraries(desto_windows_desktop_host_tests
+        PRIVATE
+            desto_platform_windows
+    )
+
+    add_test(NAME desto_windows_desktop_host_tests COMMAND desto_windows_desktop_host_tests)
 endif()
 
 add_test(NAME desto_display_topology_tests COMMAND desto_display_topology_tests)
@@ -109,3 +122,16 @@ target_link_libraries(desto_card_view_tests
 )
 
 add_test(NAME desto_card_view_tests COMMAND desto_card_view_tests)
+
+add_executable(desto_placement_interaction_tests
+    presentation/PlacementInteractionTests.cpp
+)
+
+target_include_directories(desto_placement_interaction_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+target_link_libraries(desto_placement_interaction_tests
+    PRIVATE
+        desto_presentation
+)
+
+add_test(NAME desto_placement_interaction_tests COMMAND desto_placement_interaction_tests)

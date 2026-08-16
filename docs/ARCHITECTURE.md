@@ -82,6 +82,8 @@ application default
 
 `presentation::CardView` 是 Domain Card 到宿主渲染之间的不可变视图。它只包含标题、类型标识、可见/展开状态、入口可见性和外观值；宿主不读取 Card 子类或持久化路径。关闭某个入口只改变 Card 实例偏好，不会改变 Card 的能力或生命周期。
 
+拖动和缩放由 Win32 非客户区命中测试发起，操作结束后把物理像素转换为显示器工作区相对 DIP。`presentation::ResolvePlacementInteraction` 在不依赖 HWND 的情况下完成边缘、中心和 Card 对齐吸附；Ctrl 只绕过吸附，工作区夹取和最小尺寸仍保留。宿主同步更新同一 Placement 的所有显示器 Surface，再通过回调将最终矩形提交给 `ApplicationRuntime::SetPlacement`。
+
 Windows 平台当前提供 `DisplayTopologyProvider` 的两个 Adapter：生产环境的 `WindowsDisplayTopology` 和测试使用的 `MemoryDisplayTopologyProvider`。`DisplayTopologyMonitor` 负责快照差异和防抖，`WindowsDisplayChangeSource` 负责系统消息输入。接口只暴露 `DisplaySnapshot`，不暴露 Win32 句柄、RECT 或 DPI API。
 
 事项 14 的原生原型位于 `prototypes/`，仅作为 Presentation/Platform 宿主验证，不属于正式产品 UI。它消费 `ApplicationRuntime::projections()`，为每个 `PlacementProjection` 创建一个 `WS_EX_LAYERED`、`WS_EX_NOACTIVATE`、点击穿透的 Win32 工具窗口；所有窗口通过 `BeginDeferWindowPos`/`EndDeferWindowPos` 批量定位和显示。进程使用 Per-Monitor-V2 DPI 感知，显示器工作区原点和 Placement 坐标在 DIP 与像素之间集中转换。原型不持有 Card 业务状态，也不把 HWND 泄漏到 Domain/Application 接口。

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <span>
 #include <string>
@@ -11,6 +12,11 @@ namespace desto::platform::windows {
 
 class WindowsDesktopHost final {
 public:
+    using PlacementChangedCallback = std::function<void(
+        const domain::PlacementId&,
+        const domain::CardId&,
+        const domain::PlacementRect&)>;
+
     explicit WindowsDesktopHost(std::wstring title = L"Desto");
     ~WindowsDesktopHost();
 
@@ -26,6 +32,7 @@ public:
     // Runs the host message loop until requestClose() or the optional timeout.
     int run(int durationMilliseconds = 0);
     void requestClose() noexcept;
+    void setPlacementChangedCallback(PlacementChangedCallback callback);
 
 private:
     struct Impl;

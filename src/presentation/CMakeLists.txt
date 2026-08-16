@@ -1,6 +1,8 @@
 add_library(desto_presentation STATIC
     CardView.cpp
     CardView.h
+    PlacementInteraction.cpp
+    PlacementInteraction.h
 )
 
 target_compile_features(desto_presentation PUBLIC cxx_std_20)

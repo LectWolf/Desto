@@ -23,4 +23,4 @@ Desto 是一个面向 Windows 的轻量桌面整理工具，目前处于架构�
 
 ## Status
 
-当前处于 `（19/34）Interaction, resize and snapping`。事项 1-18 已完成；Card 外壳已按实例视图配置绘制标题、类型图标、展开/收起、关闭/固定入口、透明度和外观 preset。下一步实现拖动、缩放、边缘/中心/Card 吸附、Ctrl 绕过吸附和高 DPI 输入转换。
+当前处于 `（20/34）ApplicationCard shell integration`。事项 1-19 已完成；Card 已支持无边框拖动/缩放、屏幕边缘/中心/Card 吸附、Ctrl 绕过吸附、多 DPI 坐标回写和多屏 Projection 同步。下一步接入 Explorer 拖放、Shell 文件名、快捷方式、图标和商店应用身份。

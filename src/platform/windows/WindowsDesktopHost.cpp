@@ -1,6 +1,8 @@
 #include "WindowsDesktopHost.h"
+#include "PlacementInteraction.h"
 
 #include <Windows.h>
+#include <windowsx.h>
 
 #include <algorithm>
 #include <cmath>
@@ -23,8 +25,12 @@ struct Surface {
     HBITMAP previousBitmap = nullptr;
     std::uint32_t* pixels = nullptr;
     domain::PlacementProjection projection;
+    domain::DisplaySnapshot display;
+    presentation::CardView card;
+    std::size_t ordinal = 0;
     int width = 0;
     int height = 0;
+    int interactiveHeight = 0;
 };
 
 } // namespace
@@ -49,6 +55,7 @@ struct WindowsDesktopHost::Impl {
     HINSTANCE module = nullptr;
     bool windowClassRegistered = false;
     bool closeRequested = false;
+    WindowsDesktopHost::PlacementChangedCallback placementChanged;
     std::vector<Surface> surfaces;
 
     static LRESULT CALLBACK WindowProcedure(
@@ -63,16 +70,34 @@ struct WindowsDesktopHost::Impl {
                 GWLP_USERDATA,
                 reinterpret_cast<LONG_PTR>(create->lpCreateParams));
         }
+        auto* instance = reinterpret_cast<Impl*>(GetWindowLongPtrW(window, GWLP_USERDATA));
         switch (message) {
         case WM_MOUSEACTIVATE:
             return MA_NOACTIVATE;
         case WM_NCHITTEST:
-            return HTTRANSPARENT;
+            return instance == nullptr ? HTCLIENT : instance->hitTest(window, lParam);
+        case WM_GETMINMAXINFO:
+            if (instance != nullptr) {
+                instance->setMinimumTrackSize(window, lParam);
+                return 0;
+            }
+            break;
+        case WM_EXITSIZEMOVE:
+            if (instance != nullptr) {
+                try {
+                    instance->commitInteraction(window);
+                } catch (...) {
+                    // Native window procedures must not allow exceptions to cross Win32.
+                }
+                return 0;
+            }
+            break;
         case WM_ERASEBKGND:
             return 1;
         default:
             return DefWindowProcW(window, message, wParam, lParam);
         }
+        return DefWindowProcW(window, message, wParam, lParam);
     }
 
     void initialize() {
@@ -86,14 +111,59 @@ struct WindowsDesktopHost::Impl {
             throw std::runtime_error("RegisterClassW failed for desktop host.");
         }
         windowClassRegistered = true;
-
     }
 
-    void destroySurface(Surface& surface) noexcept {
-        if (surface.window != nullptr) {
-            DestroyWindow(surface.window);
-            surface.window = nullptr;
+    Surface* findSurface(HWND window) noexcept {
+        const auto found = std::find_if(
+            surfaces.begin(), surfaces.end(), [&](const Surface& surface) {
+                return surface.window == window;
+            });
+        return found == surfaces.end() ? nullptr : &*found;
+    }
+
+    LRESULT hitTest(HWND window, LPARAM lParam) noexcept {
+        const auto* surface = findSurface(window);
+        if (surface == nullptr) {
+            return HTCLIENT;
         }
+        RECT windowRect{};
+        GetWindowRect(window, &windowRect);
+        const auto x = GET_X_LPARAM(lParam) - windowRect.left;
+        const auto y = GET_Y_LPARAM(lParam) - windowRect.top;
+        if (y < 0 || y >= surface->interactiveHeight) {
+            return HTTRANSPARENT;
+        }
+        constexpr int resizeBorder = 6;
+        const auto left = x < resizeBorder;
+        const auto right = x >= surface->width - resizeBorder;
+        const auto top = y < resizeBorder;
+        const auto bottom = y >= surface->interactiveHeight - resizeBorder;
+        if (top && left) return HTTOPLEFT;
+        if (top && right) return HTTOPRIGHT;
+        if (bottom && left) return HTBOTTOMLEFT;
+        if (bottom && right) return HTBOTTOMRIGHT;
+        if (left) return HTLEFT;
+        if (right) return HTRIGHT;
+        if (bottom) return HTBOTTOM;
+        if (top) return HTTOP;
+        if (y < 48 && x < surface->width - 96) {
+            return HTCAPTION;
+        }
+        return HTCLIENT;
+    }
+
+    void setMinimumTrackSize(HWND window, LPARAM lParam) noexcept {
+        const auto* surface = findSurface(window);
+        if (surface == nullptr) {
+            return;
+        }
+        auto* bounds = reinterpret_cast<MINMAXINFO*>(lParam);
+        const auto scale = surface->display.effectiveDpi / 96.0;
+        bounds->ptMinTrackSize.x = static_cast<LONG>(std::lround(160.0 * scale));
+        bounds->ptMinTrackSize.y = static_cast<LONG>(std::lround(80.0 * scale));
+    }
+
+    void destroyBitmap(Surface& surface) noexcept {
         if (surface.previousBitmap != nullptr && surface.memoryDc != nullptr) {
             SelectObject(surface.memoryDc, surface.previousBitmap);
             surface.previousBitmap = nullptr;
@@ -109,6 +179,14 @@ struct WindowsDesktopHost::Impl {
         }
     }
 
+    void destroySurface(Surface& surface) noexcept {
+        if (surface.window != nullptr) {
+            DestroyWindow(surface.window);
+            surface.window = nullptr;
+        }
+        destroyBitmap(surface);
+    }
+
     void destroySurfaces() noexcept {
         for (auto& surface : surfaces) {
             destroySurface(surface);
@@ -116,7 +194,7 @@ struct WindowsDesktopHost::Impl {
         surfaces.clear();
     }
 
-    void createSurface(Surface& surface) {
+    void createBitmap(Surface& surface) {
         surface.memoryDc = CreateCompatibleDC(nullptr);
         if (surface.memoryDc == nullptr) {
             throw std::runtime_error("CreateCompatibleDC failed for desktop host.");
@@ -137,8 +215,12 @@ struct WindowsDesktopHost::Impl {
         surface.pixels = static_cast<std::uint32_t*>(bits);
         surface.previousBitmap = static_cast<HBITMAP>(
             SelectObject(surface.memoryDc, surface.bitmap));
+    }
+
+    void createSurface(Surface& surface) {
+        createBitmap(surface);
         surface.window = CreateWindowExW(
-            WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
+            WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
             className.c_str(),
             title.c_str(),
             WS_POPUP,
@@ -193,6 +275,7 @@ struct WindowsDesktopHost::Impl {
             std::lround(std::clamp(card.opacity, 0.0, 1.0) * 255.0));
         const auto accent = (alpha << 24) | (red << 16) | (green << 8) | blue;
         const auto visibleBottom = card.expanded ? surface.height : std::min(surface.height, 52);
+        surface.interactiveHeight = visibleBottom;
         const auto radius = std::min(
             static_cast<int>(std::lround(card.cornerRadius * display.effectiveDpi / 96.0)),
             std::min(surface.width, visibleBottom) / 2);
@@ -297,6 +380,83 @@ struct WindowsDesktopHost::Impl {
         }
     }
 
+    void commitInteraction(HWND window) {
+        auto* moved = findSurface(window);
+        if (moved == nullptr) {
+            return;
+        }
+        RECT windowRect{};
+        if (!GetWindowRect(window, &windowRect)) {
+            return;
+        }
+        const auto scale = moved->display.effectiveDpi / 96.0;
+        domain::PlacementRect proposed{
+            .left = windowRect.left / scale - moved->display.workAreaLeft,
+            .top = windowRect.top / scale - moved->display.workAreaTop,
+            .width = (windowRect.right - windowRect.left) / scale,
+            .height = (windowRect.bottom - windowRect.top) / scale,
+        };
+        std::vector<domain::PlacementRect> otherCards;
+        for (const auto& surface : surfaces) {
+            if (surface.window != window && surface.projection.displayId == moved->projection.displayId
+                && surface.projection.placementId != moved->projection.placementId) {
+                otherCards.push_back(surface.projection.rect);
+            }
+        }
+        const auto resolved = presentation::ResolvePlacementInteraction(
+            proposed,
+            moved->display.workAreaWidth,
+            moved->display.workAreaHeight,
+            otherCards,
+            (GetKeyState(VK_CONTROL) & 0x8000) != 0);
+
+        std::vector<Surface*> affected;
+        for (auto& surface : surfaces) {
+            if (surface.projection.placementId == moved->projection.placementId) {
+                surface.projection.rect = resolved;
+                affected.push_back(&surface);
+            }
+        }
+        auto deferred = BeginDeferWindowPos(static_cast<int>(affected.size()));
+        if (deferred == nullptr) {
+            throw std::runtime_error("BeginDeferWindowPos failed after Card interaction.");
+        }
+        for (auto* surface : affected) {
+            const auto surfaceScale = surface->display.effectiveDpi / 96.0;
+            const auto width = std::max(1, static_cast<int>(std::lround(resolved.width * surfaceScale)));
+            const auto height = std::max(1, static_cast<int>(std::lround(resolved.height * surfaceScale)));
+            if (width != surface->width || height != surface->height) {
+                destroyBitmap(*surface);
+                surface->width = width;
+                surface->height = height;
+                createBitmap(*surface);
+                render(*surface, surface->display, surface->card, surface->ordinal);
+            }
+            const auto left = static_cast<int>(std::lround(
+                surface->display.workAreaLeft * surfaceScale + resolved.left * surfaceScale));
+            const auto top = static_cast<int>(std::lround(
+                surface->display.workAreaTop * surfaceScale + resolved.top * surfaceScale));
+            deferred = DeferWindowPos(
+                deferred,
+                surface->window,
+                HWND_BOTTOM,
+                left,
+                top,
+                width,
+                height,
+                SWP_NOACTIVATE);
+            if (deferred == nullptr) {
+                throw std::runtime_error("DeferWindowPos failed after Card interaction.");
+            }
+        }
+        if (!EndDeferWindowPos(deferred)) {
+            throw std::runtime_error("EndDeferWindowPos failed after Card interaction.");
+        }
+        if (placementChanged) {
+            placementChanged(moved->projection.placementId, moved->projection.cardId, resolved);
+        }
+    }
+
     void present(
         std::span<const domain::PlacementProjection> projections,
         std::span<const domain::DisplaySnapshot> displays,
@@ -327,12 +487,15 @@ struct WindowsDesktopHost::Impl {
             const auto scale = display->effectiveDpi / 96.0;
             Surface surface{
                 .projection = projection,
+                .display = *display,
+                .card = *card,
+                .ordinal = surfaces.size() + 1,
                 .width = std::max(1, static_cast<int>(std::lround(projection.rect.width * scale))),
                 .height = std::max(1, static_cast<int>(std::lround(projection.rect.height * scale))),
             };
             try {
                 createSurface(surface);
-                render(surface, *display, *card, surfaces.size() + 1);
+                render(surface, *display, *card, surface.ordinal);
                 surfaces.push_back(std::move(surface));
             } catch (...) {
                 destroySurface(surface);
@@ -416,6 +579,10 @@ int WindowsDesktopHost::run(int durationMilliseconds) {
 void WindowsDesktopHost::requestClose() noexcept {
     impl_->closeRequested = true;
     PostQuitMessage(0);
+}
+
+void WindowsDesktopHost::setPlacementChangedCallback(PlacementChangedCallback callback) {
+    impl_->placementChanged = std::move(callback);
 }
 
 } // namespace desto::platform::windows
