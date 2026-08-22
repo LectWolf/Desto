@@ -22,6 +22,7 @@ Desto 是一个面向 Windows 的轻量桌面整理工具，目前处于架构�
 - [0.1.0 发布说明](docs/RELEASE_NOTES_0.1.0.md)
 - [0.2.0 发布说明](docs/RELEASE_NOTES_0.2.0.md)
 - [0.2.1 发布说明](docs/RELEASE_NOTES_0.2.1.md)
+- [0.2.2 发布说明](docs/RELEASE_NOTES_0.2.2.md)
 - [RC 验收清单](docs/RC_CHECKLIST.md)
 - [交付路线](docs/ROADMAP.md)
 - [配置模型](docs/CONFIGURATION.md)

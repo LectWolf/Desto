@@ -178,6 +178,16 @@ std::wstring JsonInstallerUrl(const std::string& json) {
     return std::wstring(text.begin(), text.end());
 }
 
+std::wstring JsonInstallerName(const std::string& json) {
+    const std::regex pattern(
+        R"(\"name\"\s*:\s*\"(Desto-[^\"]+-win-x64-setup\.exe)\")",
+        std::regex_constants::icase);
+    std::smatch match;
+    if (!std::regex_search(json, match, pattern) || match.size() < 2) return {};
+    const auto text = match[1].str();
+    return std::wstring(text.begin(), text.end());
+}
+
 std::optional<std::wstring> DownloadInstaller(const std::wstring& url) {
     wchar_t tempPath[MAX_PATH]{};
     const auto length = GetTempPathW(static_cast<DWORD>(std::size(tempPath)), tempPath);
@@ -240,6 +250,12 @@ enum class SettingsPage {
     Cards,
     Archive,
     About,
+};
+
+enum class UpdateCheckState {
+    Idle,
+    Latest,
+    Available,
 };
 
 enum class SettingsActionKind {
@@ -2502,58 +2518,86 @@ struct WindowsSettingsHost::Impl {
                 return;
             }
             if (action.kind == SettingsActionKind::CheckForUpdates) {
+                if (updateState == UpdateCheckState::Available) {
+                    if (installerUrl.empty()) {
+                        (void)ShowWindowsAlert(window,
+                            tr(L"更新失败", L"Update failed"),
+                            tr(L"没有找到可用的安装包地址。",
+                                L"No installer was found for this release."));
+                        updateState = UpdateCheckState::Idle;
+                        InvalidateRect(window, nullptr, FALSE);
+                        return;
+                    }
+                    const auto installer = DownloadInstaller(installerUrl);
+                    if (!installer) {
+                        (void)ShowWindowsAlert(window,
+                            tr(L"下载失败", L"Download failed"),
+                            tr(L"下载安装包失败，请检查网络连接后重试。",
+                                L"The installer could not be downloaded. Check your connection and try again."));
+                        updateState = UpdateCheckState::Idle;
+                        InvalidateRect(window, nullptr, FALSE);
+                        return;
+                    }
+                    if (reinterpret_cast<INT_PTR>(ShellExecuteW(
+                            window, L"open", installer->c_str(), nullptr, nullptr,
+                            SW_SHOWNORMAL)) <= 32) {
+                        (void)ShowWindowsAlert(window,
+                            tr(L"启动更新失败", L"Could not start update"),
+                            tr(L"安装程序已下载，但 Windows 无法启动它。",
+                                L"The installer was downloaded, but Windows could not start it."));
+                        updateState = UpdateCheckState::Idle;
+                        InvalidateRect(window, nullptr, FALSE);
+                        return;
+                    }
+                    if (updateRequested) updateRequested();
+                    return;
+                }
                 std::optional<std::string> metadata;
                 const bool developmentChannel = updateChannel == "development";
-                metadata = DownloadUpdateMetadata(L"api.github.com",
-                    developmentChannel
-                        ? L"/repos/LectWolf/Desto/releases?per_page=1"
-                        : L"/repos/LectWolf/Desto/releases/latest");
+                if (developmentChannel) {
+                    metadata = DownloadUpdateMetadata(L"api.github.com",
+                        L"/repos/LectWolf/Desto/releases?per_page=1");
+                } else {
+                    metadata = DownloadUpdateMetadata(L"github.com",
+                        L"/LectWolf/Desto/releases/latest/download/release-manifest.json");
+                }
                 if (!metadata) {
                     metadata = DownloadUpdateMetadata(L"ghproxy.net",
                         developmentChannel
                             ? L"/https://api.github.com/repos/LectWolf/Desto/releases?per_page=1"
-                            : L"/https://api.github.com/repos/LectWolf/Desto/releases/latest");
+                            : L"/https://github.com/LectWolf/Desto/releases/latest/download/release-manifest.json");
                 }
                 if (!metadata) {
+                    updateState = UpdateCheckState::Idle;
                     (void)ShowWindowsAlert(window, tr(L"检查更新失败", L"Update check failed"),
                         tr(L"暂时无法连接更新服务器，请稍后重试。",
                             L"Unable to reach the update servers. Please try again later."));
                     return;
                 }
-                auto tag = JsonStringField(*metadata, "tag_name");
-                auto download = JsonInstallerUrl(*metadata);
+                auto tag = JsonStringField(*metadata,
+                    developmentChannel ? "tag_name" : "version");
+                std::wstring download = developmentChannel
+                    ? JsonInstallerUrl(*metadata) : std::wstring{};
+                if (!developmentChannel) {
+                    const auto installerName = JsonInstallerName(*metadata);
+                    if (!installerName.empty()) {
+                        download = L"https://github.com/LectWolf/Desto/releases/latest/download/"
+                            + installerName;
+                    }
+                }
                 if (!tag.empty() && tag.front() == L'v') tag.erase(tag.begin());
                 const auto current = CurrentDestoVersion(developmentChannel);
                 if (tag.empty() || CompareDestoVersions(tag, current) <= 0) {
-                    (void)ShowWindowsAlert(window, tr(L"检查更新", L"Check for updates"),
-                        tr(L"当前已是最新版本。", L"You are already up to date."));
+                    updateState = UpdateCheckState::Latest;
+                    latestVersion.clear();
+                    installerUrl.clear();
+                    InvalidateRect(window, nullptr, FALSE);
                     return;
                 }
-                const auto prompt = tr(
-                    (L"发现新版本 " + tag + L"，是否打开下载页面？").c_str(),
-                    (L"Version " + tag + L" is available. Open the download page?").c_str());
-                if (ShowWindowsConfirmation(window,
-                        tr(L"发现新版本", L"Update available"), prompt,
-                        tr(L"打开下载", L"Open download"),
-                        tr(L"取消", L"Cancel"))) {
-                    const auto url = download.empty()
-                        ? L"https://github.com/LectWolf/Desto/releases/latest"
-                        : download;
-                    if (download.empty()) {
-                        ShellExecuteW(window, L"open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-                    } else {
-                        const auto installer = DownloadInstaller(url);
-                        if (!installer) {
-                            (void)ShowWindowsAlert(window,
-                                tr(L"下载失败", L"Download failed"),
-                                tr(L"下载安装包失败，请稍后重试。",
-                                    L"The installer could not be downloaded. Please try again later."));
-                            return;
-                        }
-                        ShellExecuteW(window, L"open", installer->c_str(), nullptr, nullptr,
-                            SW_SHOWNORMAL);
-                    }
-                }
+                updateState = UpdateCheckState::Available;
+                latestVersion = tag;
+                installerUrl = download;
+                InvalidateRect(window, nullptr, FALSE);
                 return;
             }
             if (action.kind == SettingsActionKind::ToggleUpdateChannel) {
@@ -4744,8 +4788,13 @@ struct WindowsSettingsHost::Impl {
             RGB(165, 169, 177), 12, FW_NORMAL, DT_CENTER | DT_VCENTER);
         const auto paintCommand = [&](RECT rect, const SettingsAction& action,
                                       std::wstring_view label, std::wstring_view glyph) {
-            FillRounded(dc, rect, pressed == action ? kAccentPressed
-                : hovered == action ? kAccentHover : kAccent, 7);
+            const auto available = action.kind == SettingsActionKind::CheckForUpdates
+                && updateState == UpdateCheckState::Available;
+            const auto base = available ? RGB(226, 132, 42) : kAccent;
+            const auto hover = available ? RGB(239, 151, 56) : kAccentHover;
+            const auto press = available ? RGB(194, 105, 25) : kAccentPressed;
+            FillRounded(dc, rect, pressed == action ? press
+                : hovered == action ? hover : base, 7);
             DrawGlyphRaw(dc, glyph, Rect(rect.left + 12, rect.top,
                 rect.left + 36, rect.bottom), RGB(255, 255, 255), 13);
             DrawLabelRaw(dc, label, Rect(rect.left + 40, rect.top,
@@ -4754,8 +4803,13 @@ struct WindowsSettingsHost::Impl {
         };
         paintCommand(openProjectRect(), {SettingsActionKind::OpenProject},
             tr(L"查看项目", L"View project"), L"\uE8A7");
+        const auto updateLabel = updateState == UpdateCheckState::Latest
+            ? tr(L"已经是最新版本", L"Already up to date")
+            : updateState == UpdateCheckState::Available
+            ? (tr(L"更新到 ", L"Update to ") + latestVersion)
+            : tr(L"检查更新", L"Check for updates");
         paintCommand(checkForUpdatesRect(), {SettingsActionKind::CheckForUpdates},
-            tr(L"检查更新", L"Check for updates"), L"\uE895");
+            updateLabel, L"\uE895");
         paintCommand(updateChannelRect(), {SettingsActionKind::ToggleUpdateChannel},
             updateChannel == "development"
                 ? tr(L"开发版通道", L"Development channel")
@@ -4797,6 +4851,9 @@ struct WindowsSettingsHost::Impl {
     bool showIconBackgroundFrame = false;
     bool confirmFileDeletion = true;
     std::string updateChannel = "stable";
+    UpdateCheckState updateState = UpdateCheckState::Idle;
+    std::wstring latestVersion;
+    std::wstring installerUrl;
     SystemDropdown activeSystemDropdown = SystemDropdown::None;
     bool addMenuOpen = false;
     bool cardMenuOpen = false;
@@ -4839,6 +4896,7 @@ struct WindowsSettingsHost::Impl {
     IconBackgroundFrameChangedCallback iconBackgroundFrameChanged;
     FileDeletionConfirmationChangedCallback fileDeletionConfirmationChanged;
     UpdateChannelChangedCallback updateChannelChanged;
+    UpdateRequestedCallback updateRequested;
     static constexpr const wchar_t* className = L"DestoSettingsWindow";
 };
 
@@ -4864,6 +4922,9 @@ void WindowsSettingsHost::present(
     impl_->showIconBackgroundFrame = settings.showIconBackgroundFrame;
     impl_->confirmFileDeletion = settings.confirmFileDeletion;
     impl_->updateChannel = settings.updateChannel;
+    impl_->updateState = UpdateCheckState::Idle;
+    impl_->latestVersion.clear();
+    impl_->installerUrl.clear();
     if (selectedId.has_value()) {
         const auto found = std::ranges::find(impl_->cards, *selectedId, &presentation::CardView::id);
         impl_->selectedCard = found == impl_->cards.end()
@@ -4910,6 +4971,9 @@ void WindowsSettingsHost::insertCard(presentation::CardView card) {
 }
 
 void WindowsSettingsHost::show() {
+    impl_->updateState = UpdateCheckState::Idle;
+    impl_->latestVersion.clear();
+    impl_->installerUrl.clear();
     ShowWindow(impl_->window, SW_SHOWNORMAL);
     ShowWindow(impl_->window, SW_RESTORE);
     SetWindowPos(impl_->window, HWND_TOP, 0, 0, 0, 0,
@@ -5056,6 +5120,10 @@ void WindowsSettingsHost::setFileDeletionConfirmationChangedCallback(
 
 void WindowsSettingsHost::setUpdateChannelChangedCallback(UpdateChannelChangedCallback callback) {
     impl_->updateChannelChanged = std::move(callback);
+}
+
+void WindowsSettingsHost::setUpdateRequestedCallback(UpdateRequestedCallback callback) {
+    impl_->updateRequested = std::move(callback);
 }
 
 } // namespace desto::platform::windows
