@@ -11,6 +11,7 @@
 #include <gdiplus.h>
 #include <shobjidl.h>
 #include <shellapi.h>
+#include <urlmon.h>
 #include <windowsx.h>
 
 #include <algorithm>
@@ -40,6 +41,7 @@
 
 #pragma comment(lib, "gdiplus.lib")
 #pragma comment(lib, "winhttp.lib")
+#pragma comment(lib, "urlmon.lib")
 
 namespace desto::platform::windows {
 
@@ -146,6 +148,22 @@ std::wstring JsonStringField(const std::string& json, const char* field) {
     if (!std::regex_search(json, match, pattern) || match.size() < 2) return {};
     const auto text = match[1].str();
     return std::wstring(text.begin(), text.end());
+}
+
+std::optional<std::wstring> DownloadInstaller(const std::wstring& url) {
+    wchar_t tempPath[MAX_PATH]{};
+    const auto length = GetTempPathW(static_cast<DWORD>(std::size(tempPath)), tempPath);
+    if (length == 0 || length >= std::size(tempPath)) return std::nullopt;
+    wchar_t tempFile[MAX_PATH]{};
+    if (GetTempFileNameW(tempPath, L"Desto", 0, tempFile) == 0) return std::nullopt;
+    const std::wstring installerPath = std::wstring(tempFile) + L".exe";
+    DeleteFileW(tempFile);
+    if (FAILED(URLDownloadToFileW(nullptr, url.c_str(), installerPath.c_str(),
+            0, nullptr))) {
+        DeleteFileW(installerPath.c_str());
+        return std::nullopt;
+    }
+    return installerPath;
 }
 
 bool SystemAppsUseDarkTheme() noexcept {
@@ -2482,7 +2500,20 @@ struct WindowsSettingsHost::Impl {
                     const auto url = download.empty()
                         ? L"https://github.com/LectWolf/Desto/releases/latest"
                         : download;
-                    ShellExecuteW(window, L"open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+                    if (download.empty()) {
+                        ShellExecuteW(window, L"open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+                    } else {
+                        const auto installer = DownloadInstaller(url);
+                        if (!installer) {
+                            MessageBoxW(window,
+                                tr(L"下载安装包失败，请稍后重试。",
+                                    L"The installer could not be downloaded. Please try again later.").c_str(),
+                                L"Desto", MB_OK | MB_ICONWARNING);
+                            return;
+                        }
+                        ShellExecuteW(window, L"open", installer->c_str(), nullptr, nullptr,
+                            SW_SHOWNORMAL);
+                    }
                 }
                 return;
             }
