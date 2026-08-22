@@ -18,6 +18,8 @@ add_library(desto_storage STATIC
     StorageRoot.h
     StorageRootMigration.cpp
     StorageRootMigration.h
+    TodoDataStore.cpp
+    TodoDataStore.h
 )
 
 target_compile_features(desto_storage PUBLIC cxx_std_20)

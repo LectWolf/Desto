@@ -3,7 +3,8 @@ param(
     [string]$Version,
     [string]$BuildDirectory,
     [string]$OutputDirectory,
-    [int]$BuildNumber = -1
+    [int]$BuildNumber = -1,
+    [switch]$Development
 )
 
 $ErrorActionPreference = 'Stop'
@@ -46,7 +47,7 @@ if ($BuildNumber -lt 0) {
     throw 'Build number must be non-negative.'
 }
 Set-Content -LiteralPath $buildNumberPath -Value $BuildNumber -Encoding ascii
-$fullVersion = "$Version.$BuildNumber"
+$fullVersion = if ($Development) { "$Version.$BuildNumber" } else { $Version }
 
 & cmake -S $repositoryRoot -B $buildRoot "-DDESTO_BUILD_NUMBER=$BuildNumber"
 if ($LASTEXITCODE -ne 0) {

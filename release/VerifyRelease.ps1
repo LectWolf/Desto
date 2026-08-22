@@ -16,7 +16,7 @@ if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf) -or
 
 $manifest = Get-Content -Raw -Encoding utf8 -LiteralPath $manifestPath | ConvertFrom-Json
 if ($manifest.schemaVersion -ne 1 -or $manifest.product -ne 'Desto' -or
-    $manifest.version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' -or
+    $manifest.version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?$' -or
     $manifest.commit -notmatch '^[0-9a-f]{40}$' -or
     $manifest.minimumWindowsBuild -lt 17763) {
     throw 'Release manifest fields are invalid.'
@@ -27,7 +27,8 @@ if (-not [string]::IsNullOrWhiteSpace($ExpectedVersion)) {
         throw "Expected version is invalid: $ExpectedVersion"
     }
     if ($ExpectedVersion.Split('.').Count -eq 3) {
-        if (-not $manifest.version.StartsWith("$ExpectedVersion.")) {
+        if ($manifest.version -ne $ExpectedVersion -and
+            -not $manifest.version.StartsWith("$ExpectedVersion.")) {
             throw "Manifest version $($manifest.version) does not match base version $ExpectedVersion."
         }
     } elseif ($manifest.version -ne $ExpectedVersion) {

@@ -6,7 +6,8 @@ Desto releases are built on `windows-2022` from an exact Git commit. CI builds a
 
 `release/BuildRelease.ps1` produces the following. Official CI passes `-RequireClean`; local diagnostic builds retain `workingTreeDirty: true` in `BUILDINFO.json` instead of pretending to be reproducible releases.
 
-- `Desto-<major>.<minor>.<patch>.<build>-win-x64-setup.exe`: per-user installer; the fourth component is automatically incremented for every local/CI package build;
+- `Desto-<major>.<minor>.<patch>-win-x64-setup.exe`: stable per-user installer;
+- `Desto-<major>.<minor>.<patch>.<build>-win-x64-setup.exe`: development-channel per-user installer;
 - `release-manifest.json`: version, source commit, minimum Windows build, asset sizes and SHA-256 values;
 - `SHA256SUMS.txt`: hashes for every published metadata and binary artifact;
 - `BUILDINFO.json`: source commit, source time, tool version and dirty-tree state;

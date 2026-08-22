@@ -45,7 +45,7 @@ WorkspaceLayout
 - 高频交互先更新内存状态，再合并和延迟持久化。
 - 缓存可以删除重建，配置和布局不能依赖缓存才能恢复。
 
-当前使用 `JsonConfigStore` 保存 schema 27 JSON。已知字段包括 `schemaVersion`、`storage.root`、`settings`、`cards` 和 `workspace.placements`；Card 的存储目录仍记录为相对于 `storage.root` 的路径。v1 -> v22 依次补齐 Card、稀疏布局、Todo、Mapping、系统设置、`widthSpan`、材质、设置页顺序和文件 Card 布局。v22 -> v23 撤销旧扩展体系；v23 -> v24 增加实例级 `chrome.showPresentationControl`，把旧 Todo 3/4/5 宽度档映射为 4/5/6，并把非 Right 水平锚点归一为 Left；v24 -> v25 把 `transparent-white/0.36` 迁移为 0.32；v25 -> v26 再识别第一代内置值 0.62 并迁移为 0.32；v26 -> v27 为所有旧 Card 增加 `chrome.positionLocked=false`。两代水晶迁移只匹配已知预设精确值，其他透明度保持实例值。缺失字段使用大图标、隐藏名称、自适应尺寸、跨度 4、不限制高度、不锁定位置、跟随系统外观、系统时区、系统语言且不开机启动。写入时读取并保留未知字段。Windows 使用临时文件、`FlushFileBuffers` 和原子替换；发布前保留 `settings.json.bak`，发布失败不会覆盖最后有效配置。
+当前使用 `JsonConfigStore` 保存 schema 28 JSON。已知字段包括 `schemaVersion`、`storage.root`、`settings`、`cards` 和 `workspace.placements`；Todo 条目从 0.2.1 起保存在独立的 `todos/<card-id>.json`，主配置只保留 Todo Card 元数据和偏好。旧配置中的 `cards[].todo.items` 仍可兼容读取，并在下一次保存时迁移到独立文件。v1 -> v22 依次补齐 Card、稀疏布局、Todo、Mapping、系统设置、`widthSpan`、材质、设置页顺序和文件 Card 布局；后续版本继续通过显式迁移演进。写入时读取并保留未知字段。Windows 使用临时文件、`FlushFileBuffers` 和原子替换；发布前保留 `settings.json.bak`，发布失败不会覆盖最后有效配置。
 
 `settings.runAtStartup` 只记录用户意图。Windows 适配层优先在 Task Scheduler 根目录维护当前用户任务 `Desto`：唯一触发器为 `TASK_TRIGGER_LOGON`，`ILogonTrigger::Delay` 留空，运行级别为 LUA，登录类型为 `TASK_LOGON_INTERACTIVE_TOKEN`，动作固定为当前可执行文件加 `--autostart`，工作目录为程序目录；重复启用会比较任务定义而不重写。成功注册任务后清理旧 `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run` 值，关闭选项和卸载同时删除任务与旧值。部分 Windows 策略会拒绝普通用户创建计划任务；此时适配层保留 `Run` 回退并记录 `startup.zero_delay_task_unavailable.run_fallback`，不修改会影响全部登录启动应用的全局 `StartupDelayInMSec`。任务和回退均失败时不提交设置。
 
@@ -83,6 +83,8 @@ Mapping 的文件夹浏览路径栈和临时标题不持久化；重新启动、
 Config/
   settings
   layouts
+  todos/
+    <card-id>.json
 Cache/
 Logs/
 Updates/

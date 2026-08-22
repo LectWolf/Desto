@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v*'
   workflow_dispatch:
     inputs:
       version:
@@ -41,12 +41,21 @@ jobs:
           } else {
             $env:INPUT_VERSION
           }
-          if ($requested -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$' -or
-              $requested -ne $projectVersion) {
+          if ($requested -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?$') {
             throw "Requested version $requested does not match project version $projectVersion."
           }
+          $parts = $requested.Split('.')
+          $baseVersion = ($parts[0..2] -join '.')
+          if ($baseVersion -ne $projectVersion) {
+            throw "Requested version $requested does not match project version $projectVersion."
+          }
+          $development = $parts.Count -eq 4
+          $buildNumber = if ($development) { $parts[3] } else { '0' }
           "value=$requested" >> $env:GITHUB_OUTPUT
+          "baseVersion=$baseVersion" >> $env:GITHUB_OUTPUT
+          "buildNumber=$buildNumber" >> $env:GITHUB_OUTPUT
           "tag=v$requested" >> $env:GITHUB_OUTPUT
+          "development=$($development.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
 
       - name: Require an owner-selected project license
         shell: pwsh
@@ -78,9 +87,11 @@ jobs:
         shell: pwsh
         run: >-
           ./release/BuildRelease.ps1
-          -Version '${{ steps.version.outputs.value }}'
+          -Version '${{ steps.version.outputs.baseVersion }}'
           -BuildDirectory build
           -OutputDirectory dist
+          -Development:${{ steps.version.outputs.development }}
+          -BuildNumber '${{ steps.version.outputs.buildNumber }}'
           -RequireClean
 
       - name: Verify release assets
@@ -95,7 +106,7 @@ jobs:
         with:
           name: Desto-${{ steps.version.outputs.value }}-win-x64
           path: |
-            dist/Desto-${{ steps.version.outputs.value }}.*-win-x64-setup.exe
+            dist/Desto-*-win-x64-setup.exe
             dist/release-manifest.json
             dist/BUILDINFO.json
             dist/SHA256SUMS.txt
@@ -112,7 +123,7 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
-            dist/Desto-${{ steps.version.outputs.value }}.*-win-x64-setup.exe
+            dist/Desto-*-win-x64-setup.exe
             dist/release-manifest.json
             dist/BUILDINFO.json
             dist/SHA256SUMS.txt

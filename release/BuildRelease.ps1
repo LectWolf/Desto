@@ -3,7 +3,9 @@ param(
     [string]$Version,
     [string]$BuildDirectory,
     [string]$OutputDirectory,
-    [switch]$RequireClean
+    [switch]$RequireClean,
+    [switch]$Development,
+    [int]$BuildNumber = -1
 )
 
 $ErrorActionPreference = 'Stop'
@@ -43,13 +45,17 @@ if ($RequireClean -and $dirty) {
     throw 'Official release assets must be built from a clean working tree.'
 }
 
+$buildNumberPath = Join-Path $repositoryRoot '.desto-build-number'
+$buildNumber = if (Test-Path -LiteralPath $buildNumberPath) {
+    [int](Get-Content -Raw -LiteralPath $buildNumberPath).Trim()
+} else { 0 }
+$effectiveBuildNumber = if ($BuildNumber -ge 0) { $BuildNumber } else { $buildNumber }
+$fullVersion = if ($Development) { "$Version.$effectiveBuildNumber" } else { $Version }
+
 New-Item -ItemType Directory -Path $outputRoot -Force | Out-Null
 & (Join-Path $repositoryRoot 'installer\BuildInstaller.ps1') `
-    -Version $Version -BuildDirectory $buildRoot -OutputDirectory $outputRoot
-
-$buildNumberPath = Join-Path $repositoryRoot '.desto-build-number'
-$buildNumber = [int](Get-Content -Raw -LiteralPath $buildNumberPath).Trim()
-$fullVersion = "$Version.$buildNumber"
+    -Version $Version -BuildDirectory $buildRoot -OutputDirectory $outputRoot `
+    -BuildNumber $effectiveBuildNumber -Development:$Development
 $installerPath = Join-Path $outputRoot "Desto-$fullVersion-win-x64-setup.exe"
 
 $thirdPartyNoticeSource = Join-Path $repositoryRoot 'THIRD-PARTY-NOTICES.md'
@@ -64,7 +70,7 @@ $buildInfo = [ordered]@{
     product = 'Desto'
     version = $fullVersion
     baseVersion = $Version
-    buildNumber = $buildNumber
+    buildNumber = $effectiveBuildNumber
     executableVersion = $executableVersion
     commit = $commit
     workingTreeDirty = $dirty
@@ -90,7 +96,7 @@ $manifest = [ordered]@{
     product = 'Desto'
     version = $fullVersion
     baseVersion = $Version
-    buildNumber = $buildNumber
+    buildNumber = $effectiveBuildNumber
     commit = $commit
     minimumWindowsBuild = 17763
     assets = $assets

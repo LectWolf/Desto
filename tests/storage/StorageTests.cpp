@@ -2,6 +2,7 @@
 #include "ApplicationRuntime.h"
 #include "FileCopyTransaction.h"
 #include "JsonConfigStore.h"
+#include "TodoDataStore.h"
 #include "MappingRegistry.h"
 #include "StorageRootMigration.h"
 #include "TestSupport.h"
@@ -494,7 +495,26 @@ void RunTests() {
             DESTO_CHECK(entry.path().filename().wstring().find(L"settings.json.tmp-") == std::wstring::npos);
         }
 
-        const auto reloadedConfig = configStore.load();
+        // The runtime migration writes Todo items beside settings.json. Once
+        // that file exists, the main document must stop growing with the list.
+        TodoDataStore todoDataStore(configPath.parent_path());
+        todoDataStore.save(loadedConfig);
+        auto compactConfig = loadedConfig;
+        compactConfig.cards[2].todoItems.clear();
+        configStore.save(compactConfig);
+        std::ifstream compactSavedConfig(configPath);
+        const std::string compactText{
+            std::istreambuf_iterator<char>(compactSavedConfig),
+            std::istreambuf_iterator<char>()};
+        compactSavedConfig.close();
+        DESTO_CHECK(compactText.find("\"items\"") == std::string::npos);
+        auto restoredTodoConfig = configStore.load();
+        todoDataStore.loadInto(restoredTodoConfig);
+        DESTO_CHECK(restoredTodoConfig.cards[2].todoItems.size() == 1);
+        DESTO_CHECK(restoredTodoConfig.cards[2].todoItems.front().title == "Ship persistence");
+
+        auto reloadedConfig = configStore.load();
+        todoDataStore.loadInto(reloadedConfig);
         DESTO_CHECK(reloadedConfig.cards.size() == 3);
         DESTO_CHECK(reloadedConfig.preferences.timeZoneOffsetMinutes == 8 * 60);
         DESTO_CHECK(reloadedConfig.preferences.language == "zh-CN");

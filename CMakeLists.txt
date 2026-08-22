@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(Desto VERSION 0.2.0 LANGUAGES CXX)
+project(Desto VERSION 0.2.1 LANGUAGES CXX)
 
 set(DESTO_BUILD_NUMBER "0" CACHE STRING
     "Monotonically increasing internal build number")

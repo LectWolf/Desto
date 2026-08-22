@@ -9,6 +9,7 @@
 #include "FileCopyTransaction.h"
 #include "FileMoveTransaction.h"
 #include "JsonConfigStore.h"
+#include "TodoDataStore.h"
 #include "MappingCardImport.h"
 #include "DirectoryImportPlanner.h"
 #include "CardView.h"
@@ -405,6 +406,10 @@ void SaveRuntimeConfiguration(
     if (preferences != nullptr) config.preferences = *preferences;
     config.cards = runtime.cardSnapshots();
     config.workspace = runtime.workspace();
+    TodoDataStore(store.path().parent_path()).save(config);
+    for (auto& card : config.cards) {
+        if (card.type == CardType::Todo) card.todoItems.clear();
+    }
     store.save(config);
 }
 
@@ -430,6 +435,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         const auto defaultStorageRoot = DefaultStorageRoot();
         const auto configPath = defaultStorageRoot.parent_path() / "settings.json";
         JsonConfigStore configStore(configPath);
+        TodoDataStore todoDataStore(configPath.parent_path());
         const auto configInspection = configStore.inspect();
         const auto hasSavedConfiguration = configInspection.primary.state != ConfigFileState::Missing
             || configInspection.backup1.state != ConfigFileState::Missing
@@ -450,6 +456,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             const auto accepted = ShowWindowsDialog(
                 nullptr, desto::ui::RecoveryView::noUsableConfiguration());
             if (!accepted) return 1;
+        }
+        if (restoredConfiguration.has_value()) {
+            todoDataStore.loadInto(*restoredConfiguration);
         }
         ApplicationPreferences applicationPreferences = restoredConfiguration.has_value()
             ? restoredConfiguration->preferences : ApplicationPreferences{};

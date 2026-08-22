@@ -1070,10 +1070,12 @@ ApplicationConfig ParseDocument(const Json& document) {
             }
             case domain::CardType::Todo: {
                 const auto& todo = value.at("todo");
-                if (!todo.is_object() || !todo.contains("items") || !todo.at("items").is_array()) {
+                if (!todo.is_object()
+                    || (todo.contains("items") && !todo.at("items").is_array())) {
                     throw std::runtime_error("Configuration todo card is invalid.");
                 }
-                for (const auto& item : todo.at("items")) {
+                const auto items = todo.contains("items") ? todo.at("items") : Json::array();
+                for (const auto& item : items) {
                     if (!item.is_object() || !item.contains("id") || !item.at("id").is_string()
                         || !item.contains("title") || !item.at("title").is_string()) {
                         throw std::runtime_error("Configuration todo item is invalid.");
@@ -1525,20 +1527,29 @@ void JsonConfigStore::save(const ApplicationConfig& config) const {
             value.erase("mapping");
             value.erase("extension");
             value["todo"]["showCreatedTime"] = card.todoPreferences.showCreatedTime;
-            value["todo"]["items"] = Json::array();
-            for (const auto& item : card.todoItems) {
-                Json serializedItem{
-                    {"id", item.id},
-                    {"title", item.title},
-                    {"completed", item.completed},
-                    {"createdAt", item.createdAtUnixMilliseconds},
-                    {"completedAt", item.completedAtUnixMilliseconds},
-                    {"archived", item.archived},
-                };
-                if (item.scheduledDate.has_value()) {
-                    serializedItem["scheduledDate"] = domain::ToString(*item.scheduledDate);
+            // Once TodoDataStore has published the per-card file, the main
+            // settings document no longer owns the potentially large item list.
+            // Keep writing the legacy field only when no external file exists,
+            // so direct config users and old installations remain compatible.
+            const auto todoPath = configPath_.parent_path() / "todos" / (card.id + ".json");
+            if (std::filesystem::exists(todoPath)) {
+                value["todo"].erase("items");
+            } else {
+                value["todo"]["items"] = Json::array();
+                for (const auto& item : card.todoItems) {
+                    Json serializedItem{
+                        {"id", item.id},
+                        {"title", item.title},
+                        {"completed", item.completed},
+                        {"createdAt", item.createdAtUnixMilliseconds},
+                        {"completedAt", item.completedAtUnixMilliseconds},
+                        {"archived", item.archived},
+                    };
+                    if (item.scheduledDate.has_value()) {
+                        serializedItem["scheduledDate"] = domain::ToString(*item.scheduledDate);
+                    }
+                    value["todo"]["items"].push_back(std::move(serializedItem));
                 }
-                value["todo"]["items"].push_back(std::move(serializedItem));
             }
             break;
         }
