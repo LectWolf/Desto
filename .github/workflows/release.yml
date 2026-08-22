@@ -85,14 +85,23 @@ jobs:
 
       - name: Build release assets
         shell: pwsh
-        run: >-
-          ./release/BuildRelease.ps1
-          -Version '${{ steps.version.outputs.baseVersion }}'
-          -BuildDirectory build
-          -OutputDirectory dist
-          -Development:${{ steps.version.outputs.development }}
-          -BuildNumber '${{ steps.version.outputs.buildNumber }}'
-          -RequireClean
+        env:
+          RELEASE_BASE_VERSION: ${{ steps.version.outputs.baseVersion }}
+          RELEASE_DEVELOPMENT: ${{ steps.version.outputs.development }}
+          RELEASE_BUILD_NUMBER: ${{ steps.version.outputs.buildNumber }}
+        run: |
+          $arguments = @(
+            '-Version', $env:RELEASE_BASE_VERSION,
+            '-BuildDirectory', 'build',
+            '-OutputDirectory', 'dist',
+            '-BuildNumber', $env:RELEASE_BUILD_NUMBER,
+            '-RequireClean'
+          )
+          if ($env:RELEASE_DEVELOPMENT -eq 'true') {
+            $arguments += '-Development'
+          }
+          & ./release/BuildRelease.ps1 @arguments
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Verify release assets
         shell: pwsh
