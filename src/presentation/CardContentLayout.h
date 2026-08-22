@@ -7,7 +7,36 @@
 
 namespace desto::presentation {
 
+inline constexpr double CardWidthTrackDip = 55.0;
+inline constexpr double CardWidthGapDip = 8.0;
+inline constexpr std::uint32_t DefaultCardWidthSpan = 4;
+
+struct CardContentLayoutSettings;
+
+[[nodiscard]] double ResolveCardOuterWidth(
+    std::uint32_t widthSpan) noexcept;
+
+[[nodiscard]] double ResolveFileCardOuterWidth(
+    std::size_t columns,
+    const CardContentLayoutSettings& settings) noexcept;
+
+[[nodiscard]] double ResolveTodoCardOuterWidth(
+    std::uint32_t widthSpan) noexcept;
+
+[[nodiscard]] std::size_t ResolveCardColumnsForWidthSpan(
+    std::uint32_t widthSpan,
+    domain::CardItemSize itemSize) noexcept;
+
+[[nodiscard]] std::uint32_t ResolveLegacyCardWidthSpan(
+    std::size_t columns,
+    domain::CardItemSize itemSize) noexcept;
+
+[[nodiscard]] std::uint32_t ResolveCardWidthSpanForColumns(
+    std::size_t minimumColumns,
+    domain::CardItemSize itemSize) noexcept;
+
 struct CardContentLayoutSettings {
+    std::uint32_t widthSpan = DefaultCardWidthSpan;
     double headerHeight = 48.0;
     double horizontalPadding = 12.0;
     double verticalPadding = 12.0;
@@ -28,6 +57,15 @@ struct CardContentLayoutSettings {
 [[nodiscard]] std::size_t ResolveAdaptiveCardColumns(
     std::size_t itemCount,
     std::size_t requiredColumns,
+    CardContentLayoutSettings settings = {}) noexcept;
+
+[[nodiscard]] std::size_t ResolveSortedAdaptiveCardColumns(
+    std::size_t preservedColumns,
+    CardContentLayoutSettings settings = {}) noexcept;
+
+[[nodiscard]] std::size_t ResolveCustomAdaptiveCardColumns(
+    std::size_t preservedColumns,
+    domain::CardItemSize itemSize,
     CardContentLayoutSettings settings = {}) noexcept;
 
 struct CardContentLayout {
@@ -55,15 +93,14 @@ struct CardDropPreview {
     std::size_t columns = 1;
 };
 
-enum class CardDropOrigin {
-    External,
-    SameCard,
-    OtherCard,
-};
-
 [[nodiscard]] bool IsAdaptiveDropExpansionReady(
-    CardDropOrigin origin,
-    std::uint64_t edgeHoverMilliseconds) noexcept;
+    std::uint64_t edgeHoverMilliseconds,
+    std::size_t expansionStep = 0,
+    bool damped = false) noexcept;
+
+[[nodiscard]] std::uint64_t ResolveAdaptiveDropExpansionDelay(
+    std::size_t expansionStep,
+    bool damped = false) noexcept;
 
 [[nodiscard]] CardDropPreview ResolveAdaptiveCardDropPreview(
     std::size_t occupiedSlotCount,
@@ -80,5 +117,10 @@ enum class CardDropOrigin {
     double pointerY,
     CardContentLayoutSettings settings = {},
     std::optional<std::size_t> maximumRows = std::nullopt);
+
+[[nodiscard]] double ResolveScrolledCardPointerY(
+    double pointerY,
+    std::size_t scrollRowOffset,
+    CardContentLayoutSettings settings = {}) noexcept;
 
 } // namespace desto::presentation

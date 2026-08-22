@@ -9,10 +9,17 @@ namespace desto::storage {
 MappingCardImportPlan MappingCardImportService::plan(
     const domain::MappingCard& card,
     std::span<const std::filesystem::path> sources) const {
-    if (card.mode() != domain::MappingMode::Folder || !card.allowsSourceMutation()) {
-        throw std::invalid_argument("Mapping Card source mutation is disabled.");
+    return plan(card, card.sourceRoot(), sources);
+}
+
+MappingCardImportPlan MappingCardImportService::plan(
+    const domain::MappingCard& card,
+    const std::filesystem::path& destinationDirectory,
+    std::span<const std::filesystem::path> sources) const {
+    if (card.mode() != domain::MappingMode::Folder) {
+        throw std::invalid_argument("Mapping Card must use a folder source.");
     }
-    auto planned = DirectoryImportPlanner::plan(card.sourceRoot(), sources);
+    auto planned = DirectoryImportPlanner::plan(destinationDirectory, sources);
     return {
         .cardId = card.id(),
         .sourceRoot = std::move(planned.destinationDirectory),

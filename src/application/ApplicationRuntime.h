@@ -36,6 +36,14 @@ struct AddTodoItem {
     std::optional<domain::TodoDate> scheduledDate;
 };
 
+struct AddHistoricalArchivedTodoItem {
+    domain::CardId cardId;
+    std::string itemId;
+    std::string title;
+    std::int64_t archivedAtUnixMilliseconds;
+    domain::TodoDate scheduledDate;
+};
+
 struct RenameTodoItem {
     domain::CardId cardId;
     std::string itemId;
@@ -46,6 +54,7 @@ struct SetTodoItemCompleted {
     domain::CardId cardId;
     std::string itemId;
     bool completed;
+    std::int64_t completedAtUnixMilliseconds = 0;
 };
 
 struct RemoveTodoItem {
@@ -62,8 +71,20 @@ struct ArchiveCompletedTodoItems {
     domain::CardId cardId;
 };
 
+struct ArchiveTodoItem {
+    domain::CardId cardId;
+    std::string itemId;
+};
+
 struct RestoreArchivedTodoItems {
     domain::CardId cardId;
+    std::int64_t restoredAtUnixMilliseconds = 0;
+};
+
+struct RestoreArchivedTodoItem {
+    domain::CardId cardId;
+    std::string itemId;
+    std::int64_t restoredAtUnixMilliseconds = 0;
 };
 
 struct SetTodoCardPreferences {
@@ -79,6 +100,11 @@ struct SetCardVisibility {
 struct SetCardExpanded {
     domain::CardId cardId;
     bool expanded;
+};
+
+struct RenameCard {
+    domain::CardId cardId;
+    std::string name;
 };
 
 struct SetCardChromePreferences {
@@ -102,6 +128,17 @@ struct SetApplicationCardLayout {
     std::vector<domain::ApplicationItemPlacement> itemPlacements;
 };
 
+struct SetApplicationPresentationMode {
+    domain::CardId cardId;
+    domain::MappingPresentationMode mode = domain::MappingPresentationMode::Grid;
+};
+
+struct SetMappingCardLayout {
+    domain::CardId cardId;
+    domain::ApplicationItemSortMode sortMode = domain::ApplicationItemSortMode::Custom;
+    std::vector<domain::ApplicationItemPlacement> itemPlacements;
+};
+
 struct SetMappingFolderSource {
     domain::CardId cardId;
     std::filesystem::path sourceRoot;
@@ -110,6 +147,16 @@ struct SetMappingFolderSource {
 struct SetMappingReferences {
     domain::CardId cardId;
     std::vector<domain::FileReference> references;
+};
+
+struct SetMappingMode {
+    domain::CardId cardId;
+    domain::MappingMode mode = domain::MappingMode::References;
+};
+
+struct SetMappingPresentationMode {
+    domain::CardId cardId;
+    domain::MappingPresentationMode mode = domain::MappingPresentationMode::Grid;
 };
 
 struct SetMappingSourceMutation {
@@ -152,21 +199,29 @@ using ApplicationCommand = std::variant<
     CreateMappingCard,
     CreateTodoCard,
     AddTodoItem,
+    AddHistoricalArchivedTodoItem,
     RenameTodoItem,
     SetTodoItemCompleted,
     RemoveTodoItem,
     ReorderTodoItems,
     ArchiveCompletedTodoItems,
     RestoreArchivedTodoItems,
+    ArchiveTodoItem,
+    RestoreArchivedTodoItem,
     SetTodoCardPreferences,
     SetCardVisibility,
     SetCardExpanded,
+    RenameCard,
     SetCardChromePreferences,
     SetCardAppearancePreferences,
     SetCardContentPreferences,
     SetApplicationCardLayout,
+    SetApplicationPresentationMode,
+    SetMappingCardLayout,
     SetMappingFolderSource,
     SetMappingReferences,
+    SetMappingMode,
+    SetMappingPresentationMode,
     SetMappingSourceMutation,
     ClearMappingSource,
     SetPlacement,
@@ -259,21 +314,29 @@ private:
     [[nodiscard]] CommandResult handle(const CreateMappingCard& command);
     [[nodiscard]] CommandResult handle(const CreateTodoCard& command);
     [[nodiscard]] CommandResult handle(const AddTodoItem& command);
+    [[nodiscard]] CommandResult handle(const AddHistoricalArchivedTodoItem& command);
     [[nodiscard]] CommandResult handle(const RenameTodoItem& command);
     [[nodiscard]] CommandResult handle(const SetTodoItemCompleted& command);
     [[nodiscard]] CommandResult handle(const RemoveTodoItem& command);
     [[nodiscard]] CommandResult handle(const ReorderTodoItems& command);
     [[nodiscard]] CommandResult handle(const ArchiveCompletedTodoItems& command);
+    [[nodiscard]] CommandResult handle(const ArchiveTodoItem& command);
     [[nodiscard]] CommandResult handle(const RestoreArchivedTodoItems& command);
+    [[nodiscard]] CommandResult handle(const RestoreArchivedTodoItem& command);
     [[nodiscard]] CommandResult handle(const SetTodoCardPreferences& command);
     [[nodiscard]] CommandResult handle(const SetCardVisibility& command);
     [[nodiscard]] CommandResult handle(const SetCardExpanded& command);
+    [[nodiscard]] CommandResult handle(const RenameCard& command);
     [[nodiscard]] CommandResult handle(const SetCardChromePreferences& command);
     [[nodiscard]] CommandResult handle(const SetCardAppearancePreferences& command);
     [[nodiscard]] CommandResult handle(const SetCardContentPreferences& command);
     [[nodiscard]] CommandResult handle(const SetApplicationCardLayout& command);
+    [[nodiscard]] CommandResult handle(const SetApplicationPresentationMode& command);
+    [[nodiscard]] CommandResult handle(const SetMappingCardLayout& command);
     [[nodiscard]] CommandResult handle(const SetMappingFolderSource& command);
     [[nodiscard]] CommandResult handle(const SetMappingReferences& command);
+    [[nodiscard]] CommandResult handle(const SetMappingMode& command);
+    [[nodiscard]] CommandResult handle(const SetMappingPresentationMode& command);
     [[nodiscard]] CommandResult handle(const SetMappingSourceMutation& command);
     [[nodiscard]] CommandResult handle(const ClearMappingSource& command);
     [[nodiscard]] CommandResult handle(const SetPlacement& command);

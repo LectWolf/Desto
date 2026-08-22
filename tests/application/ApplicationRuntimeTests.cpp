@@ -27,6 +27,11 @@ void RunTests() {
     DESTO_CHECK(runtime.cards()[0]->id() == "application-1");
     DESTO_CHECK(runtime.cards()[1]->id() == "mapping-1");
     DESTO_CHECK(runtime.cards()[2]->id() == "todo-1");
+    DESTO_CHECK(runtime.execute(RenameCard{"todo-1", "今天要做"}).status
+                == CommandStatus::Applied);
+    DESTO_CHECK(runtime.findCard("todo-1")->name() == "今天要做");
+    DESTO_CHECK(runtime.execute(RenameCard{"todo-1", ""}).status
+                == CommandStatus::Rejected);
 
     DESTO_CHECK(runtime.execute(SetCardChromePreferences{
         "application-1",
@@ -34,6 +39,13 @@ void RunTests() {
          .showPinControl = false, .showTitle = true},
     }).status == CommandStatus::Applied);
     DESTO_CHECK(!runtime.findCard("application-1")->chrome().showCollapseControl);
+    DESTO_CHECK(runtime.execute(SetCardChromePreferences{
+        "application-1", {.showCollapseControl = false, .showCloseControl = false,
+         .showPinControl = true, .pinOnTop = true, .showTitle = true,
+         .positionLocked = true},
+    }).status == CommandStatus::Applied);
+    DESTO_CHECK(runtime.findCard("application-1")->chrome().pinOnTop);
+    DESTO_CHECK(runtime.findCard("application-1")->chrome().positionLocked);
     DESTO_CHECK(runtime.execute(SetCardAppearancePreferences{
         "application-1", {.preset = "jewel", .opacity = 0.92, .cornerRadius = 20.0},
     }).status == CommandStatus::Applied);
@@ -70,18 +82,37 @@ void RunTests() {
     DESTO_CHECK(runtime.execute(SetTodoItemCompleted{"todo-1", "todo-a", true}).status
                 == CommandStatus::Applied);
     DESTO_CHECK(todo->items()[0].completed);
+    DESTO_CHECK(todo->items()[0].completedAtUnixMilliseconds > 0);
+    DESTO_CHECK(runtime.execute(SetTodoItemCompleted{"todo-1", "todo-a", true}).status
+                == CommandStatus::NoChange);
     DESTO_CHECK(todo->items()[1].id == "todo-b");
 
     DESTO_CHECK(runtime.execute(ArchiveCompletedTodoItems{"todo-1"}).status
                 == CommandStatus::Applied);
     DESTO_CHECK(todo->items()[0].archived == true);
     DESTO_CHECK(todo->items()[1].archived == false);
-    DESTO_CHECK(runtime.execute(RestoreArchivedTodoItems{"todo-1"}).status
+    DESTO_CHECK(runtime.execute(RestoreArchivedTodoItems{"todo-1", 2'000}).status
                 == CommandStatus::Applied);
     DESTO_CHECK(!todo->items()[1].archived);
+    DESTO_CHECK(todo->items()[0].completedAtUnixMilliseconds == 2'000);
+    DESTO_CHECK(runtime.execute(ArchiveCompletedTodoItems{"todo-1"}).status
+                == CommandStatus::Applied);
+    DESTO_CHECK(runtime.execute(RestoreArchivedTodoItem{"todo-1", "todo-a", 3'000}).status
+                == CommandStatus::Applied);
+    DESTO_CHECK(!todo->items()[0].archived);
+    DESTO_CHECK(todo->items()[0].completedAtUnixMilliseconds == 3'000);
+    DESTO_CHECK(runtime.execute(ArchiveTodoItem{"todo-1", "todo-a"}).status
+                == CommandStatus::Applied);
+    DESTO_CHECK(todo->items()[0].archived);
+    DESTO_CHECK(runtime.execute(ArchiveTodoItem{"todo-1", "todo-b"}).status
+                == CommandStatus::NoChange);
     DESTO_CHECK(runtime.execute(SetTodoCardPreferences{
         "todo-1", {.showCreatedTime = true}}).status == CommandStatus::Applied);
     DESTO_CHECK(todo->preferences().showCreatedTime);
+    DESTO_CHECK(runtime.execute(SetTodoItemCompleted{"todo-1", "todo-a", false}).status
+                == CommandStatus::Applied);
+    DESTO_CHECK(!todo->items()[0].completed);
+    DESTO_CHECK(todo->items()[0].completedAtUnixMilliseconds == 0);
 
     DESTO_CHECK(runtime.execute(ReorderTodoItems{
         "todo-1", {"todo-b", "todo-a"}}).status == CommandStatus::Applied);
@@ -102,6 +133,24 @@ void RunTests() {
     const auto* restoredTodo = static_cast<const TodoCard*>(todoRestore.findCard("todo-1"));
     DESTO_CHECK(restoredTodo->items() == todo->items());
 
+    ApplicationRuntime historyRuntime;
+    DESTO_CHECK(historyRuntime.execute(CreateTodoCard{"history-card"}).status
+                == CommandStatus::Applied);
+    DESTO_CHECK(historyRuntime.execute(AddHistoricalArchivedTodoItem{
+        "history-card", "history-1", "Past task", 1'722'513'600'000,
+        {2024, 8, 1}}).status == CommandStatus::Applied);
+    const auto* historyCard = static_cast<const TodoCard*>(
+        historyRuntime.findCard("history-card"));
+    DESTO_CHECK(historyCard->items().size() == 1);
+    DESTO_CHECK(historyCard->items()[0].completed);
+    DESTO_CHECK(historyCard->items()[0].archived);
+    DESTO_CHECK(historyCard->items()[0].completedAtUnixMilliseconds
+                == 1'722'513'600'000);
+    DESTO_CHECK(historyCard->items()[0].scheduledDate == TodoDate(2024, 8, 1));
+    DESTO_CHECK(historyRuntime.execute(AddHistoricalArchivedTodoItem{
+        "history-card", "history-2", "Invalid", 0, {2024, 8, 1}}).status
+                == CommandStatus::Rejected);
+
     const auto mappingRoot =
         (std::filesystem::temp_directory_path() / "DestoRuntimeMappingSource").lexically_normal();
     const auto mappingFolder = runtime.execute(SetMappingFolderSource{
@@ -112,6 +161,7 @@ void RunTests() {
     const auto* mapping = static_cast<const MappingCard*>(runtime.findCard("mapping-1"));
     DESTO_CHECK(mapping->mode() == MappingMode::Folder);
     DESTO_CHECK(mapping->sourceRoot() == mappingRoot);
+    DESTO_CHECK(mapping->allowsSourceMutation());
     DESTO_CHECK(runtime.execute(SetMappingFolderSource{"mapping-1", mappingRoot / "."}).status
                 == CommandStatus::NoChange);
 
@@ -132,8 +182,11 @@ void RunTests() {
                 == CommandStatus::Applied);
     DESTO_CHECK(mapping->mode() == MappingMode::References);
     DESTO_CHECK(mapping->references() == references);
+    DESTO_CHECK(!mapping->allowsSourceMutation());
     DESTO_CHECK(runtime.execute(SetMappingFolderSource{"mapping-2", mappingRoot}).status
                 == CommandStatus::Applied);
+    DESTO_CHECK(static_cast<const MappingCard*>(runtime.findCard("mapping-2"))
+                ->allowsSourceMutation());
     DESTO_CHECK(runtime.execute(SetMappingSourceMutation{"mapping-2", false}).status
                 == CommandStatus::Applied);
     const auto* secondMapping = static_cast<const MappingCard*>(runtime.findCard("mapping-2"));
@@ -150,7 +203,29 @@ void RunTests() {
     DESTO_CHECK(mapping->references() == references);
     DESTO_CHECK(runtime.execute(ClearMappingSource{"mapping-2"}).status
                 == CommandStatus::Applied);
-    DESTO_CHECK(secondMapping->mode() == MappingMode::Empty);
+    DESTO_CHECK(secondMapping->mode() == MappingMode::Folder);
+    DESTO_CHECK(runtime.execute(SetMappingMode{"mapping-2", MappingMode::References}).status
+        == CommandStatus::Applied);
+    DESTO_CHECK(secondMapping->mode() == MappingMode::References);
+    DESTO_CHECK(secondMapping->references().empty());
+    DESTO_CHECK(runtime.execute(SetMappingPresentationMode{
+        "mapping-2", MappingPresentationMode::List}).status == CommandStatus::Applied);
+    DESTO_CHECK(secondMapping->presentationMode() == MappingPresentationMode::List);
+    DESTO_CHECK(runtime.execute(SetMappingCardLayout{
+        "mapping-2", ApplicationItemSortMode::ModifiedDate,
+        {{mappingRoot / "Second.txt", 1, 0}}}).status
+                == CommandStatus::Applied);
+    DESTO_CHECK(secondMapping->sortMode() == ApplicationItemSortMode::ModifiedDate);
+    DESTO_CHECK(secondMapping->itemPlacements().size() == 1);
+    const auto snapshotsAfterMappingPreferences = runtime.cardSnapshots();
+    const auto mappingSnapshot = std::ranges::find(
+        snapshotsAfterMappingPreferences, "mapping-2", &CardSnapshot::id);
+    DESTO_CHECK(mappingSnapshot != snapshotsAfterMappingPreferences.end());
+    DESTO_CHECK(mappingSnapshot->mappingMode == MappingMode::References);
+    DESTO_CHECK(mappingSnapshot->mappingPresentationMode == MappingPresentationMode::List);
+    DESTO_CHECK(mappingSnapshot->mappingSortMode == ApplicationItemSortMode::ModifiedDate);
+    DESTO_CHECK(mappingSnapshot->mappingItemPlacements.size() == 1);
+    DESTO_CHECK(mappingSnapshot->mappingItemPlacements.front().column == 1);
     DESTO_CHECK(runtime.execute(ClearMappingSource{"mapping-2"}).status
                 == CommandStatus::NoChange);
 
@@ -186,12 +261,17 @@ void RunTests() {
         runtime.findCard("application-1"));
     DESTO_CHECK(application->itemPlacements().front().fileName == "Editor.lnk");
     DESTO_CHECK(application->itemPlacements()[1].column == 2);
+    DESTO_CHECK(runtime.execute(SetApplicationPresentationMode{
+        "application-1", MappingPresentationMode::List}).status
+        == CommandStatus::Applied);
+    DESTO_CHECK(application->presentationMode() == MappingPresentationMode::List);
     const auto tooSmallGrid = runtime.execute(SetCardContentPreferences{
         .cardId = "application-1",
         .preferences = {
-            .itemSize = CardItemSize::Medium,
+            .itemSize = CardItemSize::ExtraLarge,
             .showItemNames = true,
             .sizeMode = CardSizeMode::Fixed,
+            .widthSpan = 2,
             .fixedColumns = 2,
             .fixedRows = 1,
         },

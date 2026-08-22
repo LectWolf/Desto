@@ -2,8 +2,15 @@ cmake_minimum_required(VERSION 3.25)
 
 project(Desto VERSION 0.1.0 LANGUAGES CXX)
 
+set(DESTO_BUILD_NUMBER "0" CACHE STRING
+    "Monotonically increasing internal build number")
+if(NOT DESTO_BUILD_NUMBER MATCHES "^[0-9]+$")
+    message(FATAL_ERROR "DESTO_BUILD_NUMBER must be a non-negative integer")
+endif()
+
 if(MSVC)
-    add_compile_options(/utf-8)
+    add_compile_options(/utf-8 /FS)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
 set(CMAKE_CXX_STANDARD 20)

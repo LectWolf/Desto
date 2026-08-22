@@ -6,17 +6,70 @@
 
 namespace desto::presentation {
 
+double ResolveCardOuterWidth(std::uint32_t widthSpan) noexcept {
+    if (widthSpan == 0) return 0.0;
+    return static_cast<double>(widthSpan) * CardWidthTrackDip
+        + static_cast<double>(widthSpan - 1) * CardWidthGapDip;
+}
+
+double ResolveFileCardOuterWidth(
+    std::size_t columns,
+    const CardContentLayoutSettings& settings) noexcept {
+    const auto gaps = columns == 0 ? std::size_t{0} : columns - 1;
+    return std::max(
+        180.0,
+        settings.horizontalPadding * 2.0
+            + static_cast<double>(columns) * settings.itemWidth
+            + static_cast<double>(gaps) * settings.horizontalGap);
+}
+
+double ResolveTodoCardOuterWidth(std::uint32_t widthSpan) noexcept {
+    const auto settings = ResolveCardContentLayoutSettings({
+        .itemSize = domain::CardItemSize::Large,
+        .widthSpan = widthSpan,
+    });
+    return ResolveFileCardOuterWidth(widthSpan, settings);
+}
+
+std::size_t ResolveCardColumnsForWidthSpan(
+    std::uint32_t widthSpan,
+    domain::CardItemSize itemSize) noexcept {
+    return domain::ProjectCardColumns(widthSpan, itemSize);
+}
+
+std::uint32_t ResolveLegacyCardWidthSpan(
+    std::size_t columns,
+    domain::CardItemSize itemSize) noexcept {
+    return domain::InferCardWidthSpan(columns, itemSize);
+}
+
+std::uint32_t ResolveCardWidthSpanForColumns(
+    std::size_t minimumColumns,
+    domain::CardItemSize itemSize) noexcept {
+    return domain::FitCardWidthSpan(minimumColumns, itemSize);
+}
+
 bool IsAdaptiveDropExpansionReady(
-    CardDropOrigin origin,
-    std::uint64_t edgeHoverMilliseconds) noexcept {
-    constexpr std::uint64_t sameCardExpansionDelayMilliseconds = 280;
-    return origin != CardDropOrigin::SameCard
-        || edgeHoverMilliseconds >= sameCardExpansionDelayMilliseconds;
+    std::uint64_t edgeHoverMilliseconds,
+    std::size_t expansionStep,
+    bool damped) noexcept {
+    return edgeHoverMilliseconds >= ResolveAdaptiveDropExpansionDelay(expansionStep, damped);
+}
+
+std::uint64_t ResolveAdaptiveDropExpansionDelay(
+    std::size_t expansionStep,
+    bool damped) noexcept {
+    constexpr std::uint64_t initialDelayMilliseconds = 200;
+    constexpr std::uint64_t additionalDampingMilliseconds = 300;
+    return initialDelayMilliseconds
+        + (damped ? expansionStep * additionalDampingMilliseconds : 0);
 }
 
 CardContentLayoutSettings ResolveCardContentLayoutSettings(
     const domain::CardContentPreferences& preferences) noexcept {
     CardContentLayoutSettings result;
+    result.widthSpan = preferences.widthSpan;
+    result.verticalPadding = 8.0;
     double fileNameHeight = 16.0;
     switch (preferences.itemSize) {
     case domain::CardItemSize::Small:
@@ -24,28 +77,36 @@ CardContentLayoutSettings ResolveCardContentLayoutSettings(
         result.iconSize = 20.0;
         result.itemFontSize = 8.0;
         fileNameHeight = 12.0;
-        result.preferredColumns = 6;
+        result.preferredColumns = ResolveCardColumnsForWidthSpan(
+            preferences.widthSpan, preferences.itemSize);
+        result.minimumColumns = 3;
         break;
     case domain::CardItemSize::Medium:
         result.itemWidth = 44.0;
         result.iconSize = 26.0;
         result.itemFontSize = 9.0;
         fileNameHeight = 14.0;
-        result.preferredColumns = 5;
+        result.preferredColumns = ResolveCardColumnsForWidthSpan(
+            preferences.widthSpan, preferences.itemSize);
+        result.minimumColumns = 3;
         break;
     case domain::CardItemSize::Large:
         result.itemWidth = 55.0;
         result.iconSize = 34.0;
         result.itemFontSize = 10.0;
         fileNameHeight = 16.0;
-        result.preferredColumns = 4;
+        result.preferredColumns = ResolveCardColumnsForWidthSpan(
+            preferences.widthSpan, preferences.itemSize);
+        result.minimumColumns = 2;
         break;
     case domain::CardItemSize::ExtraLarge:
         result.itemWidth = 74.0;
         result.iconSize = 44.0;
         result.itemFontSize = 11.0;
         fileNameHeight = 32.0;
-        result.preferredColumns = 3;
+        result.preferredColumns = ResolveCardColumnsForWidthSpan(
+            preferences.widthSpan, preferences.itemSize);
+        result.minimumColumns = 2;
         break;
     }
     result.horizontalGap = 0.0;
@@ -64,6 +125,22 @@ std::size_t ResolveAdaptiveCardColumns(
     return std::max(
         requiredColumns,
         std::clamp(contentColumns, settings.minimumColumns, settings.maximumColumns));
+}
+
+std::size_t ResolveSortedAdaptiveCardColumns(
+    std::size_t preservedColumns,
+    CardContentLayoutSettings settings) noexcept {
+    const auto columns = preservedColumns == 0 ? std::size_t{4} : preservedColumns;
+    return std::max(columns, settings.minimumColumns);
+}
+
+std::size_t ResolveCustomAdaptiveCardColumns(
+    std::size_t preservedColumns,
+    domain::CardItemSize itemSize,
+    CardContentLayoutSettings settings) noexcept {
+    const auto minimumCustomColumns = domain::ProjectCardColumns(
+        DefaultCardWidthSpan, itemSize);
+    return std::max({minimumCustomColumns, preservedColumns, settings.minimumColumns});
 }
 
 CardContentLayout ResolveCardContentLayout(
@@ -183,6 +260,9 @@ CardDropPreview ResolveAdaptiveCardDropPreview(
         0.0,
         static_cast<double>(visibleColumns - 1)));
     auto columns = std::max(baseColumns, column + 1);
+    if (columns < visibleColumns) {
+        columns = visibleColumns - 1;
+    }
     if (allowEdgeExpansion && localX >= contentWidth - edgeExpansionThreshold
         && visibleColumns < settings.maximumColumns) {
         column = visibleColumns;
@@ -225,6 +305,14 @@ std::optional<std::size_t> ResolveCardSlotIndex(
         row = std::min(row, *maximumRows - 1);
     }
     return row * layout.columns + column;
+}
+
+double ResolveScrolledCardPointerY(
+    double pointerY,
+    std::size_t scrollRowOffset,
+    CardContentLayoutSettings settings) noexcept {
+    return pointerY + static_cast<double>(scrollRowOffset)
+        * (settings.itemHeight + settings.verticalGap);
 }
 
 } // namespace desto::presentation

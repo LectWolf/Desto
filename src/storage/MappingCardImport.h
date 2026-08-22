@@ -27,6 +27,10 @@ public:
     [[nodiscard]] MappingCardImportPlan plan(
         const domain::MappingCard& card,
         std::span<const std::filesystem::path> sources) const;
+    [[nodiscard]] MappingCardImportPlan plan(
+        const domain::MappingCard& card,
+        const std::filesystem::path& destinationDirectory,
+        std::span<const std::filesystem::path> sources) const;
     [[nodiscard]] MappingCardImportResult execute(
         const MappingCardImportPlan& plan) const;
 };

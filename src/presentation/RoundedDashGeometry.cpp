@@ -6,6 +6,49 @@
 #include <numbers>
 
 namespace desto::presentation {
+namespace {
+
+double RoundedRectSignedDistance(
+    const RoundedRectSpec& spec,
+    double x,
+    double y) noexcept {
+    if (!std::isfinite(spec.width) || !std::isfinite(spec.height)
+        || !std::isfinite(spec.radius) || !std::isfinite(x) || !std::isfinite(y)
+        || spec.width <= 0.0 || spec.height <= 0.0) {
+        return std::numeric_limits<double>::infinity();
+    }
+    const auto halfWidth = spec.width / 2.0;
+    const auto halfHeight = spec.height / 2.0;
+    const auto radius = std::clamp(
+        spec.radius, 0.0, std::min(halfWidth, halfHeight));
+    const auto qx = std::abs(x - halfWidth) - (halfWidth - radius);
+    const auto qy = std::abs(y - halfHeight) - (halfHeight - radius);
+    const auto outsideX = std::max(qx, 0.0);
+    const auto outsideY = std::max(qy, 0.0);
+    return std::hypot(outsideX, outsideY)
+        + std::min(std::max(qx, qy), 0.0) - radius;
+}
+
+} // namespace
+
+double SampleRoundedRectCoverage(
+    const RoundedRectSpec& spec,
+    double x,
+    double y) noexcept {
+    return std::clamp(0.5 - RoundedRectSignedDistance(spec, x, y), 0.0, 1.0);
+}
+
+double SampleInnerRoundedOutlineCoverage(
+    const RoundedRectSpec& spec,
+    double x,
+    double y) noexcept {
+    if (!std::isfinite(spec.strokeWidth) || spec.strokeWidth <= 0.0) return 0.0;
+    const auto distance = RoundedRectSignedDistance(spec, x, y);
+    const auto shapeCoverage = std::clamp(0.5 - distance, 0.0, 1.0);
+    const auto innerBand = std::clamp(
+        spec.strokeWidth + 0.5 + distance, 0.0, 1.0);
+    return shapeCoverage * innerBand;
+}
 
 double SampleRoundedDashCoverage(
     const RoundedDashSpec& spec,

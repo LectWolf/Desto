@@ -7,6 +7,8 @@ add_library(desto_storage STATIC
     DirectoryImportPlanner.h
     FileMoveTransaction.cpp
     FileMoveTransaction.h
+    FileCopyTransaction.cpp
+    FileCopyTransaction.h
     JsonConfigStore.cpp
     JsonConfigStore.h
     MappingRegistry.h

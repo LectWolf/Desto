@@ -73,6 +73,19 @@ void RunTests() {
     DESTO_CHECK(std::filesystem::exists(mappingRoot / "Mapped (1).txt"));
     DESTO_CHECK(!std::filesystem::exists(mappingSources.front()));
 
+    const auto mappingChild = mappingRoot / "Child";
+    std::filesystem::create_directories(mappingChild);
+    std::ofstream(sourceDirectory / "Child import.txt") << "child";
+    const std::vector<std::filesystem::path> childSources{
+        sourceDirectory / "Child import.txt",
+    };
+    const auto childPlan = mappingService.plan(mapping, mappingChild, childSources);
+    DESTO_CHECK(childPlan.moves.size() == 1);
+    DESTO_CHECK(childPlan.moves.front().destination.parent_path() == mappingChild);
+    DESTO_CHECK(mappingService.execute(childPlan).succeeded);
+    DESTO_CHECK(std::filesystem::exists(mappingChild / "Child import.txt"));
+    DESTO_CHECK(!std::filesystem::exists(mappingRoot / "Child import.txt"));
+
     mapping.setAllowsSourceMutation(false);
     bool mutationRejected = false;
     try {

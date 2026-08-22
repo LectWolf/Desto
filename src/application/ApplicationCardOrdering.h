@@ -36,6 +36,16 @@ struct ApplicationItemPlacementResult {
     std::uint32_t columns,
     std::optional<std::uint32_t> maximumRows = std::nullopt);
 
+// Reflows positions that no longer fit after an explicit grid-density
+// change. Ordinary reconciliation intentionally preserves out-of-width
+// adaptive positions so content can expand a Card; density changes need the
+// opposite behavior so stale columns do not immediately expand it again.
+[[nodiscard]] ApplicationItemPlacementResult ReflowApplicationItemPlacementsForGrid(
+    std::span<const domain::ApplicationItemPlacement> preferredPlacements,
+    std::span<const std::filesystem::path> actualFileNames,
+    std::uint32_t columns,
+    std::optional<std::uint32_t> maximumRows = std::nullopt);
+
 [[nodiscard]] ApplicationItemPlacementResult MoveApplicationItemsToSlot(
     std::span<const domain::ApplicationItemPlacement> currentPlacements,
     std::span<const std::filesystem::path> movedFileNames,

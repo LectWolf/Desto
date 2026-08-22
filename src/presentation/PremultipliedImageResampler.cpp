@@ -35,10 +35,20 @@ std::uint32_t SamplePremultipliedBilinear(
     const auto xWeight = sourceX - x0;
     const auto yWeight = sourceY - y0;
 
-    const auto topLeft = pixels[y0 * sourceWidth + x0];
-    const auto topRight = pixels[y0 * sourceWidth + x1];
-    const auto bottomLeft = pixels[y1 * sourceWidth + x0];
-    const auto bottomRight = pixels[y1 * sourceWidth + x1];
+    // Keep the resampler defensive at the boundary: a few shell providers
+    // leave RGB data in transparent pixels. It must not be interpolated into
+    // a visible edge as a colored halo.
+    const auto sanitize = [](std::uint32_t pixel) {
+        const auto alpha = (pixel >> 24) & 0xFFu;
+        const auto red = std::min((pixel >> 16) & 0xFFu, alpha);
+        const auto green = std::min((pixel >> 8) & 0xFFu, alpha);
+        const auto blue = std::min(pixel & 0xFFu, alpha);
+        return (alpha << 24) | (red << 16) | (green << 8) | blue;
+    };
+    const auto topLeft = sanitize(pixels[y0 * sourceWidth + x0]);
+    const auto topRight = sanitize(pixels[y0 * sourceWidth + x1]);
+    const auto bottomLeft = sanitize(pixels[y1 * sourceWidth + x0]);
+    const auto bottomRight = sanitize(pixels[y1 * sourceWidth + x1]);
     const auto channel = [&](int shift) {
         const auto interpolate = [](double left, double right, double weight) {
             return left + (right - left) * weight;

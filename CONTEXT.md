@@ -35,3 +35,19 @@ _Avoid_: Migrated placement, Rewritten layout
 **Fallback Projection**:
 目标显示器不可用时，在另一显示器上临时呈现的 Projection；它不改变原始 Placement。
 _Avoid_: Moved card, Reassigned placement
+
+**Content Density**:
+文件内容在 Card 中的视觉密度预设，决定图标资源档位、图标尺寸、文字区节拍和建议列数。当前稳定档位为小、中、大、特大；它不是 Card 的物理宽度。
+_Avoid_: Card size, Grid width
+
+**Card Width Policy**:
+Card 内容区域的布局宽度规则，分为自适应和固定格数；固定格数是布局覆盖值，不改变 Content Density 的图标来源。
+_Avoid_: Icon size, Card density
+
+**Card Visibility**:
+单个 Card 是否参与当前 Workspace 的正常 Projection，是实例配置。它与桌面双击或任务栏双击造成的全局显隐会话无关。
+_Avoid_: Global visibility, Hidden session
+
+**Card Chrome**:
+所有 Card 共有的标题栏入口和交互状态，包括收缩、置顶及其可见性；具体内容类型只扩展自己的内容操作，不重复实现 Chrome。
+_Avoid_: Card-specific toolbar, Type controls

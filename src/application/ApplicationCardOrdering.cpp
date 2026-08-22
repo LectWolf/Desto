@@ -16,7 +16,7 @@ std::wstring FoldCase(std::wstring value) {
 }
 
 std::wstring PathKey(const std::filesystem::path& path) {
-    return FoldCase(path.filename().wstring());
+    return FoldCase(path.lexically_normal().wstring());
 }
 
 std::uint64_t Slot(std::uint32_t column, std::uint32_t row) {
@@ -90,10 +90,28 @@ ApplicationItemPlacementResult ReconcileApplicationItemPlacements(
             result.fits = false;
             continue;
         }
-        result.placements.push_back({fileName.filename(), slot->first, slot->second});
+        result.placements.push_back({fileName, slot->first, slot->second});
         placed.insert(key);
     }
     return result;
+}
+
+ApplicationItemPlacementResult ReflowApplicationItemPlacementsForGrid(
+    std::span<const domain::ApplicationItemPlacement> preferredPlacements,
+    std::span<const std::filesystem::path> actualFileNames,
+    std::uint32_t columns,
+    std::optional<std::uint32_t> maximumRows) {
+    std::vector<domain::ApplicationItemPlacement> fitting;
+    fitting.reserve(preferredPlacements.size());
+    for (const auto& placement : preferredPlacements) {
+        if (placement.column >= columns
+            || (maximumRows.has_value() && placement.row >= *maximumRows)) {
+            continue;
+        }
+        fitting.push_back(placement);
+    }
+    return ReconcileApplicationItemPlacements(
+        fitting, actualFileNames, columns, maximumRows);
 }
 
 ApplicationItemPlacementResult MoveApplicationItemsToSlot(
@@ -143,7 +161,7 @@ ApplicationItemPlacementResult MoveApplicationItemsToSlot(
             occupant->row = static_cast<std::uint32_t>(index / columns);
         }
         result.placements.push_back({
-            name.filename(),
+            name,
             static_cast<std::uint32_t>(start % columns),
             static_cast<std::uint32_t>(start / columns),
         });
@@ -162,6 +180,38 @@ std::vector<ApplicationItemProjection> ProjectApplicationItems(
     ordered.reserve(items.size());
     for (const auto& item : items) ordered.push_back(&item);
     if (sortMode == domain::ApplicationItemSortMode::Custom) {
+        if (columns == 1) {
+            std::unordered_map<std::wstring, const ApplicationItemSortData*> byName;
+            for (const auto& item : items) byName.emplace(PathKey(item.fileName), &item);
+
+            std::vector<const domain::ApplicationItemPlacement*> customOrder;
+            customOrder.reserve(customPlacements.size());
+            for (const auto& placement : customPlacements) customOrder.push_back(&placement);
+            std::ranges::stable_sort(customOrder, [](const auto* left, const auto* right) {
+                return left->row != right->row
+                    ? left->row < right->row
+                    : left->column < right->column;
+            });
+
+            std::unordered_set<std::wstring> projected;
+            std::vector<ApplicationItemProjection> result;
+            result.reserve(items.size());
+            const auto append = [&](const ApplicationItemSortData& item) {
+                const auto key = PathKey(item.fileName);
+                if (!projected.insert(key).second) return;
+                result.push_back({
+                    item.fileName,
+                    0,
+                    static_cast<std::uint32_t>(result.size()),
+                });
+            };
+            for (const auto* placement : customOrder) {
+                const auto found = byName.find(PathKey(placement->fileName));
+                if (found != byName.end()) append(*found->second);
+            }
+            for (const auto& item : items) append(item);
+            return result;
+        }
         std::vector<std::filesystem::path> actualNames;
         actualNames.reserve(items.size());
         for (const auto& item : items) actualNames.push_back(item.fileName);

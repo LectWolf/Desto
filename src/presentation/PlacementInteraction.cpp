@@ -27,6 +27,19 @@ void Consider(
 
 } // namespace
 
+domain::PlacementRect ResolveAdaptiveDropExpansionRect(
+    domain::PlacementRect current,
+    double expandedWidth,
+    double expandedHeight,
+    domain::PlacementHorizontalAnchor horizontalAnchor) noexcept {
+    if (horizontalAnchor == domain::PlacementHorizontalAnchor::Right) {
+        current.left -= expandedWidth - current.width;
+    }
+    current.width = expandedWidth;
+    current.height = expandedHeight;
+    return current;
+}
+
 PlacementInteractionResult ResolvePlacementInteractionDetailed(
     domain::PlacementRect proposed,
     double workAreaWidth,
@@ -67,7 +80,7 @@ PlacementInteractionResult ResolvePlacementInteractionDetailed(
     auto verticalDelta = settings.threshold + 1.0;
     std::optional<double> verticalGuide;
     std::optional<double> horizontalGuide;
-    auto horizontalAnchor = domain::PlacementHorizontalAnchor::Free;
+    auto horizontalAnchor = domain::PlacementHorizontalAnchor::Left;
     auto verticalAnchor = domain::PlacementVerticalAnchor::Free;
     Consider(horizontalInset, proposed.left, horizontalInset,
              domain::PlacementHorizontalAnchor::Left,
@@ -77,7 +90,7 @@ PlacementInteractionResult ResolvePlacementInteractionDetailed(
              domain::PlacementHorizontalAnchor::Right,
              settings.threshold, horizontalDelta, verticalGuide, horizontalAnchor);
     Consider(workAreaWidth / 2.0, proposed.left + proposed.width / 2.0,
-             workAreaWidth / 2.0, domain::PlacementHorizontalAnchor::Center,
+             workAreaWidth / 2.0, domain::PlacementHorizontalAnchor::Left,
              settings.threshold, horizontalDelta, verticalGuide, horizontalAnchor);
     Consider(verticalInset, proposed.top, verticalInset,
              domain::PlacementVerticalAnchor::Top,
@@ -92,12 +105,12 @@ PlacementInteractionResult ResolvePlacementInteractionDetailed(
 
     for (const auto& other : otherCards) {
         Consider(other.left, proposed.left, other.left,
-                 domain::PlacementHorizontalAnchor::Free,
+                 domain::PlacementHorizontalAnchor::Left,
                  settings.threshold, horizontalDelta, verticalGuide, horizontalAnchor);
         Consider(other.left + other.width,
                  proposed.left + proposed.width,
                  other.left + other.width,
-                 domain::PlacementHorizontalAnchor::Free,
+                 domain::PlacementHorizontalAnchor::Right,
                  settings.threshold,
                  horizontalDelta,
                  verticalGuide,
@@ -105,7 +118,7 @@ PlacementInteractionResult ResolvePlacementInteractionDetailed(
         Consider(other.left + other.width + settings.visualGap,
                  proposed.left,
                  other.left + other.width + settings.visualGap / 2.0,
-                 domain::PlacementHorizontalAnchor::Free,
+                 domain::PlacementHorizontalAnchor::Left,
                  settings.threshold,
                  horizontalDelta,
                  verticalGuide,
@@ -113,7 +126,7 @@ PlacementInteractionResult ResolvePlacementInteractionDetailed(
         Consider(other.left - settings.visualGap,
                  proposed.left + proposed.width,
                  other.left - settings.visualGap / 2.0,
-                 domain::PlacementHorizontalAnchor::Free,
+                 domain::PlacementHorizontalAnchor::Left,
                  settings.threshold,
                  horizontalDelta,
                  verticalGuide,

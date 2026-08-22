@@ -65,7 +65,7 @@ struct CardPlacement {
     DisplayTarget target;
     PlacementRect rect;
     std::int32_t zIndex = 0;
-    PlacementHorizontalAnchor horizontalAnchor = PlacementHorizontalAnchor::Free;
+    PlacementHorizontalAnchor horizontalAnchor = PlacementHorizontalAnchor::Left;
     PlacementVerticalAnchor verticalAnchor = PlacementVerticalAnchor::Free;
     double referenceWorkAreaWidth = 0;
     double referenceWorkAreaHeight = 0;
@@ -88,7 +88,7 @@ struct PlacementProjection {
     DisplayId displayId;
     PlacementRect rect;
     std::int32_t zIndex = 0;
-    PlacementHorizontalAnchor horizontalAnchor = PlacementHorizontalAnchor::Free;
+    PlacementHorizontalAnchor horizontalAnchor = PlacementHorizontalAnchor::Left;
     PlacementVerticalAnchor verticalAnchor = PlacementVerticalAnchor::Free;
     bool fallback = false;
 };

@@ -5,12 +5,18 @@
 #include <propvarutil.h>
 #include <shellapi.h>
 #include <shlobj.h>
+#include <wincodec.h>
 #include <wrl/client.h>
 
 #include <algorithm>
 #include <cwchar>
+#include <cwctype>
+#include <iterator>
+#include <limits>
 #include <memory>
+#include <mutex>
 #include <system_error>
+#include <unordered_map>
 
 namespace desto::platform::windows {
 namespace {
@@ -44,6 +50,12 @@ struct ShortcutMetadata {
 
 bool IsShortcut(const std::filesystem::path& path) noexcept {
     return _wcsicmp(path.extension().c_str(), L".lnk") == 0;
+}
+
+bool IsHiddenFile(const std::filesystem::path& path) noexcept {
+    const auto attributes = GetFileAttributesW(path.c_str());
+    return attributes != INVALID_FILE_ATTRIBUTES
+        && (attributes & FILE_ATTRIBUTE_HIDDEN) != 0;
 }
 
 ShortcutMetadata ReadShortcut(const std::filesystem::path& path) {
@@ -106,38 +118,55 @@ std::wstring DisplayName(const std::filesystem::path& path) {
 }
 
 presentation::CardItemIcon BitmapPixels(HBITMAP bitmap) {
-    BITMAP details{};
-    if (bitmap == nullptr || GetObjectW(bitmap, sizeof(details), &details) == 0
-        || details.bmWidth <= 0 || details.bmHeight == 0) {
+    if (bitmap == nullptr) {
         return {};
     }
-    const auto width = details.bmWidth;
-    const auto height = std::abs(details.bmHeight);
+
+    // IShellItemImageFactory returns an HBITMAP whose alpha encoding is not
+    // part of the API contract. Let WIC make the conversion explicit instead
+    // of guessing from pixel values (which misclassifies dark translucent
+    // edges and creates a halo after scaling).
+    ComPtr<IWICImagingFactory> imagingFactory;
+    if (FAILED(CoCreateInstance(
+            CLSID_WICImagingFactory,
+            nullptr,
+            CLSCTX_INPROC_SERVER,
+            IID_PPV_ARGS(&imagingFactory)))) {
+        return {};
+    }
+    ComPtr<IWICBitmap> sourceBitmap;
+    if (FAILED(imagingFactory->CreateBitmapFromHBITMAP(
+            bitmap,
+            nullptr,
+            WICBitmapUseAlpha,
+            &sourceBitmap))) {
+        return {};
+    }
+    UINT width = 0;
+    UINT height = 0;
+    if (FAILED(sourceBitmap->GetSize(&width, &height)) || width == 0 || height == 0) {
+        return {};
+    }
+    ComPtr<IWICFormatConverter> converter;
+    if (FAILED(imagingFactory->CreateFormatConverter(&converter))
+        || FAILED(converter->Initialize(
+            sourceBitmap.Get(),
+            GUID_WICPixelFormat32bppPBGRA,
+            WICBitmapDitherTypeNone,
+            nullptr,
+            0.0,
+            WICBitmapPaletteTypeCustom))) {
+        return {};
+    }
     auto pixels = std::make_shared<std::vector<std::uint32_t>>(
         static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
-    BITMAPINFO info{};
-    info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    info.bmiHeader.biWidth = width;
-    info.bmiHeader.biHeight = -height;
-    info.bmiHeader.biPlanes = 1;
-    info.bmiHeader.biBitCount = 32;
-    info.bmiHeader.biCompression = BI_RGB;
-    const auto dc = GetDC(nullptr);
-    if (dc == nullptr
-        || GetDIBits(
-            dc,
-            bitmap,
-            0,
-            static_cast<UINT>(height),
-            pixels->data(),
-            &info,
-            DIB_RGB_COLORS) != height) {
-        if (dc != nullptr) {
-            ReleaseDC(nullptr, dc);
-        }
+    if (FAILED(converter->CopyPixels(
+            nullptr,
+            width * sizeof(std::uint32_t),
+            static_cast<UINT>(pixels->size() * sizeof(std::uint32_t)),
+            reinterpret_cast<BYTE*>(pixels->data())))) {
         return {};
     }
-    ReleaseDC(nullptr, dc);
     const auto hasVisiblePixel = std::any_of(
         pixels->begin(),
         pixels->end(),
@@ -145,28 +174,9 @@ presentation::CardItemIcon BitmapPixels(HBITMAP bitmap) {
     if (!hasVisiblePixel) {
         return {};
     }
-    const auto needsPremultiplication = std::any_of(
-        pixels->begin(),
-        pixels->end(),
-        [](std::uint32_t pixel) {
-            const auto alpha = (pixel >> 24) & 0xFFu;
-            return alpha > 0 && alpha < 255
-                && (((pixel >> 16) & 0xFFu) > alpha
-                    || ((pixel >> 8) & 0xFFu) > alpha
-                    || (pixel & 0xFFu) > alpha);
-        });
-    if (needsPremultiplication) {
-        for (auto& pixel : *pixels) {
-            const auto alpha = (pixel >> 24) & 0xFFu;
-            const auto red = ((pixel >> 16) & 0xFFu) * alpha / 255u;
-            const auto green = ((pixel >> 8) & 0xFFu) * alpha / 255u;
-            const auto blue = (pixel & 0xFFu) * alpha / 255u;
-            pixel = (alpha << 24) | (red << 16) | (green << 8) | blue;
-        }
-    }
     return {
-        .width = width,
-        .height = height,
+        .width = static_cast<int>(width),
+        .height = static_cast<int>(height),
         .premultipliedPixels = std::move(pixels),
     };
 }
@@ -188,7 +198,8 @@ presentation::CardItemIcon LoadShellImage(
     HBITMAP bitmap = nullptr;
     const auto pixels = static_cast<LONG>(sourceSize);
     const SIZE size{pixels, pixels};
-    const auto flags = static_cast<SIIGBF>(SIIGBF_ICONONLY | SIIGBF_RESIZETOFIT);
+    const auto flags = static_cast<SIIGBF>(
+        SIIGBF_ICONONLY | SIIGBF_RESIZETOFIT | SIIGBF_BIGGERSIZEOK);
     if (FAILED(imageFactory->GetImage(size, flags, &bitmap)) || bitmap == nullptr) {
         return {};
     }
@@ -197,42 +208,58 @@ presentation::CardItemIcon LoadShellImage(
     return result;
 }
 
-} // namespace
+struct FileFingerprint {
+    bool exists = false;
+    bool directory = false;
+    std::uintmax_t fileSize = 0;
+    std::int64_t modifiedTime = 0;
 
-ShellIconSourceSize ResolveShellIconSourceSize(domain::CardItemSize itemSize) noexcept {
-    switch (itemSize) {
-    case domain::CardItemSize::Small:
-    case domain::CardItemSize::Medium:
-        return ShellIconSourceSize::Small;
-    case domain::CardItemSize::Large:
-    case domain::CardItemSize::ExtraLarge:
-        return ShellIconSourceSize::Medium;
+    bool operator==(const FileFingerprint&) const = default;
+};
+
+FileFingerprint ReadFingerprint(const std::filesystem::path& path) noexcept {
+    FileFingerprint result;
+    std::error_code error;
+    const auto status = std::filesystem::status(path, error);
+    if (error || !std::filesystem::exists(status)) return result;
+    result.exists = true;
+    result.directory = std::filesystem::is_directory(status);
+    if (std::filesystem::is_regular_file(status)) {
+        result.fileSize = std::filesystem::file_size(path, error);
+        if (error) {
+            result.fileSize = 0;
+            error.clear();
+        }
     }
-    return ShellIconSourceSize::Medium;
+    const auto modified = std::filesystem::last_write_time(path, error);
+    if (!error) result.modifiedTime = modified.time_since_epoch().count();
+    return result;
 }
 
-presentation::CardItemView WindowsShellItemCatalog::inspect(
-    const std::filesystem::path& sourcePath,
-    ShellIconSourceSize iconSize) const {
-    const auto normalized = sourcePath.lexically_normal();
+std::wstring CachePathKey(const std::filesystem::path& path) {
+    auto result = path.lexically_normal().wstring();
+    std::ranges::transform(result, result.begin(), [](wchar_t character) {
+        return static_cast<wchar_t>(std::towlower(character));
+    });
+    return result;
+}
+
+presentation::CardItemView InspectShellItem(
+    const std::filesystem::path& normalized,
+    ShellIconSourceSize iconSize,
+    const FileFingerprint& fingerprint) {
     presentation::CardItemView result{
         .id = normalized.wstring(),
         .displayName = DisplayName(normalized),
         .sourcePath = normalized,
+        .fileSize = fingerprint.fileSize,
+        .modifiedTime = fingerprint.modifiedTime,
     };
-    std::error_code error;
-    if (!std::filesystem::exists(normalized, error) || error) {
+    if (!fingerprint.exists) {
         result.state = presentation::CardItemState::Missing;
         return result;
     }
 
-    if (std::filesystem::is_regular_file(normalized, error) && !error) {
-        result.fileSize = std::filesystem::file_size(normalized, error);
-        if (error) result.fileSize = 0;
-    }
-    error.clear();
-    const auto modified = std::filesystem::last_write_time(normalized, error);
-    if (!error) result.modifiedTime = modified.time_since_epoch().count();
     SHFILEINFOW fileInfo{};
     if (SHGetFileInfoW(
             normalized.c_str(),
@@ -273,6 +300,118 @@ presentation::CardItemView WindowsShellItemCatalog::inspect(
     return result;
 }
 
+} // namespace
+
+struct WindowsShellItemCatalog::Impl {
+    struct CacheKey {
+        std::wstring path;
+        ShellIconSourceSize iconSize = ShellIconSourceSize::Medium;
+
+        bool operator==(const CacheKey&) const = default;
+    };
+
+    struct CacheKeyHash {
+        std::size_t operator()(const CacheKey& key) const noexcept {
+            const auto pathHash = std::hash<std::wstring>{}(key.path);
+            const auto sizeHash = std::hash<int>{}(static_cast<int>(key.iconSize));
+            return pathHash ^ (sizeHash + 0x9e3779b9u + (pathHash << 6) + (pathHash >> 2));
+        }
+    };
+
+    struct CacheEntry {
+        FileFingerprint fingerprint;
+        presentation::CardItemView item;
+        std::size_t iconBytes = 0;
+        std::uint64_t lastUsed = 0;
+    };
+
+    explicit Impl(std::size_t entryLimit, std::size_t byteLimit)
+        : maximumEntries(entryLimit), maximumIconBytes(byteLimit) {
+    }
+
+    void erase(std::unordered_map<CacheKey, CacheEntry, CacheKeyHash>::iterator entry) {
+        cachedIconBytes -= entry->second.iconBytes;
+        cache.erase(entry);
+    }
+
+    void trim() {
+        while (!cache.empty()
+            && (cache.size() > maximumEntries || cachedIconBytes > maximumIconBytes)) {
+            auto oldest = cache.begin();
+            for (auto entry = std::next(cache.begin()); entry != cache.end(); ++entry) {
+                if (entry->second.lastUsed < oldest->second.lastUsed) oldest = entry;
+            }
+            erase(oldest);
+        }
+    }
+
+    std::size_t maximumEntries = 0;
+    std::size_t maximumIconBytes = 0;
+    mutable std::mutex mutex;
+    std::unordered_map<CacheKey, CacheEntry, CacheKeyHash> cache;
+    std::size_t cachedIconBytes = 0;
+    std::uint64_t clock = 0;
+    std::uint64_t hits = 0;
+    std::uint64_t misses = 0;
+};
+
+WindowsShellItemCatalog::WindowsShellItemCatalog(
+    std::size_t maximumEntries,
+    std::size_t maximumIconBytes)
+    : impl_(std::make_unique<Impl>(maximumEntries, maximumIconBytes)) {
+}
+
+WindowsShellItemCatalog::~WindowsShellItemCatalog() = default;
+
+ShellIconSourceSize ResolveShellIconSourceSize(domain::CardItemSize itemSize) noexcept {
+    switch (itemSize) {
+    case domain::CardItemSize::Small:
+        return ShellIconSourceSize::Small;
+    case domain::CardItemSize::Medium:
+        return ShellIconSourceSize::Small;
+    case domain::CardItemSize::Large:
+        return ShellIconSourceSize::Medium;
+    case domain::CardItemSize::ExtraLarge:
+        return ShellIconSourceSize::Medium;
+    }
+    return ShellIconSourceSize::Large;
+}
+
+presentation::CardItemView WindowsShellItemCatalog::inspect(
+    const std::filesystem::path& sourcePath,
+    ShellIconSourceSize iconSize) const {
+    const auto normalized = sourcePath.lexically_normal();
+    const auto fingerprint = ReadFingerprint(normalized);
+    const Impl::CacheKey key{CachePathKey(normalized), iconSize};
+    {
+        std::lock_guard lock(impl_->mutex);
+        const auto cached = impl_->cache.find(key);
+        if (cached != impl_->cache.end() && cached->second.fingerprint == fingerprint) {
+            cached->second.lastUsed = ++impl_->clock;
+            ++impl_->hits;
+            return cached->second.item;
+        }
+        if (cached != impl_->cache.end()) impl_->erase(cached);
+        ++impl_->misses;
+    }
+
+    auto result = InspectShellItem(normalized, iconSize, fingerprint);
+    const auto iconBytes = result.icon.empty()
+        ? std::size_t{0}
+        : result.icon.premultipliedPixels->size() * sizeof(std::uint32_t);
+    if (impl_->maximumEntries == 0 || iconBytes > impl_->maximumIconBytes) return result;
+    {
+        std::lock_guard lock(impl_->mutex);
+        const auto existing = impl_->cache.find(key);
+        if (existing != impl_->cache.end()) impl_->erase(existing);
+        impl_->cachedIconBytes += iconBytes;
+        impl_->cache.emplace(key, Impl::CacheEntry{
+            fingerprint, result, iconBytes, ++impl_->clock});
+        impl_->trim();
+    }
+    return result;
+}
+
 std::vector<presentation::CardItemView> WindowsShellItemCatalog::enumerate(
     const std::filesystem::path& directory,
     std::span<const std::filesystem::path> preferredOrder,
@@ -285,6 +424,7 @@ std::vector<presentation::CardItemView> WindowsShellItemCatalog::enumerate(
     for (std::filesystem::directory_iterator iterator(directory, error), end;
          !error && iterator != end;
          iterator.increment(error)) {
+        if (IsHiddenFile(iterator->path())) continue;
         result.push_back(inspect(iterator->path(), iconSize));
     }
     const auto rank = [&](const presentation::CardItemView& item) {
@@ -328,6 +468,41 @@ std::vector<presentation::CardItemView> WindowsShellItemCatalog::refreshIcons(
     return result;
 }
 
+std::vector<presentation::CardItemView> WindowsShellItemCatalog::refreshDirectoryEntries(
+    const std::filesystem::path& directory,
+    std::span<const presentation::CardItemView> currentItems,
+    std::span<const std::filesystem::path> changedRelativePaths,
+    ShellIconSourceSize iconSize) const {
+    const auto normalizedDirectory = directory.lexically_normal();
+    std::vector<presentation::CardItemView> result(currentItems.begin(), currentItems.end());
+    for (const auto& relative : changedRelativePaths) {
+        if (relative.empty() || relative.is_absolute()
+            || std::ranges::any_of(relative, [](const auto& component) {
+                return component == L"..";
+            })) {
+            return enumerate(normalizedDirectory, {}, iconSize);
+        }
+        const auto target = (normalizedDirectory / relative).lexically_normal();
+        if (_wcsicmp(target.parent_path().c_str(), normalizedDirectory.c_str()) != 0) {
+            return enumerate(normalizedDirectory, {}, iconSize);
+        }
+        invalidate(target);
+        const auto targetKey = CachePathKey(target);
+        std::erase_if(result, [&](const auto& item) {
+            return CachePathKey(item.sourcePath) == targetKey;
+        });
+        std::error_code error;
+        if (std::filesystem::exists(target, error) && !error
+            && !IsHiddenFile(target)) {
+            result.push_back(inspect(target, iconSize));
+        }
+    }
+    std::ranges::stable_sort(result, [](const auto& left, const auto& right) {
+        return _wcsicmp(left.displayName.c_str(), right.displayName.c_str()) < 0;
+    });
+    return result;
+}
+
 presentation::CardItemView WindowsShellItemCatalog::retarget(
     presentation::CardItemView preparedItem,
     const std::filesystem::path& destinationPath) const {
@@ -349,6 +524,8 @@ void WindowsShellItemCatalog::notifyMoved(
     const std::filesystem::path& destinationPath) const noexcept {
     const auto source = sourcePath.lexically_normal();
     const auto destination = destinationPath.lexically_normal();
+    invalidate(source);
+    invalidate(destination);
     std::error_code error;
     const auto event = std::filesystem::is_directory(destination, error)
         ? SHCNE_RENAMEFOLDER
@@ -365,6 +542,39 @@ void WindowsShellItemCatalog::notifyMoved(
         && _wcsicmp(sourceDirectory.c_str(), destinationDirectory.c_str()) != 0) {
         SHChangeNotify(SHCNE_UPDATEDIR, flags, destinationDirectory.c_str(), nullptr);
     }
+}
+
+void WindowsShellItemCatalog::invalidate(
+    const std::filesystem::path& sourcePath) const noexcept {
+    try {
+        const auto path = CachePathKey(sourcePath);
+        std::lock_guard lock(impl_->mutex);
+        for (auto entry = impl_->cache.begin(); entry != impl_->cache.end();) {
+            if (entry->first.path == path) {
+                const auto current = entry++;
+                impl_->erase(current);
+            } else {
+                ++entry;
+            }
+        }
+    } catch (...) {
+    }
+}
+
+void WindowsShellItemCatalog::clearCache() const noexcept {
+    std::lock_guard lock(impl_->mutex);
+    impl_->cache.clear();
+    impl_->cachedIconBytes = 0;
+}
+
+ShellItemCacheStats WindowsShellItemCatalog::cacheStats() const noexcept {
+    std::lock_guard lock(impl_->mutex);
+    return {
+        .entries = impl_->cache.size(),
+        .iconBytes = impl_->cachedIconBytes,
+        .hits = impl_->hits,
+        .misses = impl_->misses,
+    };
 }
 
 bool WindowsShellItemCatalog::launch(const presentation::CardItemView& item) const noexcept {

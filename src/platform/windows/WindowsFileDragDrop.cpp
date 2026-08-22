@@ -21,6 +21,18 @@ FORMATETC FileDropFormat() noexcept {
     };
 }
 
+FORMATETC DestoInternalFileDropFormat() noexcept {
+    static const auto format = static_cast<CLIPFORMAT>(RegisterClipboardFormatW(
+        L"Desto.InternalFileDrop"));
+    return {
+        .cfFormat = format,
+        .ptd = nullptr,
+        .dwAspect = DVASPECT_CONTENT,
+        .lindex = -1,
+        .tymed = TYMED_HGLOBAL,
+    };
+}
+
 FORMATETC PreferredEffectFormat() noexcept {
     static const auto format = static_cast<CLIPFORMAT>(RegisterClipboardFormatW(
         L"Preferred DropEffect"));
@@ -75,14 +87,16 @@ bool SupportsFormat(IDataObject* data, const FORMATETC& format) noexcept {
 }
 
 std::vector<std::filesystem::path> ReadFileDrop(IDataObject* data) {
-    auto format = FileDropFormat();
+    auto format = SupportsFormat(data, FileDropFormat())
+        ? FileDropFormat() : DestoInternalFileDropFormat();
     STGMEDIUM medium{};
     if (data == nullptr || FAILED(data->GetData(&format, &medium))) {
         return {};
     }
     std::vector<std::filesystem::path> result;
-    const auto drop = static_cast<HDROP>(GlobalLock(medium.hGlobal));
-    if (drop != nullptr) {
+    if (format.cfFormat == FileDropFormat().cfFormat) {
+        const auto drop = static_cast<HDROP>(GlobalLock(medium.hGlobal));
+        if (drop != nullptr) {
         const auto count = DragQueryFileW(drop, 0xFFFFFFFFu, nullptr, 0);
         result.reserve(count);
         for (UINT index = 0; index < count; ++index) {
@@ -94,6 +108,22 @@ std::vector<std::filesystem::path> ReadFileDrop(IDataObject* data) {
             }
         }
         GlobalUnlock(medium.hGlobal);
+        }
+    } else {
+        const auto* value = static_cast<const wchar_t*>(GlobalLock(medium.hGlobal));
+        if (value != nullptr) {
+            const auto characterCount = GlobalSize(medium.hGlobal) / sizeof(wchar_t);
+            std::size_t offset = 0;
+            while (offset < characterCount && value[offset] != L'\0') {
+                const auto begin = offset;
+                while (offset < characterCount && value[offset] != L'\0') ++offset;
+                if (offset > begin) {
+                    result.emplace_back(std::wstring(value + begin, offset - begin));
+                }
+                ++offset;
+            }
+            GlobalUnlock(medium.hGlobal);
+        }
     }
     ReleaseStgMedium(&medium);
     return result;
@@ -143,6 +173,27 @@ HGLOBAL CreateFileDropMemory(const std::vector<std::filesystem::path>& paths) {
     header->fWide = TRUE;
     auto* destination = reinterpret_cast<wchar_t*>(bytes + sizeof(DROPFILES));
     for (const auto& value : values) {
+        std::memcpy(destination, value.c_str(), (value.size() + 1) * sizeof(wchar_t));
+        destination += value.size() + 1;
+    }
+    *destination = L'\0';
+    GlobalUnlock(memory);
+    return memory;
+}
+
+HGLOBAL CreateInternalFileDropMemory(const std::vector<std::filesystem::path>& paths) {
+    std::size_t characterCount = 1;
+    for (const auto& path : paths) characterCount += path.wstring().size() + 1;
+    const auto memory = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT,
+        characterCount * sizeof(wchar_t));
+    if (memory == nullptr) return nullptr;
+    auto* destination = static_cast<wchar_t*>(GlobalLock(memory));
+    if (destination == nullptr) {
+        GlobalFree(memory);
+        return nullptr;
+    }
+    for (const auto& path : paths) {
+        const auto value = path.wstring();
         std::memcpy(destination, value.c_str(), (value.size() + 1) * sizeof(wchar_t));
         destination += value.size() + 1;
     }
@@ -209,8 +260,11 @@ class FileDataObject final : public IDataObject {
 public:
     FileDataObject(
         std::vector<std::filesystem::path> paths,
-        std::optional<std::string> sourceCardId)
-        : paths_(std::move(paths)), sourceCardId_(std::move(sourceCardId)) {
+        std::optional<std::string> sourceCardId,
+        bool allowMove,
+        bool exposeToShell)
+        : paths_(std::move(paths)), sourceCardId_(std::move(sourceCardId)),
+          allowMove_(allowMove), exposeToShell_(exposeToShell) {
     }
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void** result) override {
@@ -247,12 +301,16 @@ public:
             const auto sourceFormat = DestoSourceCardFormat();
             const auto completedFormat = DestoDropCompletedFormat();
             HGLOBAL memory = nullptr;
-            if (format->cfFormat == fileFormat.cfFormat
+            if (exposeToShell_ && format->cfFormat == fileFormat.cfFormat
                 && (format->tymed & TYMED_HGLOBAL) != 0) {
                 memory = CreateFileDropMemory(paths_);
+            } else if (!exposeToShell_
+                       && format->cfFormat == DestoInternalFileDropFormat().cfFormat
+                       && (format->tymed & TYMED_HGLOBAL) != 0) {
+                memory = CreateInternalFileDropMemory(paths_);
             } else if (format->cfFormat == effectFormat.cfFormat
                        && (format->tymed & TYMED_HGLOBAL) != 0) {
-                memory = CreateEffectMemory(DROPEFFECT_MOVE);
+                memory = CreateEffectMemory(allowMove_ ? DROPEFFECT_MOVE : DROPEFFECT_COPY);
             } else if (performedDropEffect_.has_value()
                        && format->cfFormat == performedFormat.cfFormat
                        && (format->tymed & TYMED_HGLOBAL) != 0) {
@@ -294,7 +352,9 @@ public:
         return (format->dwAspect == DVASPECT_CONTENT
                 && format->lindex == -1
                 && (format->tymed & TYMED_HGLOBAL) != 0
-                && (format->cfFormat == fileFormat.cfFormat
+                && ((exposeToShell_ && format->cfFormat == fileFormat.cfFormat)
+                    || (!exposeToShell_
+                        && format->cfFormat == DestoInternalFileDropFormat().cfFormat)
                     || format->cfFormat == effectFormat.cfFormat
                     || (performedDropEffect_.has_value()
                         && format->cfFormat == performedFormat.cfFormat)
@@ -337,7 +397,7 @@ public:
             return E_NOTIMPL;
         }
         std::vector<FORMATETC> formats{
-            FileDropFormat(),
+            exposeToShell_ ? FileDropFormat() : DestoInternalFileDropFormat(),
             PreferredEffectFormat(),
         };
         if (sourceCardId_.has_value()) formats.push_back(DestoSourceCardFormat());
@@ -358,6 +418,8 @@ private:
     std::atomic<ULONG> references_{1};
     std::vector<std::filesystem::path> paths_;
     std::optional<std::string> sourceCardId_;
+    bool allowMove_ = true;
+    bool exposeToShell_ = true;
     std::optional<DWORD> performedDropEffect_;
     bool dropCompleted_ = false;
 };
@@ -427,13 +489,14 @@ public:
 
     HRESULT STDMETHODCALLTYPE DragEnter(
         IDataObject* data,
-        DWORD,
+        DWORD keyState,
         POINTL point,
         DWORD* effect) override {
         try {
-            acceptsFiles_ = SupportsFormat(data, FileDropFormat());
+            acceptsFiles_ = SupportsFormat(data, FileDropFormat())
+                || SupportsFormat(data, DestoInternalFileDropFormat());
             sourceCardId_ = ReadSourceCardId(data);
-            return Update(point, effect);
+            return Update(keyState, point, effect);
         } catch (...) {
             acceptsFiles_ = false;
             sourceCardId_.reset();
@@ -441,9 +504,12 @@ public:
             return E_UNEXPECTED;
         }
     }
-    HRESULT STDMETHODCALLTYPE DragOver(DWORD, POINTL point, DWORD* effect) override {
+    HRESULT STDMETHODCALLTYPE DragOver(
+        DWORD keyState,
+        POINTL point,
+        DWORD* effect) override {
         try {
-            return Update(point, effect);
+            return Update(keyState, point, effect);
         } catch (...) {
             if (effect != nullptr) *effect = DROPEFFECT_NONE;
             return E_UNEXPECTED;
@@ -463,7 +529,7 @@ public:
     }
     HRESULT STDMETHODCALLTYPE Drop(
         IDataObject* data,
-        DWORD,
+        DWORD keyState,
         POINTL point,
         DWORD* effect) override {
         if (effect == nullptr) {
@@ -477,7 +543,8 @@ public:
             sourceCardId_.reset();
             const auto internalSource = sourceCardId.has_value();
             *effect = !paths.empty() && callbacks_.drop
-                ? callbacks_.drop(std::move(paths), std::move(sourceCardId), point, allowed)
+                ? callbacks_.drop(
+                    std::move(paths), std::move(sourceCardId), point, allowed, keyState)
                 : DROPEFFECT_NONE;
             if (*effect != DROPEFFECT_NONE) {
                 (void)SetEffectData(data, PerformedEffectFormat(), *effect);
@@ -494,13 +561,13 @@ public:
     }
 
 private:
-    HRESULT Update(POINTL point, DWORD* effect) {
+    HRESULT Update(DWORD keyState, POINTL point, DWORD* effect) {
         if (effect == nullptr) {
             return E_POINTER;
         }
         const auto allowed = *effect;
         *effect = acceptsFiles_ && callbacks_.dragOver
-            ? callbacks_.dragOver(point, allowed, sourceCardId_)
+            ? callbacks_.dragOver(point, allowed, keyState, sourceCardId_)
             : DROPEFFECT_NONE;
         return S_OK;
     }
@@ -519,12 +586,15 @@ IDropTarget* CreateFileDropTarget(FileDropTargetCallbacks callbacks) {
 
 IDataObject* CreateFileDataObject(
     const std::vector<std::filesystem::path>& paths,
-    std::optional<std::string> sourceCardId) {
+    std::optional<std::string> sourceCardId,
+    bool allowMove,
+    bool exposeToShell) {
     if (paths.empty()) {
         return nullptr;
     }
     try {
-        return new (std::nothrow) FileDataObject(paths, std::move(sourceCardId));
+        return new (std::nothrow) FileDataObject(
+            paths, std::move(sourceCardId), allowMove, exposeToShell);
     } catch (...) {
         return nullptr;
     }
@@ -532,11 +602,14 @@ IDataObject* CreateFileDataObject(
 
 FileDragResult BeginFileDrag(
     const std::vector<std::filesystem::path>& paths,
-    std::optional<std::string> sourceCardId) {
+    std::optional<std::string> sourceCardId,
+    bool allowMove,
+    bool exposeToShell) {
     if (paths.empty()) {
         return {.status = E_INVALIDARG};
     }
-    auto* data = CreateFileDataObject(paths, std::move(sourceCardId));
+    auto* data = CreateFileDataObject(
+        paths, std::move(sourceCardId), allowMove, exposeToShell);
     auto* source = new (std::nothrow) FileDropSource();
     if (data == nullptr || source == nullptr) {
         if (data != nullptr) data->Release();
@@ -544,7 +617,9 @@ FileDragResult BeginFileDrag(
         return {.status = E_OUTOFMEMORY};
     }
     DWORD effect = DROPEFFECT_NONE;
-    const auto status = DoDragDrop(data, source, DROPEFFECT_MOVE | DROPEFFECT_COPY, &effect);
+    const auto allowedEffects = allowMove
+        ? (DROPEFFECT_MOVE | DROPEFFECT_COPY) : DROPEFFECT_COPY;
+    const auto status = DoDragDrop(data, source, allowedEffects, &effect);
     const auto completedInsideDesto = WasFileDropHandledByDesto(data);
     data->Release();
     source->Release();

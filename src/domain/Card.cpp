@@ -3,8 +3,11 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
+#include <ctime>
 #include <cwctype>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <unordered_set>
@@ -61,9 +64,18 @@ void ValidateContent(const CardContentPreferences& content) {
     default:
         throw std::invalid_argument("Card size mode is invalid.");
     }
+    if (content.widthSpan < MinimumCardWidthSpan(content.itemSize)
+        || content.widthSpan > 64) {
+        throw std::invalid_argument(
+            "Card width span is outside the range supported by its item size.");
+    }
     if (content.fixedColumns == 0 || content.fixedColumns > 64
         || content.fixedRows == 0 || content.fixedRows > 64) {
         throw std::invalid_argument("Card fixed grid dimensions must be between 1 and 64.");
+    }
+    if (content.maximumVisibleRows.has_value()
+        && (*content.maximumVisibleRows == 0 || *content.maximumVisibleRows > 64)) {
+        throw std::invalid_argument("Card maximum visible rows must be between 1 and 64.");
     }
 }
 
@@ -104,6 +116,28 @@ void NormalizeAndValidatePlacements(std::vector<ApplicationItemPlacement>& place
     }
 }
 
+void NormalizeAndValidateMappingPlacements(
+    std::vector<ApplicationItemPlacement>& placements) {
+    std::unordered_set<std::wstring> unique;
+    std::unordered_set<std::uint64_t> occupied;
+    for (auto& placement : placements) {
+        auto& path = placement.fileName;
+        path = path.lexically_normal();
+        const auto slot = (static_cast<std::uint64_t>(placement.row) << 32)
+            | placement.column;
+        auto key = path.wstring();
+        std::ranges::transform(key, key.begin(), [](wchar_t character) {
+            return static_cast<wchar_t>(std::towlower(character));
+        });
+        if (path.empty() || !path.is_absolute()
+            || !unique.insert(std::move(key)).second
+            || !occupied.insert(slot).second) {
+            throw std::invalid_argument(
+                "Mapping card placements must contain unique absolute paths and slots.");
+        }
+    }
+}
+
 } // namespace
 
 bool IsValidTodoDate(TodoDate date) noexcept {
@@ -118,15 +152,35 @@ bool IsValidTodoDate(TodoDate date) noexcept {
 }
 
 TodoDate CurrentSystemTodoDate() noexcept {
-    const auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-    std::tm local{};
+    return CurrentTodoDate();
+}
+
+TodoDate CurrentTodoDate(std::optional<std::int32_t> offsetMinutes) noexcept {
+    const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    return TodoDateAtUnixMilliseconds(now, offsetMinutes);
+}
+
+TodoDate TodoDateAtUnixMilliseconds(
+    std::int64_t unixMilliseconds,
+    std::optional<std::int32_t> offsetMinutes) noexcept {
+    auto seconds = static_cast<std::time_t>(unixMilliseconds / 1000);
+    std::tm value{};
 #if defined(_WIN32)
-    localtime_s(&local, &now);
+    const auto failed = offsetMinutes.has_value()
+        ? (seconds += static_cast<std::time_t>(*offsetMinutes) * 60,
+            gmtime_s(&value, &seconds) != 0)
+        : localtime_s(&value, &seconds) != 0;
 #else
-    local = *std::localtime(&now);
+    const auto* converted = offsetMinutes.has_value()
+        ? (seconds += static_cast<std::time_t>(*offsetMinutes) * 60, std::gmtime(&seconds))
+        : std::localtime(&seconds);
+    const auto failed = converted == nullptr;
+    if (!failed) value = *converted;
 #endif
-    return {local.tm_year + 1900, static_cast<std::uint8_t>(local.tm_mon + 1),
-        static_cast<std::uint8_t>(local.tm_mday)};
+    if (failed) return {1970, 1, 1};
+    return {value.tm_year + 1900, static_cast<std::uint8_t>(value.tm_mon + 1),
+        static_cast<std::uint8_t>(value.tm_mday)};
 }
 
 TodoDate AddTodoDays(TodoDate date, std::int32_t days) noexcept {
@@ -148,11 +202,28 @@ std::string ToString(TodoDate date) {
     return result.str();
 }
 
+bool IsTodoItemArchived(
+    const TodoItem& item,
+    TodoDate currentDate,
+    std::optional<std::int32_t> offsetMinutes) noexcept {
+    if (item.archived) return true;
+    if (!item.completed || item.completedAtUnixMilliseconds <= 0) return false;
+    return TodoDateAtUnixMilliseconds(item.completedAtUnixMilliseconds, offsetMinutes)
+        != currentDate;
+}
+
 Card::Card(CardId id, CardType type)
     : id_(std::move(id)), type_(type) {
     if (id_.empty()) {
         throw std::invalid_argument("Card id must not be empty.");
     }
+}
+
+void Card::setName(std::string name) {
+    if (name.empty() || name.size() > 192) {
+        throw std::invalid_argument("Card name must contain 1-192 UTF-8 bytes.");
+    }
+    name_ = std::move(name);
 }
 
 void Card::setChrome(CardChromePreferences preferences) {
@@ -214,9 +285,10 @@ void ApplicationCard::validateContentPreferences(
     const CardContentPreferences& preferences) const {
     ValidateContent(preferences);
     if (preferences.sizeMode != CardSizeMode::Fixed) return;
+    const auto columns = ProjectCardColumns(preferences.widthSpan, preferences.itemSize);
     const auto outside = std::ranges::any_of(
         itemPlacements_, [&](const ApplicationItemPlacement& placement) {
-            return placement.column >= preferences.fixedColumns
+            return placement.column >= columns
                 || placement.row >= preferences.fixedRows;
         });
     if (outside) {
@@ -229,19 +301,14 @@ MappingCard::MappingCard(CardId id)
     : Card(std::move(id), CardType::Mapping) {
 }
 
-MappingMode MappingCard::mode() const noexcept {
-    if (!sourceRoot_.empty()) {
-        return MappingMode::Folder;
-    }
-    return references_.empty() ? MappingMode::Empty : MappingMode::References;
-}
-
 void MappingCard::setFolderSource(std::filesystem::path sourceRoot) {
     if (sourceRoot.empty() || !sourceRoot.is_absolute()) {
         throw std::invalid_argument("Mapping folder source must be an absolute path.");
     }
     references_.clear();
+    itemPlacements_.clear();
     sourceRoot_ = sourceRoot.lexically_normal();
+    mode_ = MappingMode::Folder;
 }
 
 void MappingCard::setReferences(std::vector<FileReference> references) {
@@ -266,12 +333,44 @@ void MappingCard::setReferences(std::vector<FileReference> references) {
         references[index].path = references[index].path.lexically_normal();
     }
     sourceRoot_.clear();
+    itemPlacements_.clear();
     references_ = std::move(references);
+    mode_ = MappingMode::References;
+}
+
+void MappingCard::setSortMode(ApplicationItemSortMode mode) {
+    setLayout(mode, itemPlacements_);
+}
+
+void MappingCard::setItemPlacements(
+    std::vector<ApplicationItemPlacement> placements) {
+    setLayout(sortMode_, std::move(placements));
+}
+
+void MappingCard::setLayout(
+    ApplicationItemSortMode mode,
+    std::vector<ApplicationItemPlacement> placements) {
+    ValidateSortMode(mode);
+    NormalizeAndValidateMappingPlacements(placements);
+    sortMode_ = mode;
+    itemPlacements_ = std::move(placements);
+}
+
+void MappingCard::setMode(MappingMode mode) {
+    if (mode == MappingMode::Empty) {
+        throw std::invalid_argument("Mapping source mode must be Folder or References.");
+    }
+    if (mode_ == mode) return;
+    sourceRoot_.clear();
+    references_.clear();
+    itemPlacements_.clear();
+    mode_ = mode;
 }
 
 void MappingCard::clearSource() noexcept {
     sourceRoot_.clear();
     references_.clear();
+    itemPlacements_.clear();
 }
 
 TodoCard::TodoCard(CardId id)
@@ -285,6 +384,8 @@ void TodoCard::setItems(std::vector<TodoItem> items) {
             != std::string::npos;
         if (item.id.empty() || !hasVisibleTitle || item.title.size() > 512
             || item.createdAtUnixMilliseconds < 0
+            || item.completedAtUnixMilliseconds < 0
+            || (!item.completed && item.completedAtUnixMilliseconds != 0)
             || (item.scheduledDate.has_value() && !IsValidTodoDate(*item.scheduledDate))
             || !ids.insert(item.id).second) {
             throw std::invalid_argument(
@@ -318,6 +419,64 @@ std::string_view ToString(CardItemSize size) noexcept {
         return "extraLarge";
     }
     return "medium";
+}
+
+std::uint32_t MinimumCardWidthSpan(CardItemSize size) noexcept {
+    return size == CardItemSize::Small || size == CardItemSize::Medium ? 3u : 2u;
+}
+
+std::size_t ProjectCardColumns(
+    std::uint32_t widthSpan,
+    CardItemSize size) noexcept {
+    const auto span = std::max(widthSpan, MinimumCardWidthSpan(size));
+    double scale = 1.0;
+    switch (size) {
+    case CardItemSize::Small:
+        scale = 1.5;
+        break;
+    case CardItemSize::Medium:
+        scale = 1.25;
+        break;
+    case CardItemSize::Large:
+        break;
+    case CardItemSize::ExtraLarge:
+        scale = 0.75;
+        break;
+    }
+    return static_cast<std::size_t>(
+        std::floor(static_cast<double>(span) * scale + 0.5));
+}
+
+std::uint32_t InferCardWidthSpan(
+    std::size_t columns,
+    CardItemSize size) noexcept {
+    constexpr std::uint32_t maximumWidthSpan = 64;
+    const auto minimumWidthSpan = MinimumCardWidthSpan(size);
+    if (columns == 0) return minimumWidthSpan;
+
+    auto bestSpan = minimumWidthSpan;
+    auto bestDistance = std::numeric_limits<std::size_t>::max();
+    for (auto span = minimumWidthSpan; span <= maximumWidthSpan; ++span) {
+        const auto projected = ProjectCardColumns(span, size);
+        const auto distance = projected > columns
+            ? projected - columns : columns - projected;
+        if (distance < bestDistance) {
+            bestSpan = span;
+            bestDistance = distance;
+        }
+        if (distance == 0) break;
+    }
+    return bestSpan;
+}
+
+std::uint32_t FitCardWidthSpan(
+    std::size_t minimumColumns,
+    CardItemSize size) noexcept {
+    constexpr std::uint32_t maximumWidthSpan = 64;
+    for (auto span = MinimumCardWidthSpan(size); span < maximumWidthSpan; ++span) {
+        if (ProjectCardColumns(span, size) >= minimumColumns) return span;
+    }
+    return maximumWidthSpan;
 }
 
 std::string_view ToString(CardSizeMode mode) noexcept {

@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Windows ${{ matrix.configuration }}
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Configure
+        run: >-
+          cmake -S . -B build
+          -DDESTO_BUILD_PROTOTYPES=OFF
+          -DDESTO_BUILD_BENCHMARKS=ON
+
+      - name: Build
+        run: >-
+          cmake --build build
+          --config ${{ matrix.configuration }}
+          --parallel 4
+          -- /nodeReuse:false
+
+      - name: Test
+        run: >-
+          ctest --test-dir build
+          -C ${{ matrix.configuration }}
+          --output-on-failure
+
+      - name: Upload test logs on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: test-logs-${{ matrix.configuration }}
+          path: build/Testing/Temporary/
+          if-no-files-found: ignore
+          retention-days: 7

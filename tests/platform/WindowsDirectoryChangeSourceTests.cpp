@@ -3,6 +3,7 @@
 
 #include <Windows.h>
 
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <filesystem>
@@ -18,13 +19,15 @@ void RunTests() {
         / ("DestoDirectoryWatch-" + std::to_string(GetCurrentProcessId()));
     std::filesystem::remove_all(root);
     std::filesystem::create_directories(root);
+    const auto replacementRoot = root / "replacement";
+    std::filesystem::create_directories(replacementRoot);
 
     std::mutex mutex;
     std::condition_variable changedCondition;
-    std::vector<std::vector<desto::domain::CardId>> batches;
+    std::vector<std::vector<DirectoryMappingChange>> batches;
     WindowsDirectoryChangeSource source(
         {{"mapping-1", root}},
-        [&](std::vector<desto::domain::CardId> changed) {
+        [&](std::vector<DirectoryMappingChange> changed) {
             std::lock_guard lock(mutex);
             batches.push_back(std::move(changed));
             changedCondition.notify_all();
@@ -39,7 +42,30 @@ void RunTests() {
             lock,
             std::chrono::seconds(3),
             [&] { return !batches.empty(); }));
-        DESTO_CHECK(batches.front() == std::vector<desto::domain::CardId>{"mapping-1"});
+        DESTO_CHECK(batches.front().size() == 1);
+        DESTO_CHECK(batches.front().front().cardId == "mapping-1");
+        DESTO_CHECK(!batches.front().front().requiresFullRefresh);
+        DESTO_CHECK(!batches.front().front().relativePaths.empty());
+    }
+    {
+        std::lock_guard lock(mutex);
+        batches.clear();
+    }
+    source.replaceWatches({{"mapping-2", replacementRoot}});
+    DESTO_CHECK(source.running());
+    std::ofstream(replacementRoot / "Replacement.txt") << "replacement";
+    {
+        std::unique_lock lock(mutex);
+        DESTO_CHECK(changedCondition.wait_for(
+            lock,
+            std::chrono::seconds(3),
+            [&] { return !batches.empty(); }));
+        DESTO_CHECK(batches.front().size() == 1);
+        DESTO_CHECK(batches.front().front().cardId == "mapping-2");
+        DESTO_CHECK(!batches.front().front().requiresFullRefresh);
+        DESTO_CHECK(std::ranges::any_of(
+            batches.front().front().relativePaths,
+            [](const auto& path) { return path == "Replacement.txt"; }));
     }
     source.stop();
     DESTO_CHECK(!source.running());
@@ -48,7 +74,7 @@ void RunTests() {
     try {
         WindowsDirectoryChangeSource missing(
             {{"missing", root / "missing"}},
-            [](std::vector<desto::domain::CardId>) {});
+            [](std::vector<DirectoryMappingChange>) {});
         missing.start();
     } catch (const std::runtime_error&) {
         missingRejected = true;

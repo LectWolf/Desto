@@ -23,9 +23,14 @@ CMakeUserPresets.json
 *.pdb
 *.ilk
 *.obj
+\.desto-build-number
 *.exe
 *.dll
 *.lib
 *.exp
 TestResults/
 artifacts/
+Testing/
+build-verify/
+dist/
+dist-release/

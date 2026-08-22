@@ -6,10 +6,13 @@
 #include <array>
 #include <cstddef>
 #include <condition_variable>
+#include <cwchar>
 #include <exception>
 #include <mutex>
+#include <string>
 #include <stdexcept>
 #include <thread>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace desto::platform::windows {
@@ -22,6 +25,21 @@ constexpr DWORD ChangeFilter = FILE_NOTIFY_CHANGE_FILE_NAME
     | FILE_NOTIFY_CHANGE_LAST_WRITE
     | FILE_NOTIFY_CHANGE_CREATION;
 constexpr DWORD CoalesceMilliseconds = 60;
+constexpr std::size_t MaximumIncrementalPathsPerCard = 512;
+
+void ValidateWatches(std::vector<DirectoryMappingWatch>& watches) {
+    std::unordered_set<domain::CardId> cardIds;
+    for (auto& watch : watches) {
+        if (watch.cardId.empty() || watch.sourceRoot.empty()
+            || !watch.sourceRoot.is_absolute()) {
+            throw std::invalid_argument("Directory watches require a Card id and absolute path.");
+        }
+        watch.sourceRoot = watch.sourceRoot.lexically_normal();
+        if (!cardIds.insert(watch.cardId).second) {
+            throw std::invalid_argument("A Mapping Card may have only one directory watch.");
+        }
+    }
+}
 
 } // namespace
 
@@ -109,12 +127,72 @@ struct WindowsDirectoryChangeSource::Impl {
         }
     }
 
-    void deliver(std::unordered_set<domain::CardId>& changed) noexcept {
+    using PendingChanges = std::unordered_map<domain::CardId, DirectoryMappingChange>;
+
+    static void appendPath(
+        DirectoryMappingChange& change,
+        std::filesystem::path relativePath) {
+        if (change.requiresFullRefresh || relativePath.empty()) return;
+        relativePath = relativePath.lexically_normal();
+        if (relativePath.is_absolute() || relativePath.native().starts_with(L"..")) {
+            change.requiresFullRefresh = true;
+            change.relativePaths.clear();
+            return;
+        }
+        const auto duplicate = std::ranges::any_of(
+            change.relativePaths, [&](const auto& existing) {
+                return _wcsicmp(existing.c_str(), relativePath.c_str()) == 0;
+            });
+        if (!duplicate) change.relativePaths.push_back(std::move(relativePath));
+        if (change.relativePaths.size() > MaximumIncrementalPathsPerCard) {
+            change.requiresFullRefresh = true;
+            change.relativePaths.clear();
+        }
+    }
+
+    static void appendNotificationPaths(
+        DirectoryMappingChange& change,
+        const WatchState& state,
+        DWORD bytes) {
+        if (bytes == 0 || bytes > state.buffer.size()) {
+            change.requiresFullRefresh = true;
+            change.relativePaths.clear();
+            return;
+        }
+        DWORD offset = 0;
+        while (offset < bytes) {
+            const auto* notification = reinterpret_cast<const FILE_NOTIFY_INFORMATION*>(
+                state.buffer.data() + offset);
+            if (notification->FileNameLength > 0
+                && notification->FileNameLength % sizeof(wchar_t) == 0) {
+                appendPath(change, std::filesystem::path(std::wstring(
+                    notification->FileName,
+                    notification->FileNameLength / sizeof(wchar_t))));
+            }
+            if (notification->NextEntryOffset == 0) break;
+            if (notification->NextEntryOffset > bytes - offset) {
+                change.requiresFullRefresh = true;
+                change.relativePaths.clear();
+                break;
+            }
+            offset += notification->NextEntryOffset;
+        }
+    }
+
+    void deliver(PendingChanges& changed) noexcept {
         if (changed.empty()) {
             return;
         }
-        std::vector<domain::CardId> batch(changed.begin(), changed.end());
-        std::ranges::sort(batch);
+        std::vector<DirectoryMappingChange> batch;
+        batch.reserve(changed.size());
+        for (auto& [cardId, change] : changed) {
+            (void)cardId;
+            std::ranges::sort(change.relativePaths, [](const auto& left, const auto& right) {
+                return _wcsicmp(left.c_str(), right.c_str()) < 0;
+            });
+            batch.push_back(std::move(change));
+        }
+        std::ranges::sort(batch, {}, &DirectoryMappingChange::cardId);
         changed.clear();
         try {
             callback(std::move(batch));
@@ -126,8 +204,9 @@ struct WindowsDirectoryChangeSource::Impl {
     bool processCompletion(
         BOOL succeeded,
         DWORD error,
+        DWORD bytes,
         ULONG_PTR key,
-        std::unordered_set<domain::CardId>& changed) noexcept {
+        PendingChanges& changed) noexcept {
         if (key == StopCompletionKey) {
             return false;
         }
@@ -135,7 +214,16 @@ struct WindowsDirectoryChangeSource::Impl {
         if (state == nullptr) {
             return true;
         }
-        changed.insert(state->watch.cardId);
+        auto [entry, inserted] = changed.try_emplace(
+            state->watch.cardId,
+            DirectoryMappingChange{.cardId = state->watch.cardId});
+        (void)inserted;
+        if (succeeded) {
+            appendNotificationPaths(entry->second, *state, bytes);
+        } else {
+            entry->second.requiresFullRefresh = true;
+            entry->second.relativePaths.clear();
+        }
         state->active = false;
         if (succeeded || error == ERROR_NOTIFY_ENUM_DIR) {
             (void)issueRead(*state);
@@ -161,9 +249,9 @@ struct WindowsDirectoryChangeSource::Impl {
                 const auto succeeded = GetQueuedCompletionStatus(
                     completionPort, &bytes, &key, &overlapped, INFINITE);
                 const auto error = succeeded ? ERROR_SUCCESS : GetLastError();
-                std::unordered_set<domain::CardId> changed;
+                PendingChanges changed;
                 continueRunning = processCompletion(
-                    succeeded, error, key, changed);
+                    succeeded, error, bytes, key, changed);
                 while (continueRunning && !changed.empty()) {
                     bytes = 0;
                     key = 0;
@@ -179,7 +267,7 @@ struct WindowsDirectoryChangeSource::Impl {
                         break;
                     }
                     continueRunning = processCompletion(
-                        more, moreError, key, changed);
+                        more, moreError, bytes, key, changed);
                 }
                 if (continueRunning) {
                     deliver(changed);
@@ -205,17 +293,7 @@ WindowsDirectoryChangeSource::WindowsDirectoryChangeSource(
     if (!impl_->callback) {
         throw std::invalid_argument("Directory change callback must not be empty.");
     }
-    std::unordered_set<domain::CardId> cardIds;
-    for (auto& watch : impl_->configuredWatches) {
-        if (watch.cardId.empty() || watch.sourceRoot.empty()
-            || !watch.sourceRoot.is_absolute()) {
-            throw std::invalid_argument("Directory watches require a Card id and absolute path.");
-        }
-        watch.sourceRoot = watch.sourceRoot.lexically_normal();
-        if (!cardIds.insert(watch.cardId).second) {
-            throw std::invalid_argument("A Mapping Card may have only one directory watch.");
-        }
-    }
+    ValidateWatches(impl_->configuredWatches);
 }
 
 WindowsDirectoryChangeSource::~WindowsDirectoryChangeSource() {
@@ -255,6 +333,15 @@ void WindowsDirectoryChangeSource::stop() noexcept {
     if (worker.joinable()) {
         worker.join();
     }
+}
+
+void WindowsDirectoryChangeSource::replaceWatches(
+    std::vector<DirectoryMappingWatch> watches) {
+    ValidateWatches(watches);
+    const auto restart = impl_->thread.joinable();
+    if (restart) stop();
+    impl_->configuredWatches = std::move(watches);
+    if (restart) start();
 }
 
 bool WindowsDirectoryChangeSource::running() const noexcept {

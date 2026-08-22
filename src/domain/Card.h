@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -27,6 +28,11 @@ enum class MappingMode {
     Empty,
     Folder,
     References,
+};
+
+enum class MappingPresentationMode {
+    Grid,
+    List,
 };
 
 enum class CardItemSize {
@@ -68,13 +74,16 @@ struct CardChromePreferences {
     bool showCollapseControl = true;
     bool showCloseControl = false;
     bool showPinControl = false;
+    bool showPresentationControl = true;
+    bool pinOnTop = false;
     bool showTitle = true;
+    bool positionLocked = false;
 
     bool operator==(const CardChromePreferences&) const = default;
 };
 
 struct CardAppearancePreferences {
-    std::string preset = "default";
+    std::string preset = "system";
     double opacity = 1.0;
     double cornerRadius = 16.0;
 
@@ -85,8 +94,10 @@ struct CardContentPreferences {
     CardItemSize itemSize = CardItemSize::Large;
     bool showItemNames = false;
     CardSizeMode sizeMode = CardSizeMode::Adaptive;
+    std::uint32_t widthSpan = 4;
     std::uint32_t fixedColumns = 4;
     std::uint32_t fixedRows = 3;
+    std::optional<std::uint32_t> maximumVisibleRows;
 
     bool operator==(const CardContentPreferences&) const = default;
 };
@@ -112,6 +123,11 @@ struct TodoDate {
 
 [[nodiscard]] bool IsValidTodoDate(TodoDate date) noexcept;
 [[nodiscard]] TodoDate CurrentSystemTodoDate() noexcept;
+[[nodiscard]] TodoDate CurrentTodoDate(
+    std::optional<std::int32_t> offsetMinutes = std::nullopt) noexcept;
+[[nodiscard]] TodoDate TodoDateAtUnixMilliseconds(
+    std::int64_t unixMilliseconds,
+    std::optional<std::int32_t> offsetMinutes = std::nullopt) noexcept;
 [[nodiscard]] TodoDate AddTodoDays(TodoDate date, std::int32_t days) noexcept;
 [[nodiscard]] std::int32_t CompareTodoDates(TodoDate left, TodoDate right) noexcept;
 [[nodiscard]] std::string ToString(TodoDate date);
@@ -121,11 +137,17 @@ struct TodoItem {
     std::string title;
     bool completed = false;
     std::int64_t createdAtUnixMilliseconds = 0;
+    std::int64_t completedAtUnixMilliseconds = 0;
     std::optional<TodoDate> scheduledDate;
     bool archived = false;
 
     bool operator==(const TodoItem&) const = default;
 };
+
+[[nodiscard]] bool IsTodoItemArchived(
+    const TodoItem& item,
+    TodoDate currentDate,
+    std::optional<std::int32_t> offsetMinutes = std::nullopt) noexcept;
 
 struct TodoCardPreferences {
     bool showCreatedTime = false;
@@ -136,6 +158,7 @@ struct TodoCardPreferences {
 // Persistence-neutral value representation used at the storage seam.
 struct CardSnapshot {
     CardId id;
+    std::string name;
     CardType type = CardType::Todo;
     bool visible = true;
     bool expanded = true;
@@ -145,9 +168,14 @@ struct CardSnapshot {
     std::filesystem::path applicationStoragePath;
     ApplicationItemSortMode applicationSortMode = ApplicationItemSortMode::Custom;
     std::vector<ApplicationItemPlacement> applicationItemPlacements;
+    MappingPresentationMode applicationPresentationMode = MappingPresentationMode::Grid;
     std::filesystem::path mappingSourceRoot;
     std::vector<FileReference> mappingReferences;
     bool mappingAllowsSourceMutation = true;
+    MappingMode mappingMode = MappingMode::References;
+    MappingPresentationMode mappingPresentationMode = MappingPresentationMode::Grid;
+    ApplicationItemSortMode mappingSortMode = ApplicationItemSortMode::Custom;
+    std::vector<ApplicationItemPlacement> mappingItemPlacements;
     TodoCardPreferences todoPreferences;
     std::vector<TodoItem> todoItems;
 };
@@ -157,6 +185,7 @@ public:
     virtual ~Card() = default;
 
     [[nodiscard]] const CardId& id() const noexcept { return id_; }
+    [[nodiscard]] const std::string& name() const noexcept { return name_; }
     [[nodiscard]] CardType type() const noexcept { return type_; }
     [[nodiscard]] bool isVisible() const noexcept { return visible_; }
     [[nodiscard]] bool isExpanded() const noexcept { return expanded_; }
@@ -168,6 +197,7 @@ public:
     [[nodiscard]] virtual CardDeletionEffect deletionEffect() const noexcept = 0;
 
     void setVisible(bool visible) noexcept { visible_ = visible; }
+    void setName(std::string name);
     void setExpanded(bool expanded) noexcept { expanded_ = expanded; }
     void setChrome(CardChromePreferences preferences);
     void setAppearance(CardAppearancePreferences preferences);
@@ -178,6 +208,7 @@ protected:
 
 private:
     CardId id_;
+    std::string name_;
     CardType type_;
     bool visible_ = true;
     bool expanded_ = true;
@@ -198,6 +229,9 @@ public:
     [[nodiscard]] const std::vector<ApplicationItemPlacement>& itemPlacements() const noexcept {
         return itemPlacements_;
     }
+    [[nodiscard]] MappingPresentationMode presentationMode() const noexcept {
+        return presentationMode_;
+    }
     void setRelativeStoragePath(std::filesystem::path relativeStoragePath);
     void setSortMode(ApplicationItemSortMode sortMode);
     void setItemPlacements(std::vector<ApplicationItemPlacement> placements);
@@ -205,11 +239,15 @@ public:
         ApplicationItemSortMode sortMode,
         std::vector<ApplicationItemPlacement> placements);
     void validateContentPreferences(const CardContentPreferences& preferences) const;
+    void setPresentationMode(MappingPresentationMode mode) noexcept {
+        presentationMode_ = mode;
+    }
 
 private:
     std::filesystem::path relativeStoragePath_;
     ApplicationItemSortMode sortMode_ = ApplicationItemSortMode::Custom;
     std::vector<ApplicationItemPlacement> itemPlacements_;
+    MappingPresentationMode presentationMode_ = MappingPresentationMode::Grid;
 };
 
 class MappingCard final : public Card {
@@ -219,13 +257,29 @@ public:
     [[nodiscard]] CardDeletionEffect deletionEffect() const noexcept override {
         return CardDeletionEffect::RemoveCardOnly;
     }
-    [[nodiscard]] MappingMode mode() const noexcept;
+    [[nodiscard]] MappingMode mode() const noexcept { return mode_; }
+    [[nodiscard]] MappingPresentationMode presentationMode() const noexcept {
+        return presentationMode_;
+    }
+    [[nodiscard]] ApplicationItemSortMode sortMode() const noexcept { return sortMode_; }
+    [[nodiscard]] const std::vector<ApplicationItemPlacement>& itemPlacements() const noexcept {
+        return itemPlacements_;
+    }
     [[nodiscard]] bool presentsAsFolderMapping() const noexcept { return mode() != MappingMode::References; }
     [[nodiscard]] const std::filesystem::path& sourceRoot() const noexcept { return sourceRoot_; }
     [[nodiscard]] bool allowsSourceMutation() const noexcept { return allowsSourceMutation_; }
     [[nodiscard]] const std::vector<FileReference>& references() const noexcept { return references_; }
     void setFolderSource(std::filesystem::path sourceRoot);
     void setReferences(std::vector<FileReference> references);
+    void setMode(MappingMode mode);
+    void setPresentationMode(MappingPresentationMode mode) noexcept {
+        presentationMode_ = mode;
+    }
+    void setSortMode(ApplicationItemSortMode mode);
+    void setItemPlacements(std::vector<ApplicationItemPlacement> placements);
+    void setLayout(
+        ApplicationItemSortMode mode,
+        std::vector<ApplicationItemPlacement> placements);
     void clearSource() noexcept;
     void setAllowsSourceMutation(bool allowed) noexcept { allowsSourceMutation_ = allowed; }
 
@@ -233,6 +287,10 @@ private:
     std::filesystem::path sourceRoot_;
     std::vector<FileReference> references_;
     bool allowsSourceMutation_ = true;
+    MappingMode mode_ = MappingMode::References;
+    MappingPresentationMode presentationMode_ = MappingPresentationMode::Grid;
+    ApplicationItemSortMode sortMode_ = ApplicationItemSortMode::Custom;
+    std::vector<ApplicationItemPlacement> itemPlacements_;
 };
 
 class TodoCard final : public Card {
@@ -254,6 +312,16 @@ private:
 
 [[nodiscard]] std::string_view ToString(CardType type) noexcept;
 [[nodiscard]] std::string_view ToString(CardItemSize size) noexcept;
+[[nodiscard]] std::uint32_t MinimumCardWidthSpan(CardItemSize size) noexcept;
+[[nodiscard]] std::size_t ProjectCardColumns(
+    std::uint32_t widthSpan,
+    CardItemSize size) noexcept;
+[[nodiscard]] std::uint32_t InferCardWidthSpan(
+    std::size_t columns,
+    CardItemSize size) noexcept;
+[[nodiscard]] std::uint32_t FitCardWidthSpan(
+    std::size_t minimumColumns,
+    CardItemSize size) noexcept;
 [[nodiscard]] std::string_view ToString(CardSizeMode mode) noexcept;
 [[nodiscard]] std::string_view ToString(ApplicationItemSortMode mode) noexcept;
 

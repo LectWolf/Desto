@@ -54,6 +54,19 @@ if(WIN32)
 
     add_test(NAME desto_windows_single_instance_tests COMMAND desto_windows_single_instance_tests)
 
+    add_executable(desto_windows_startup_integration_tests
+        platform/WindowsStartupIntegrationTests.cpp
+    )
+
+    target_include_directories(desto_windows_startup_integration_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+    target_link_libraries(desto_windows_startup_integration_tests
+        PRIVATE
+            desto_platform_windows
+    )
+
+    add_test(NAME desto_windows_startup_integration_tests COMMAND desto_windows_startup_integration_tests)
+
     add_executable(desto_windows_desktop_host_tests
         platform/WindowsDesktopHostTests.cpp
     )
@@ -67,6 +80,19 @@ if(WIN32)
 
     add_test(NAME desto_windows_desktop_host_tests COMMAND desto_windows_desktop_host_tests)
 
+    add_executable(desto_windows_desktop_trigger_tests
+        platform/WindowsDesktopTriggerTests.cpp
+    )
+
+    target_include_directories(desto_windows_desktop_trigger_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+    target_link_libraries(desto_windows_desktop_trigger_tests
+        PRIVATE
+            desto_platform_windows
+    )
+
+    add_test(NAME desto_windows_desktop_trigger_tests COMMAND desto_windows_desktop_trigger_tests)
+
     add_executable(desto_windows_settings_host_tests
         platform/WindowsSettingsHostTests.cpp
     )
@@ -79,6 +105,32 @@ if(WIN32)
     )
 
     add_test(NAME desto_windows_settings_host_tests COMMAND desto_windows_settings_host_tests)
+
+    add_executable(desto_windows_text_input_tests
+        platform/WindowsTextInputTests.cpp
+    )
+
+    target_include_directories(desto_windows_text_input_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+    target_link_libraries(desto_windows_text_input_tests
+        PRIVATE
+            desto_platform_windows
+    )
+
+    add_test(NAME desto_windows_text_input_tests COMMAND desto_windows_text_input_tests)
+
+    add_executable(desto_windows_icon_font_tests
+        platform/WindowsIconFontTests.cpp
+    )
+
+    target_include_directories(desto_windows_icon_font_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+    target_link_libraries(desto_windows_icon_font_tests
+        PRIVATE
+            desto_platform_windows
+    )
+
+    add_test(NAME desto_windows_icon_font_tests COMMAND desto_windows_icon_font_tests)
 
     add_executable(desto_windows_file_drag_drop_tests
         platform/WindowsFileDragDropTests.cpp
@@ -118,9 +170,24 @@ if(WIN32)
     )
 
     add_test(NAME desto_windows_directory_change_source_tests COMMAND desto_windows_directory_change_source_tests)
+
+    add_executable(desto_fault_injection_tests
+        stability/FaultInjectionTests.cpp
+    )
+
+    target_include_directories(desto_fault_injection_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+    target_link_libraries(desto_fault_injection_tests
+        PRIVATE
+            desto_platform_windows
+            desto_storage
+    )
+
+    add_test(NAME desto_fault_injection_tests COMMAND desto_fault_injection_tests)
 endif()
 
 add_test(NAME desto_display_topology_tests COMMAND desto_display_topology_tests)
+
 
 add_executable(desto_application_runtime_tests
     application/ApplicationRuntimeTests.cpp
@@ -239,3 +306,16 @@ target_link_libraries(desto_placement_interaction_tests
 )
 
 add_test(NAME desto_placement_interaction_tests COMMAND desto_placement_interaction_tests)
+
+add_executable(desto_ui_tests
+    ui/DialogTests.cpp
+)
+
+target_include_directories(desto_ui_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+target_link_libraries(desto_ui_tests
+    PRIVATE
+        desto_ui
+)
+
+add_test(NAME desto_ui_tests COMMAND desto_ui_tests)

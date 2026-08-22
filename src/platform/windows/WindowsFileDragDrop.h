@@ -15,12 +15,14 @@ struct FileDropTargetCallbacks {
     std::function<DWORD(
         POINTL,
         DWORD,
+        DWORD,
         const std::optional<std::string>&)> dragOver;
     std::function<void()> dragLeave;
     std::function<DWORD(
         std::vector<std::filesystem::path>,
         std::optional<std::string>,
         POINTL,
+        DWORD,
         DWORD)> drop;
 };
 
@@ -33,10 +35,14 @@ struct FileDragResult {
 [[nodiscard]] IDropTarget* CreateFileDropTarget(FileDropTargetCallbacks callbacks);
 [[nodiscard]] IDataObject* CreateFileDataObject(
     const std::vector<std::filesystem::path>& paths,
-    std::optional<std::string> sourceCardId = std::nullopt);
+    std::optional<std::string> sourceCardId = std::nullopt,
+    bool allowMove = true,
+    bool exposeToShell = true);
 [[nodiscard]] FileDragResult BeginFileDrag(
     const std::vector<std::filesystem::path>& paths,
-    std::optional<std::string> sourceCardId = std::nullopt);
+    std::optional<std::string> sourceCardId = std::nullopt,
+    bool allowMove = true,
+    bool exposeToShell = true);
 [[nodiscard]] bool WasFileDropHandledByDesto(IDataObject* data) noexcept;
 [[nodiscard]] std::optional<DWORD> PerformedFileDropEffect(IDataObject* data) noexcept;
 

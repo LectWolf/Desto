@@ -1,0 +1,119 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version without the v prefix
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-release:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve and validate version
+        id: version
+        shell: pwsh
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          $cmakeText = Get-Content -Raw CMakeLists.txt
+          $projectVersion = [regex]::Match(
+            $cmakeText, 'project\(Desto VERSION ([0-9]+\.[0-9]+\.[0-9]+)').Groups[1].Value
+          $requested = if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $env:GITHUB_REF_NAME.TrimStart('v')
+          } else {
+            $env:INPUT_VERSION
+          }
+          if ($requested -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$' -or
+              $requested -ne $projectVersion) {
+            throw "Requested version $requested does not match project version $projectVersion."
+          }
+          "value=$requested" >> $env:GITHUB_OUTPUT
+          "tag=v$requested" >> $env:GITHUB_OUTPUT
+
+      - name: Require an owner-selected project license
+        shell: pwsh
+        run: |
+          if (-not (Test-Path -LiteralPath LICENSE -PathType Leaf)) {
+            throw 'Select and commit the Desto host project license before creating a public release.'
+          }
+
+      - name: Configure
+        run: >-
+          cmake -S . -B build
+          -DDESTO_BUILD_PROTOTYPES=OFF
+          -DDESTO_BUILD_BENCHMARKS=ON
+
+      - name: Build Release
+        run: >-
+          cmake --build build
+          --config Release
+          --parallel 4
+          -- /nodeReuse:false
+
+      - name: Test Release
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Install pinned Inno Setup compiler
+        run: choco install innosetup --version=6.7.3 --yes --no-progress
+
+      - name: Build release assets
+        shell: pwsh
+        run: >-
+          ./release/BuildRelease.ps1
+          -Version '${{ steps.version.outputs.value }}'
+          -BuildDirectory build
+          -OutputDirectory dist
+          -RequireClean
+
+      - name: Verify release assets
+        shell: pwsh
+        run: >-
+          ./release/VerifyRelease.ps1
+          -ReleaseDirectory dist
+          -ExpectedVersion '${{ steps.version.outputs.value }}'
+
+      - name: Upload immutable workflow artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Desto-${{ steps.version.outputs.value }}-win-x64
+          path: |
+            dist/Desto-${{ steps.version.outputs.value }}.*-win-x64-setup.exe
+            dist/release-manifest.json
+            dist/BUILDINFO.json
+            dist/SHA256SUMS.txt
+            dist/THIRD-PARTY-NOTICES.md
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create or update draft GitHub release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          draft: true
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/Desto-${{ steps.version.outputs.value }}.*-win-x64-setup.exe
+            dist/release-manifest.json
+            dist/BUILDINFO.json
+            dist/SHA256SUMS.txt
+            dist/THIRD-PARTY-NOTICES.md

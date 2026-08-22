@@ -20,6 +20,25 @@ void RunTests() {
     const auto preservedWhenNarrow = ReconcileApplicationItemPlacements(
         wideCustom, std::vector<std::filesystem::path>{"One.lnk"}, 3);
     DESTO_CHECK(preservedWhenNarrow.placements == wideCustom);
+    const auto reflowedWhenDensityChanges = ReflowApplicationItemPlacementsForGrid(
+        wideCustom, std::vector<std::filesystem::path>{"One.lnk"}, 3);
+    DESTO_CHECK(reflowedWhenDensityChanges.fits);
+    DESTO_CHECK(reflowedWhenDensityChanges.placements.size() == 1);
+    DESTO_CHECK(reflowedWhenDensityChanges.placements.front().column == 0);
+    DESTO_CHECK(reflowedWhenDensityChanges.placements.front().row == 0);
+
+    const std::vector<ApplicationItemPlacement> oldDensityGrid{
+        {"One.lnk", 0, 0}, {"Two.lnk", 1, 0}, {"Three.lnk", 2, 0},
+        {"Four.lnk", 3, 0}, {"Five.lnk", 4, 0},
+    };
+    const std::vector<std::filesystem::path> fiveItems{
+        "One.lnk", "Two.lnk", "Three.lnk", "Four.lnk", "Five.lnk"};
+    const auto compactDensityGrid = ReflowApplicationItemPlacementsForGrid(
+        oldDensityGrid, fiveItems, 3);
+    DESTO_CHECK(compactDensityGrid.fits);
+    DESTO_CHECK(std::ranges::all_of(compactDensityGrid.placements,
+        [](const auto& placement) { return placement.column < 3; }));
+    DESTO_CHECK(compactDensityGrid.placements.size() == fiveItems.size());
 
     const std::vector<std::filesystem::path> withNew{"One.lnk", "Two.lnk", "Three.lnk"};
     const auto appended = ReconcileApplicationItemPlacements(sparse, withNew, 5);
@@ -52,6 +71,21 @@ void RunTests() {
     DESTO_CHECK(inserted->column == 0 && inserted->row == 0);
     DESTO_CHECK(displaced->column == 1 && displaced->row == 0);
 
+    const std::vector<std::filesystem::path> mappedPaths{
+        "C:/First/Same.txt", "D:/Second/Same.txt"};
+    const auto mapped = ReconcileApplicationItemPlacements({}, mappedPaths, 4);
+    DESTO_CHECK(mapped.fits);
+    DESTO_CHECK(mapped.placements.size() == 2);
+    const auto mappedMoved = MoveApplicationItemsToSlot(
+        mapped.placements,
+        std::vector<std::filesystem::path>{mappedPaths[1]},
+        3, 0, 4);
+    DESTO_CHECK(mappedMoved.fits);
+    const auto secondMapped = std::ranges::find(
+        mappedMoved.placements, mappedPaths[1], &ApplicationItemPlacement::fileName);
+    DESTO_CHECK(secondMapped != mappedMoved.placements.end());
+    DESTO_CHECK(secondMapped->column == 3 && secondMapped->row == 0);
+
     const auto full = ReconcileApplicationItemPlacements(
         {}, withNew, 2, 1);
     DESTO_CHECK(!full.fits);
@@ -81,6 +115,20 @@ void RunTests() {
         5);
     DESTO_CHECK(customAgain[1].column == 2 && customAgain[1].row == 0);
     DESTO_CHECK(customAgain[2].column == 4 && customAgain[2].row == 1);
+
+    const auto customList = ProjectApplicationItems(
+        metadata,
+        std::vector<ApplicationItemPlacement>{{"Large.txt", 2, 0}, {"App.lnk", 4, 0}, {"Small.txt", 1, 2}},
+        ApplicationItemSortMode::Custom,
+        1);
+    DESTO_CHECK(customList.size() == 3);
+    DESTO_CHECK(customList[0].fileName == "Large.txt");
+    DESTO_CHECK(customList[1].fileName == "App.lnk");
+    DESTO_CHECK(customList[2].fileName == "Small.txt");
+    for (std::size_t index = 0; index < customList.size(); ++index) {
+        DESTO_CHECK(customList[index].column == 0);
+        DESTO_CHECK(customList[index].row == index);
+    }
 
     const std::vector<ApplicationItemSortData> sixItems{
         {"6", L"6"}, {"5", L"5"}, {"4", L"4"},

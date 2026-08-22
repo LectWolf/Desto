@@ -19,10 +19,19 @@ struct PlacementInteractionResult {
     std::optional<double> verticalGuide;
     std::optional<double> horizontalGuide;
     domain::PlacementHorizontalAnchor horizontalAnchor =
-        domain::PlacementHorizontalAnchor::Free;
+        domain::PlacementHorizontalAnchor::Left;
     domain::PlacementVerticalAnchor verticalAnchor =
         domain::PlacementVerticalAnchor::Free;
 };
+
+// Drop-driven content growth is directional rather than a general resize:
+// only a right-aligned Card preserves its right edge, and height always grows
+// downward from the existing top edge.
+[[nodiscard]] domain::PlacementRect ResolveAdaptiveDropExpansionRect(
+    domain::PlacementRect current,
+    double expandedWidth,
+    double expandedHeight,
+    domain::PlacementHorizontalAnchor horizontalAnchor) noexcept;
 
 [[nodiscard]] PlacementInteractionResult ResolvePlacementInteractionDetailed(
     domain::PlacementRect proposed,

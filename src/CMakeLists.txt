@@ -1,5 +1,6 @@
 add_subdirectory(domain)
 add_subdirectory(application)
 add_subdirectory(presentation)
+add_subdirectory(ui)
 add_subdirectory(platform)
 add_subdirectory(storage)

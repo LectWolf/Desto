@@ -14,9 +14,15 @@ struct DirectoryMappingWatch {
     std::filesystem::path sourceRoot;
 };
 
+struct DirectoryMappingChange {
+    domain::CardId cardId;
+    std::vector<std::filesystem::path> relativePaths;
+    bool requiresFullRefresh = false;
+};
+
 class WindowsDirectoryChangeSource final {
 public:
-    using Callback = std::function<void(std::vector<domain::CardId>)>;
+    using Callback = std::function<void(std::vector<DirectoryMappingChange>)>;
 
     explicit WindowsDirectoryChangeSource(
         std::vector<DirectoryMappingWatch> watches,
@@ -28,6 +34,7 @@ public:
 
     void start();
     void stop() noexcept;
+    void replaceWatches(std::vector<DirectoryMappingWatch> watches);
     [[nodiscard]] bool running() const noexcept;
 
 private:

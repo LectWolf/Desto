@@ -3,7 +3,9 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "Card.h"
@@ -53,20 +55,31 @@ struct CardView {
     bool showCollapseControl = true;
     bool showCloseControl = false;
     bool showPinControl = false;
-    std::string appearancePreset = "default";
+    bool showPresentationControl = true;
+    bool pinOnTop = false;
+    bool positionLocked = false;
+    std::string appearancePreset = "system";
     double opacity = 1.0;
     double cornerRadius = 16.0;
     domain::CardContentPreferences content;
     domain::ApplicationItemSortMode applicationSortMode =
         domain::ApplicationItemSortMode::Custom;
     std::vector<domain::ApplicationItemPlacement> applicationItemPlacements;
-    domain::MappingMode mappingMode = domain::MappingMode::Empty;
+    domain::MappingMode mappingMode = domain::MappingMode::References;
+    domain::MappingPresentationMode mappingPresentationMode =
+        domain::MappingPresentationMode::Grid;
+    domain::ApplicationItemSortMode mappingSortMode =
+        domain::ApplicationItemSortMode::Custom;
+    bool mappingHasSource = false;
     bool mappingAllowsSourceMutation = true;
+    bool mappingCanNavigateUp = false;
     domain::TodoCardPreferences todoPreferences;
     std::vector<domain::TodoItem> todoItems;
     std::vector<CardItemView> items;
 };
 
-[[nodiscard]] CardView MakeCardView(const domain::Card& card);
+[[nodiscard]] CardView MakeCardView(
+    const domain::Card& card,
+    std::string_view resolvedLanguage = "zh-CN");
 
 } // namespace desto::presentation
