@@ -71,8 +71,8 @@ jobs:
       - name: Test Release
         run: ctest --test-dir build -C Release --output-on-failure
 
-      - name: Install pinned Inno Setup compiler
-        run: choco install innosetup --version=6.7.3 --yes --no-progress
+      - name: Install Inno Setup compiler
+        run: choco install innosetup --yes --no-progress
 
       - name: Build release assets
         shell: pwsh
