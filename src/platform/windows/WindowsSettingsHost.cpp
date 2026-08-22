@@ -2,6 +2,7 @@
 #include "WindowsDesktopHost.h"
 #include "WindowsIconFont.h"
 #include "WindowsTextInput.h"
+#include "WindowsConfirmationDialog.h"
 #include "CardContentLayout.h"
 
 #include <Windows.h>
@@ -2492,10 +2493,9 @@ struct WindowsSettingsHost::Impl {
                             : L"/https://api.github.com/repos/LectWolf/Desto/releases/latest");
                 }
                 if (!metadata) {
-                    MessageBoxW(window,
+                    (void)ShowWindowsAlert(window, tr(L"检查更新失败", L"Update check failed"),
                         tr(L"暂时无法连接更新服务器，请稍后重试。",
-                            L"Unable to reach the update servers. Please try again later.").c_str(),
-                        L"Desto", MB_OK | MB_ICONWARNING);
+                            L"Unable to reach the update servers. Please try again later."));
                     return;
                 }
                 auto tag = JsonStringField(*metadata, "tag_name");
@@ -2503,16 +2503,17 @@ struct WindowsSettingsHost::Impl {
                 if (!tag.empty() && tag.front() == L'v') tag.erase(tag.begin());
                 const auto current = CurrentDestoVersion(developmentChannel);
                 if (tag.empty() || CompareDestoVersions(tag, current) <= 0) {
-                    MessageBoxW(window,
-                        tr(L"当前已是最新版本。", L"You are already up to date.").c_str(),
-                        L"Desto", MB_OK | MB_ICONINFORMATION);
+                    (void)ShowWindowsAlert(window, tr(L"检查更新", L"Check for updates"),
+                        tr(L"当前已是最新版本。", L"You are already up to date."));
                     return;
                 }
                 const auto prompt = tr(
                     (L"发现新版本 " + tag + L"，是否打开下载页面？").c_str(),
                     (L"Version " + tag + L" is available. Open the download page?").c_str());
-                if (MessageBoxW(window, prompt.c_str(), L"Desto",
-                        MB_YESNO | MB_ICONINFORMATION) == IDYES) {
+                if (ShowWindowsConfirmation(window,
+                        tr(L"发现新版本", L"Update available"), prompt,
+                        tr(L"打开下载", L"Open download"),
+                        tr(L"取消", L"Cancel"))) {
                     const auto url = download.empty()
                         ? L"https://github.com/LectWolf/Desto/releases/latest"
                         : download;
@@ -2521,10 +2522,10 @@ struct WindowsSettingsHost::Impl {
                     } else {
                         const auto installer = DownloadInstaller(url);
                         if (!installer) {
-                            MessageBoxW(window,
+                            (void)ShowWindowsAlert(window,
+                                tr(L"下载失败", L"Download failed"),
                                 tr(L"下载安装包失败，请稍后重试。",
-                                    L"The installer could not be downloaded. Please try again later.").c_str(),
-                                L"Desto", MB_OK | MB_ICONWARNING);
+                                    L"The installer could not be downloaded. Please try again later."));
                             return;
                         }
                         ShellExecuteW(window, L"open", installer->c_str(), nullptr, nullptr,
