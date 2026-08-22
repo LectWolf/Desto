@@ -90,17 +90,22 @@ jobs:
           RELEASE_DEVELOPMENT: ${{ steps.version.outputs.development }}
           RELEASE_BUILD_NUMBER: ${{ steps.version.outputs.buildNumber }}
         run: |
-          $arguments = @(
-            '-Version', $env:RELEASE_BASE_VERSION,
-            '-BuildDirectory', 'build',
-            '-OutputDirectory', 'dist',
-            '-BuildNumber', $env:RELEASE_BUILD_NUMBER,
-            '-RequireClean'
-          )
           if ($env:RELEASE_DEVELOPMENT -eq 'true') {
-            $arguments += '-Development'
+            & ./release/BuildRelease.ps1 `
+              -Version $env:RELEASE_BASE_VERSION `
+              -BuildDirectory 'build' `
+              -OutputDirectory 'dist' `
+              -BuildNumber ([int]$env:RELEASE_BUILD_NUMBER) `
+              -Development `
+              -RequireClean
+          } else {
+            & ./release/BuildRelease.ps1 `
+              -Version $env:RELEASE_BASE_VERSION `
+              -BuildDirectory 'build' `
+              -OutputDirectory 'dist' `
+              -BuildNumber ([int]$env:RELEASE_BUILD_NUMBER) `
+              -RequireClean
           }
-          & ./release/BuildRelease.ps1 @arguments
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Verify release assets

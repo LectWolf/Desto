@@ -124,7 +124,7 @@ int CompareDestoVersions(std::wstring left, std::wstring right) noexcept {
 
 std::optional<std::string> DownloadUpdateMetadata(const wchar_t* host,
     const wchar_t* path) {
-    HINTERNET session = WinHttpOpen(L"Desto/0.1 update-check",
+    HINTERNET session = WinHttpOpen(L"Desto/0.2 update-check",
         WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
         WINHTTP_NO_PROXY_BYPASS, 0);
     if (!session) return std::nullopt;
@@ -132,10 +132,22 @@ std::optional<std::string> DownloadUpdateMetadata(const wchar_t* host,
     if (!connection) { WinHttpCloseHandle(session); return std::nullopt; }
     HINTERNET request = WinHttpOpenRequest(connection, L"GET", path, nullptr,
         WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
-    if (!request || !WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+    constexpr wchar_t kHeaders[] = L"Accept: application/vnd.github+json\r\n"
+        L"User-Agent: Desto-update-check\r\n";
+    if (!request || !WinHttpSendRequest(request, kHeaders, static_cast<DWORD>(-1L),
             WINHTTP_NO_REQUEST_DATA, 0, 0, 0) || !WinHttpReceiveResponse(request, nullptr)) {
         if (request) WinHttpCloseHandle(request);
         WinHttpCloseHandle(connection); WinHttpCloseHandle(session); return std::nullopt;
+    }
+    DWORD status = 0;
+    DWORD statusSize = sizeof(status);
+    if (!WinHttpQueryHeaders(request,
+            WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+            WINHTTP_HEADER_NAME_BY_INDEX, &status, &statusSize, WINHTTP_NO_HEADER_INDEX)
+        || status < 200 || status >= 300) {
+        WinHttpCloseHandle(request); WinHttpCloseHandle(connection);
+        WinHttpCloseHandle(session);
+        return std::nullopt;
     }
     std::string body;
     DWORD available = 0;
@@ -150,6 +162,16 @@ std::optional<std::string> DownloadUpdateMetadata(const wchar_t* host,
 
 std::wstring JsonStringField(const std::string& json, const char* field) {
     const std::regex pattern(std::string("\\\"") + field + "\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"");
+    std::smatch match;
+    if (!std::regex_search(json, match, pattern) || match.size() < 2) return {};
+    const auto text = match[1].str();
+    return std::wstring(text.begin(), text.end());
+}
+
+std::wstring JsonInstallerUrl(const std::string& json) {
+    const std::regex pattern(
+        R"(\"browser_download_url\"\s*:\s*\"([^\"]*setup\.exe)\")",
+        std::regex_constants::icase);
     std::smatch match;
     if (!std::regex_search(json, match, pattern) || match.size() < 2) return {};
     const auto text = match[1].str();
@@ -2499,7 +2521,7 @@ struct WindowsSettingsHost::Impl {
                     return;
                 }
                 auto tag = JsonStringField(*metadata, "tag_name");
-                auto download = JsonStringField(*metadata, "browser_download_url");
+                auto download = JsonInstallerUrl(*metadata);
                 if (!tag.empty() && tag.front() == L'v') tag.erase(tag.begin());
                 const auto current = CurrentDestoVersion(developmentChannel);
                 if (tag.empty() || CompareDestoVersions(tag, current) <= 0) {
