@@ -1352,7 +1352,7 @@ struct WindowsSettingsHost::Impl {
     }
     RECT updateChannelRect() const noexcept {
         const auto center = (kContentLeft + clientRight() - 26) / 2;
-        return Rect(center - 115, 286, center + 115, 318);
+        return Rect(center - 115, 384, center + 115, 418);
     }
     RECT radiusOptionRect(std::size_t index) const noexcept {
         const auto left = kContentLeft + 18;
