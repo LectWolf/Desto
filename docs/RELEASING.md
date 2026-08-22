@@ -1,6 +1,6 @@
 # Release Process
 
-Desto releases are built on `windows-2022` from an exact Git commit. CI builds and tests both Debug and Release. A release tag must be `v<major>.<minor>.<patch>` and exactly match the version in `CMakeLists.txt`.
+Desto releases are built on `windows-2022` from an exact Git commit. CI builds and tests both Debug and Release. Stable release tags use `v<major>.<minor>.<patch>`; development builds use a fourth build component (`v<major>.<minor>.<patch>.<build>`).
 
 ## Artifacts
 
@@ -20,7 +20,8 @@ The following are intentionally not guessed or embedded in the repository:
 
 - a project license for the Desto host, selected by the owner before making the repository public;
 - a Windows Authenticode code-signing certificate and its protected CI secret;
-- final release notes and manual release-candidate approval.
+- final release notes and manual release-candidate approval;
+- GPL-3.0-or-later is declared in the repository root `LICENSE`.
 
 ## Local Verification
 

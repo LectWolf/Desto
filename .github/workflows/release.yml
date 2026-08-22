@@ -108,7 +108,7 @@ jobs:
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           target_commitish: ${{ github.sha }}
-          draft: true
+          draft: false
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |

@@ -671,6 +671,15 @@ Json MigrateDocument(Json document) {
             version = 27;
             continue;
         }
+        if (version == 27) {
+            if (!document.contains("settings") || !document["settings"].is_object()) {
+                document["settings"] = Json::object();
+            }
+            document["settings"]["updateChannel"] = "stable";
+            document["schemaVersion"] = 28;
+            version = 28;
+            continue;
+        }
         throw std::runtime_error("Configuration schema migration is unavailable.");
     }
     return document;
@@ -876,6 +885,12 @@ ApplicationConfig ParseDocument(const Json& document) {
             settings.value("showIconBackgroundFrame", false);
         result.preferences.confirmFileDeletion =
             settings.value("confirmFileDeletion", true);
+        result.preferences.updateChannel =
+            settings.value("updateChannel", std::string{"stable"});
+        if (result.preferences.updateChannel != "stable"
+            && result.preferences.updateChannel != "development") {
+            throw std::runtime_error("Configuration update channel is invalid.");
+        }
         if (settings.contains("cardOrder")) {
             const auto& order = settings.at("cardOrder");
             if (!order.is_array()) {
@@ -1296,6 +1311,10 @@ void JsonConfigStore::save(const ApplicationConfig& config) const {
         && config.preferences.taskbarDoubleClickAction != "current-display") {
         throw std::invalid_argument("Configuration taskbar double-click action is invalid.");
     }
+    if (config.preferences.updateChannel != "stable"
+        && config.preferences.updateChannel != "development") {
+        throw std::invalid_argument("Configuration update channel is invalid.");
+    }
     std::unordered_set<domain::CardId> cardIds;
     for (const auto& card : config.cards) {
         if (card.id.empty() || !cardIds.insert(card.id).second) {
@@ -1388,6 +1407,7 @@ void JsonConfigStore::save(const ApplicationConfig& config) const {
         {"pinnedCardsYieldToFullscreen", config.preferences.pinnedCardsYieldToFullscreen},
         {"showIconBackgroundFrame", config.preferences.showIconBackgroundFrame},
         {"confirmFileDeletion", config.preferences.confirmFileDeletion},
+        {"updateChannel", config.preferences.updateChannel},
         {"cardOrder", config.preferences.cardOrder},
     };
 

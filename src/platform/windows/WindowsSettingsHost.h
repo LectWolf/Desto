@@ -47,6 +47,7 @@ struct WindowsSystemSettings {
     bool pinnedCardsYieldToFullscreen = true;
     bool showIconBackgroundFrame = false;
     bool confirmFileDeletion = true;
+    std::string updateChannel = "stable";
 };
 
 class WindowsSettingsHost final {
@@ -96,6 +97,7 @@ public:
     using PinnedCardsYieldToFullscreenChangedCallback = std::function<bool(bool)>;
     using IconBackgroundFrameChangedCallback = std::function<bool(bool)>;
     using FileDeletionConfirmationChangedCallback = std::function<bool(bool)>;
+    using UpdateChannelChangedCallback = std::function<bool(const std::string&)>;
 
     explicit WindowsSettingsHost(std::wstring title = L"Desto");
     ~WindowsSettingsHost();
@@ -148,6 +150,7 @@ public:
     void setIconBackgroundFrameChangedCallback(IconBackgroundFrameChangedCallback callback);
     void setFileDeletionConfirmationChangedCallback(
         FileDeletionConfirmationChangedCallback callback);
+    void setUpdateChannelChangedCallback(UpdateChannelChangedCallback callback);
 
 private:
     struct Impl;

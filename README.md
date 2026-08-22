@@ -20,10 +20,18 @@ Desto 是一个面向 Windows 的轻量桌面整理工具，目前处于架构�
 - [稳定性验证](docs/STABILITY.md)
 - [发布流程](docs/RELEASING.md)
 - [0.1.0 发布说明](docs/RELEASE_NOTES_0.1.0.md)
+- [0.2.0 发布说明](docs/RELEASE_NOTES_0.2.0.md)
 - [RC 验收清单](docs/RC_CHECKLIST.md)
 - [交付路线](docs/ROADMAP.md)
 - [配置模型](docs/CONFIGURATION.md)
 - [架构决策记录](docs/adr/README.md)
+
+## License
+
+Desto is licensed under [GPL-3.0-or-later](LICENSE). Redistributions and
+modified versions must preserve attribution and provide corresponding source
+under the same license. Third-party components remain under their own licenses;
+see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 ## Status
 

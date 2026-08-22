@@ -23,11 +23,12 @@ struct ApplicationPreferences {
     bool pinnedCardsYieldToFullscreen = true;
     bool showIconBackgroundFrame = false;
     bool confirmFileDeletion = true;
+    std::string updateChannel = "stable";
     std::vector<domain::CardId> cardOrder;
 };
 
 struct ApplicationConfig {
-    static constexpr int CurrentSchemaVersion = 27;
+    static constexpr int CurrentSchemaVersion = 28;
 
     int schemaVersion = CurrentSchemaVersion;
     std::filesystem::path storageRoot;

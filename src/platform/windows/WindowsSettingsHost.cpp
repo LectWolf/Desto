@@ -94,10 +94,15 @@ FileCardSettingsLayout ResolveFileCardSettingsLayout(bool mappingCard) noexcept 
 
 namespace {
 
-std::wstring CurrentDestoVersion() {
+std::wstring CurrentDestoVersion(bool development) {
     wchar_t value[64]{};
-    swprintf_s(value, L"%d.%d.%d.%d", DESTO_VERSION_MAJOR,
-        DESTO_VERSION_MINOR, DESTO_VERSION_PATCH, DESTO_VERSION_BUILD);
+    if (development) {
+        swprintf_s(value, L"%d.%d.%d.%d", DESTO_VERSION_MAJOR,
+            DESTO_VERSION_MINOR, DESTO_VERSION_PATCH, DESTO_VERSION_BUILD);
+    } else {
+        swprintf_s(value, L"%d.%d.%d", DESTO_VERSION_MAJOR,
+            DESTO_VERSION_MINOR, DESTO_VERSION_PATCH);
+    }
     return value;
 }
 
@@ -274,6 +279,7 @@ enum class SettingsActionKind {
     TogglePinnedCardsYieldToFullscreen,
     ToggleIconBackgroundFrame,
     ToggleFileDeletionConfirmation,
+    ToggleUpdateChannel,
     OpenProject,
     CheckForUpdates,
     PreviousArchiveDate,
@@ -1344,6 +1350,10 @@ struct WindowsSettingsHost::Impl {
         const auto center = (kContentLeft + clientRight() - 26) / 2;
         return Rect(center - 115, 342, center + 115, 376);
     }
+    RECT updateChannelRect() const noexcept {
+        const auto center = (kContentLeft + clientRight() - 26) / 2;
+        return Rect(center - 115, 286, center + 115, 318);
+    }
     RECT radiusOptionRect(std::size_t index) const noexcept {
         const auto left = kContentLeft + 18;
         const auto right = clientRight() - 44;
@@ -1886,6 +1896,7 @@ struct WindowsSettingsHost::Impl {
         if (page == SettingsPage::About) {
             if (Contains(openProjectRect(), x, y)) return {SettingsActionKind::OpenProject};
             if (Contains(checkForUpdatesRect(), x, y)) return {SettingsActionKind::CheckForUpdates};
+            if (Contains(updateChannelRect(), x, y)) return {SettingsActionKind::ToggleUpdateChannel};
         }
         if (page == SettingsPage::Cards) {
             if (Contains(addCardRect(), x, y)) return {SettingsActionKind::AddCard};
@@ -2469,11 +2480,16 @@ struct WindowsSettingsHost::Impl {
             }
             if (action.kind == SettingsActionKind::CheckForUpdates) {
                 std::optional<std::string> metadata;
+                const bool developmentChannel = updateChannel == "development";
                 metadata = DownloadUpdateMetadata(L"api.github.com",
-                    L"/repos/LectWolf/Desto/releases/latest");
+                    developmentChannel
+                        ? L"/repos/LectWolf/Desto/releases?per_page=1"
+                        : L"/repos/LectWolf/Desto/releases/latest");
                 if (!metadata) {
                     metadata = DownloadUpdateMetadata(L"ghproxy.net",
-                        L"/https://api.github.com/repos/LectWolf/Desto/releases/latest");
+                        developmentChannel
+                            ? L"/https://api.github.com/repos/LectWolf/Desto/releases?per_page=1"
+                            : L"/https://api.github.com/repos/LectWolf/Desto/releases/latest");
                 }
                 if (!metadata) {
                     MessageBoxW(window,
@@ -2485,7 +2501,7 @@ struct WindowsSettingsHost::Impl {
                 auto tag = JsonStringField(*metadata, "tag_name");
                 auto download = JsonStringField(*metadata, "browser_download_url");
                 if (!tag.empty() && tag.front() == L'v') tag.erase(tag.begin());
-                const auto current = CurrentDestoVersion();
+                const auto current = CurrentDestoVersion(developmentChannel);
                 if (tag.empty() || CompareDestoVersions(tag, current) <= 0) {
                     MessageBoxW(window,
                         tr(L"当前已是最新版本。", L"You are already up to date.").c_str(),
@@ -2515,6 +2531,12 @@ struct WindowsSettingsHost::Impl {
                             SW_SHOWNORMAL);
                     }
                 }
+                return;
+            }
+            if (action.kind == SettingsActionKind::ToggleUpdateChannel) {
+                const auto next = updateChannel == "development" ? "stable" : "development";
+                if (updateChannelChanged && updateChannelChanged(next)) updateChannel = next;
+                InvalidateRect(window, nullptr, FALSE);
                 return;
             }
             if (action.kind == SettingsActionKind::Navigate) {
@@ -4690,8 +4712,10 @@ struct WindowsSettingsHost::Impl {
             ? L"Version: " : L"当前版本：")
             + std::to_wstring(DESTO_VERSION_MAJOR) + L"."
             + std::to_wstring(DESTO_VERSION_MINOR) + L"."
-            + std::to_wstring(DESTO_VERSION_PATCH) + L"."
-            + std::to_wstring(DESTO_VERSION_BUILD);
+            + std::to_wstring(DESTO_VERSION_PATCH)
+            + (updateChannel == "development"
+                ? L"." + std::to_wstring(DESTO_VERSION_BUILD)
+                : L"");
         DrawLabel(dc, versionText,
             Rect(kContentLeft, 250, clientRight() - 26, 282),
             RGB(165, 169, 177), 12, FW_NORMAL, DT_CENTER | DT_VCENTER);
@@ -4709,6 +4733,10 @@ struct WindowsSettingsHost::Impl {
             tr(L"查看项目", L"View project"), L"\uE8A7");
         paintCommand(checkForUpdatesRect(), {SettingsActionKind::CheckForUpdates},
             tr(L"检查更新", L"Check for updates"), L"\uE895");
+        paintCommand(updateChannelRect(), {SettingsActionKind::ToggleUpdateChannel},
+            updateChannel == "development"
+                ? tr(L"开发版通道", L"Development channel")
+                : tr(L"稳定版通道", L"Stable channel"), L"\uE7BA");
     }
 
     std::wstring title;
@@ -4745,6 +4773,7 @@ struct WindowsSettingsHost::Impl {
     bool pinnedCardsYieldToFullscreen = true;
     bool showIconBackgroundFrame = false;
     bool confirmFileDeletion = true;
+    std::string updateChannel = "stable";
     SystemDropdown activeSystemDropdown = SystemDropdown::None;
     bool addMenuOpen = false;
     bool cardMenuOpen = false;
@@ -4786,6 +4815,7 @@ struct WindowsSettingsHost::Impl {
     PinnedCardsYieldToFullscreenChangedCallback pinnedCardsYieldToFullscreenChanged;
     IconBackgroundFrameChangedCallback iconBackgroundFrameChanged;
     FileDeletionConfirmationChangedCallback fileDeletionConfirmationChanged;
+    UpdateChannelChangedCallback updateChannelChanged;
     static constexpr const wchar_t* className = L"DestoSettingsWindow";
 };
 
@@ -4810,6 +4840,7 @@ void WindowsSettingsHost::present(
     impl_->pinnedCardsYieldToFullscreen = settings.pinnedCardsYieldToFullscreen;
     impl_->showIconBackgroundFrame = settings.showIconBackgroundFrame;
     impl_->confirmFileDeletion = settings.confirmFileDeletion;
+    impl_->updateChannel = settings.updateChannel;
     if (selectedId.has_value()) {
         const auto found = std::ranges::find(impl_->cards, *selectedId, &presentation::CardView::id);
         impl_->selectedCard = found == impl_->cards.end()
@@ -4998,6 +5029,10 @@ void WindowsSettingsHost::setIconBackgroundFrameChangedCallback(
 void WindowsSettingsHost::setFileDeletionConfirmationChangedCallback(
     FileDeletionConfirmationChangedCallback callback) {
     impl_->fileDeletionConfirmationChanged = std::move(callback);
+}
+
+void WindowsSettingsHost::setUpdateChannelChangedCallback(UpdateChannelChangedCallback callback) {
+    impl_->updateChannelChanged = std::move(callback);
 }
 
 } // namespace desto::platform::windows

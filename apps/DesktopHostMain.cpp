@@ -1280,6 +1280,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
                 .showIconBackgroundFrame =
                     applicationPreferences.showIconBackgroundFrame,
                 .confirmFileDeletion = applicationPreferences.confirmFileDeletion,
+                .updateChannel = applicationPreferences.updateChannel,
             });
             SaveRuntimeConfiguration(
                 configStore, storageRoot, runtime, &applicationPreferences);
@@ -1355,6 +1356,21 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
                 host.setPinnedCardsYieldToFullscreen(previous);
                 diagnostics.record(DiagnosticLevel::Error,
                     "desktop.fullscreen_pin_preference_save_failed");
+                return false;
+            }
+        });
+        settingsHost.setUpdateChannelChangedCallback([&](const std::string& channel) {
+            if (channel != "stable" && channel != "development") return false;
+            const auto previous = applicationPreferences.updateChannel;
+            applicationPreferences.updateChannel = channel;
+            try {
+                SaveRuntimeConfiguration(
+                    configStore, storageRoot, runtime, &applicationPreferences);
+                return true;
+            } catch (...) {
+                applicationPreferences.updateChannel = previous;
+                diagnostics.record(DiagnosticLevel::Error,
+                    "update.channel_preference_save_failed");
                 return false;
             }
         });
@@ -2572,6 +2588,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
                 applicationPreferences.pinnedCardsYieldToFullscreen,
             .showIconBackgroundFrame =
                 applicationPreferences.showIconBackgroundFrame,
+            .updateChannel = applicationPreferences.updateChannel,
         });
         if (launchOptions.showSettings) {
             settingsHost.show();
