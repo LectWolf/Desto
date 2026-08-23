@@ -46,10 +46,10 @@ if ($RequireClean -and $dirty) {
 }
 
 $buildNumberPath = Join-Path $repositoryRoot '.desto-build-number'
-$buildNumber = if (Test-Path -LiteralPath $buildNumberPath) {
+$storedBuildNumber = if (Test-Path -LiteralPath $buildNumberPath) {
     [int](Get-Content -Raw -LiteralPath $buildNumberPath).Trim()
 } else { 0 }
-$effectiveBuildNumber = if ($BuildNumber -ge 0) { $BuildNumber } else { $buildNumber }
+$effectiveBuildNumber = if ($BuildNumber -ge 0) { $BuildNumber } else { $storedBuildNumber }
 $fullVersion = if ($Development) { "$Version.$effectiveBuildNumber" } else { $Version }
 
 New-Item -ItemType Directory -Path $outputRoot -Force | Out-Null
