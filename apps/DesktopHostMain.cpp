@@ -1598,10 +1598,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
                 updated.verticalAnchor = verticalAnchor;
                 updated.referenceWorkAreaWidth = referenceWorkAreaWidth;
                 updated.referenceWorkAreaHeight = referenceWorkAreaHeight;
-                if (runtime.execute(SetPlacement{std::move(updated)}).status
-                    == CommandStatus::Rejected) {
+                const auto placementResult = runtime.execute(SetPlacement{std::move(updated)});
+                if (placementResult.status == CommandStatus::Rejected) {
                     diagnostics.record(DiagnosticLevel::Warning, "desktop.placement_rejected");
-                } else {
+                } else if (placementResult.status == CommandStatus::Applied) {
                     SaveRuntimeConfiguration(configStore, storageRoot, runtime);
                 }
             });
@@ -2467,14 +2467,17 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
                     && !navigation->second.directoryStack.empty()) {
                     return true;
                 }
-                if (!ShowWindowsConfirmation(
-                        static_cast<HWND>(settingsHost.nativeHandle()),
-                        L"移除引用映射",
-                        L"是否移除该项目的引用映射？\n源文件不会被删除或移动。",
-                        L"移除",
-                        L"取消")) {
-                    return true;
-                }
+                static bool confirmingMappingRemoval = false;
+                if (confirmingMappingRemoval) return true;
+                confirmingMappingRemoval = true;
+                const auto accepted = ShowWindowsConfirmation(
+                    nullptr,
+                    L"移除引用映射",
+                    L"是否移除该项目的引用映射？\n源文件不会被删除或移动。",
+                    L"移除",
+                    L"取消");
+                confirmingMappingRemoval = false;
+                if (!accepted) return true;
                 auto references = mapping->references();
                 const auto key = PathKey(item.sourcePath);
                 const auto removed = std::erase_if(references, [&](const auto& reference) {
@@ -2522,7 +2525,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             [&](const CardId&, const desto::presentation::CardItemView& item) {
                 if (!applicationPreferences.confirmFileDeletion) return true;
                 return ShowWindowsConfirmation(
-                    static_cast<HWND>(settingsHost.nativeHandle()),
+                    nullptr,
                     L"确认删除文件",
                     L"是否删除“" + item.displayName
                         + L"”？此操作将直接修改源文件。",

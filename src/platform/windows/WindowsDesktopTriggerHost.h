@@ -9,24 +9,6 @@ namespace desto::platform::windows {
 
 [[nodiscard]] bool ShouldCaptureDesktopSessionWindow(
     HWND window, HMONITOR monitor = nullptr) noexcept;
-[[nodiscard]] bool ShouldRestoreDesktopSessionOnForeground(
-    bool allDisplaysSession,
-    bool sessionActive,
-    bool transitioning,
-    bool restoreOnForeground,
-    bool candidateWasCaptured,
-    bool candidateIsIconic) noexcept;
-
-enum class DesktopSessionToggleAction {
-    BeginSession,
-    HideExposedWindows,
-    RestoreSession,
-};
-
-[[nodiscard]] DesktopSessionToggleAction ResolveDesktopSessionToggleAction(
-    bool sessionActive,
-    bool desktopVisible) noexcept;
-
 [[nodiscard]] bool IsBlankTaskbarAccessibilityTarget(
     bool querySucceeded,
     long role,
@@ -35,10 +17,6 @@ enum class DesktopSessionToggleAction {
     bool querySucceeded,
     long controlType,
     bool hasMeaningfulIdentity) noexcept;
-
-// Restores the captured visible state while retaining maximized windows.
-[[nodiscard]] bool RestoreCapturedWindowPlacement(
-    HWND window, const WINDOWPLACEMENT& captured) noexcept;
 
 class DesktopDoubleClickDetector final {
 public:
@@ -88,19 +66,13 @@ private:
 
 class WindowsTaskbarWindowToggle final {
 public:
-    WindowsTaskbarWindowToggle();
-    ~WindowsTaskbarWindowToggle();
+    WindowsTaskbarWindowToggle() = default;
+    ~WindowsTaskbarWindowToggle() = default;
 
     WindowsTaskbarWindowToggle(const WindowsTaskbarWindowToggle&) = delete;
     WindowsTaskbarWindowToggle& operator=(const WindowsTaskbarWindowToggle&) = delete;
 
-    void setRestoreOnNewWindow(bool enabled) noexcept;
-    void toggle(int screenX, int screenY, bool currentDisplayOnly);
     void showDesktop(int screenX, int screenY, bool currentDisplayOnly);
-
-private:
-    struct Impl;
-    std::unique_ptr<Impl> impl_;
 };
 
 } // namespace desto::platform::windows

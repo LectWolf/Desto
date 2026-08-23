@@ -75,7 +75,7 @@ CardContentLayoutSettings ResolveCardContentLayoutSettings(
     case domain::CardItemSize::Small:
         result.itemWidth = 37.0;
         result.iconSize = 20.0;
-        result.itemFontSize = 8.0;
+        result.itemFontSize = 9.0;
         fileNameHeight = 12.0;
         result.preferredColumns = ResolveCardColumnsForWidthSpan(
             preferences.widthSpan, preferences.itemSize);
@@ -84,7 +84,7 @@ CardContentLayoutSettings ResolveCardContentLayoutSettings(
     case domain::CardItemSize::Medium:
         result.itemWidth = 44.0;
         result.iconSize = 26.0;
-        result.itemFontSize = 9.0;
+        result.itemFontSize = 10.0;
         fileNameHeight = 14.0;
         result.preferredColumns = ResolveCardColumnsForWidthSpan(
             preferences.widthSpan, preferences.itemSize);

@@ -158,10 +158,10 @@ void RunTests() {
     DESTO_CHECK(ResolveLayeredSurfaceTextQuality() == ANTIALIASED_QUALITY);
     DESTO_CHECK(ResolveLayeredSurfaceTextQuality() != CLEARTYPE_QUALITY);
     const auto crystalStyle = ResolveCrystalMaterialStyle();
-    DESTO_CHECK(crystalStyle.surfaceOpacity == 0.32);
-    DESTO_CHECK(crystalStyle.itemFillOpacity == 0.16);
-    DESTO_CHECK(crystalStyle.itemOutlineOpacity == 0.54);
-    DESTO_CHECK(crystalStyle.surfaceOutlineOpacity == 0.52);
+    DESTO_CHECK(crystalStyle.surfaceOpacity == 0.20);
+    DESTO_CHECK(crystalStyle.itemFillOpacity == 0.14);
+    DESTO_CHECK(crystalStyle.itemOutlineOpacity == 0.62);
+    DESTO_CHECK(crystalStyle.surfaceOutlineOpacity == 0.60);
     DESTO_CHECK(CompositeCrystalLayerPixel(
         0x00F8FAFCu, 82u, 0u, 1.0) == 0x52505051u);
     DESTO_CHECK(CompositeCrystalLayerPixel(
@@ -991,8 +991,17 @@ void RunTests() {
 
         todoHost.resetRenderStatistics();
         for (int index = 0; index < 100; ++index) {
-            SendMessageW(todoWindow, WM_MOUSEMOVE, 0,
-                MAKELPARAM(100, index % 2 == 0 ? 149 : 191));
+            SendMessageW(todoWindow, WM_MOUSEMOVE, 0, MAKELPARAM(100, 149));
+        }
+        DESTO_CHECK(todoHost.renderStatistics().fullSurfaceRenders <= 1);
+        DESTO_CHECK(todoHost.renderStatistics().fullSurfaceCommits <= 1);
+        todoHost.resetRenderStatistics();
+        SendMessageW(todoWindow, WM_MOUSEMOVE, 0, MAKELPARAM(100, 191));
+        DESTO_CHECK(todoHost.renderStatistics().fullSurfaceRenders == 1);
+        DESTO_CHECK(todoHost.renderStatistics().fullSurfaceCommits == 1);
+        todoHost.resetRenderStatistics();
+        for (int index = 0; index < 100; ++index) {
+            SendMessageW(todoWindow, WM_MOUSEMOVE, 0, MAKELPARAM(100, 191));
         }
         DESTO_CHECK(todoHost.renderStatistics().fullSurfaceRenders == 0);
         DESTO_CHECK(todoHost.renderStatistics().fullSurfaceCommits == 0);

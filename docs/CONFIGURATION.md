@@ -53,7 +53,7 @@ WorkspaceLayout
 
 `cards` 保存 Card 身份、类型、可见/展开状态、Chrome 入口偏好、外观偏好和类型专属内容；`workspace.placements` 只保存原始布局。当前显示器拓扑与 Projection 不写入配置，启动后由平台适配器重新提供。
 
-Card 外观当前保存 `preset`、`opacity` 和兼容用的 `cornerRadius`。应用级 `settings.globalCardCornerRadius` 是运行时权威值；设置界面提供直角 0 DIP、Windows 12 DIP、macOS 24 DIP 和饱满圆角 32 DIP 四种预设，并同步更新所有 Card。主题仍按 Card 实例保存，当前包含跟随系统、Win11 深色 Mica、浅色 Mica、品牌色和水晶透明五种色块；`system` 预设在系统深浅色变化时只重绘使用它的 Card，水晶透明色块写入 `transparent-white/0.32`。
+Card 外观当前保存 `preset`、`opacity` 和兼容用的 `cornerRadius`。应用级 `settings.globalCardCornerRadius` 是运行时权威值；设置界面提供直角 0 DIP、Windows 12 DIP、macOS 24 DIP 和饱满圆角 32 DIP 四种预设，并同步更新所有 Card。主题仍按 Card 实例保存，当前包含跟随系统、Win11 深色 Mica、浅色 Mica、品牌色和水晶透明五种色块；`system` 预设在系统深浅色变化时只重绘使用它的 Card，水晶透明色块写入 `transparent-white` 与当前底板 Alpha 0.20。
 
 Card 内容偏好按实例保存 `itemSize`、`showItemNames`、`sizeMode`、`widthSpan`、兼容用 `fixedColumns`、`fixedRows` 和 `maximumVisibleRows`。默认跨度 4 投影为 6 个小图标、5 个中图标、4 个大图标或 3 个特大图标；文件 Card 的自适应网格外宽由投影列数和固定槽宽计算，固定网格和列表仍使用跨度轨道。Todo 的小/中/大保存为 4/5/6，并按 Large 文件网格公式投影为 244/299/354 DIP，不使用带 8 DIP 轨道间距的通用跨度外宽公式。因此不能把 `widthSpan` 简化为所有类型和模式完全相同的外框公式。小/中密度请求 Shell 小图标源，大/特大请求 Shell 中图标源，显示缩放不反向改变源档位。`adaptive` 按内容扩缩，`fixed` 使用明确宽高容量；两者都不提供鼠标自由缩放。当前没有数值动画偏好或时间驱动刷新字段。
 

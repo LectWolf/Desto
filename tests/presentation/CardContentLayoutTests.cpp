@@ -100,7 +100,7 @@ void RunTests() {
         .showItemNames = true,
     });
     DESTO_CHECK(small.iconSize == 20.0);
-    DESTO_CHECK(small.itemFontSize == 8.0);
+    DESTO_CHECK(small.itemFontSize == 9.0);
     DESTO_CHECK(small.itemWidth == 37.0);
     DESTO_CHECK(small.itemWidth == small.itemHeight);
     DESTO_CHECK(small.preferredColumns == 6);
@@ -109,7 +109,7 @@ void RunTests() {
     DESTO_CHECK(small.verticalGap == 0.0);
     DESTO_CHECK(smallWithName.itemHeight == 49.0);
     DESTO_CHECK(medium.iconSize == 26.0);
-    DESTO_CHECK(medium.itemFontSize == 9.0);
+    DESTO_CHECK(medium.itemFontSize == 10.0);
     DESTO_CHECK(medium.itemWidth == 44.0);
     DESTO_CHECK(medium.itemWidth == medium.itemHeight);
     DESTO_CHECK(medium.preferredColumns == 5);

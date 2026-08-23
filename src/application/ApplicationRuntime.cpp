@@ -839,7 +839,11 @@ CommandResult ApplicationRuntime::handle(const SetPlacement& command) {
         && existing->rect.top == command.placement.rect.top
         && existing->rect.width == command.placement.rect.width
         && existing->rect.height == command.placement.rect.height
-        && existing->zIndex == command.placement.zIndex) {
+        && existing->zIndex == command.placement.zIndex
+        && existing->horizontalAnchor == command.placement.horizontalAnchor
+        && existing->verticalAnchor == command.placement.verticalAnchor
+        && existing->referenceWorkAreaWidth == command.placement.referenceWorkAreaWidth
+        && existing->referenceWorkAreaHeight == command.placement.referenceWorkAreaHeight) {
         return noChange();
     }
 

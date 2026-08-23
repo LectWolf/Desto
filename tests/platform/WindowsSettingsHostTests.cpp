@@ -250,7 +250,7 @@ void RunTests() {
     DESTO_CHECK(appearanceChanged);
     Click(window, 476, 185);
     DESTO_CHECK(appearancePresetChanged == "transparent-white");
-    DESTO_CHECK(appearanceOpacityChanged == 0.32);
+    DESTO_CHECK(appearanceOpacityChanged == 0.20);
     Click(window, 280, 185);
     DESTO_CHECK(appearancePresetChanged == "system");
     Click(window, 279, 271);

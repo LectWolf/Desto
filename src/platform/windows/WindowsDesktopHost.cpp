@@ -89,10 +89,10 @@ std::wstring_view ResolveTodoTextFontFamily(std::wstring_view) noexcept {
 
 CrystalMaterialStyle ResolveCrystalMaterialStyle() noexcept {
     return {
-        .surfaceOpacity = 0.32,
-        .itemFillOpacity = 0.16,
-        .itemOutlineOpacity = 0.54,
-        .surfaceOutlineOpacity = 0.52,
+        .surfaceOpacity = 0.20,
+        .itemFillOpacity = 0.14,
+        .itemOutlineOpacity = 0.62,
+        .surfaceOutlineOpacity = 0.60,
     };
 }
 
@@ -103,6 +103,11 @@ std::uint32_t ResolveLayeredSurfaceTextQuality() noexcept {
     // every wallpaper and display orientation.
     return ANTIALIASED_QUALITY;
 }
+
+// Small type on a translucent layered card needs more ink than the same size
+// on an opaque ClearType surface. Keep the size ladder; raise weight instead.
+constexpr int kCardTitleWeight = FW_SEMIBOLD;
+constexpr double kCardMetadataDip = 11.0;
 
 std::uint32_t CompositeCrystalLayerPixel(
     std::uint32_t materialRgb,
@@ -3628,6 +3633,7 @@ struct WindowsDesktopHost::Impl {
             return;
         }
         const auto visualHoverChanged = index != surface->hoveredItem
+            || todoRow != surface->hoveredTodoRow
             || collapseHovered != surface->collapseHovered
             || pinHovered != surface->pinHovered
             || mappingViewHovered != surface->mappingViewHovered
@@ -3666,9 +3672,10 @@ struct WindowsDesktopHost::Impl {
         const auto& item = surface->card.items[*index];
         surface->tooltipText = item.displayName;
         if (item.state == presentation::CardItemState::Missing) {
-            surface->tooltipText += L"\n(Item is missing)";
+            surface->tooltipText += tr(L"\n项目缺失", L"\nItem is missing");
         } else if (item.state == presentation::CardItemState::UnresolvedShortcut) {
-            surface->tooltipText += L"\n(Shortcut is unavailable)";
+            surface->tooltipText += tr(
+                L"\n快捷方式不可用", L"\nShortcut is unavailable");
         }
         SetTimer(window, ItemTooltipTimerId, ItemTooltipDelayMilliseconds, nullptr);
         try {
@@ -4269,9 +4276,9 @@ struct WindowsDesktopHost::Impl {
                     const auto vertical = visibleBottom <= 1
                         ? 0.0 : static_cast<double>(std::min(y, visibleBottom - 1))
                             / (visibleBottom - 1);
-                    red = static_cast<std::uint32_t>(std::lround(246.0 + 3.0 * (1.0 - vertical)));
-                    green = static_cast<std::uint32_t>(std::lround(249.0 + 3.0 * horizontal));
-                    blue = static_cast<std::uint32_t>(std::lround(252.0 + 3.0 * (1.0 - horizontal)));
+                    red = static_cast<std::uint32_t>(std::lround(226.0 + 8.0 * (1.0 - vertical)));
+                    green = static_cast<std::uint32_t>(std::lround(232.0 + 6.0 * horizontal));
+                    blue = static_cast<std::uint32_t>(std::lround(240.0 + 6.0 * (1.0 - horizontal)));
                 }
                 surface.pixels[y * surface.width + x] = (red << 16) | (green << 8) | blue;
             }
@@ -4288,14 +4295,15 @@ struct WindowsDesktopHost::Impl {
         std::wstring titleText = card.title;
         const auto text = card.showTitle ? titleText : L"";
         SetBkMode(surface.memoryDc, TRANSPARENT);
-        const auto foreground = darkSurface ? RGB(244, 246, 249) : RGB(38, 40, 45);
+        const auto foreground = darkSurface ? RGB(244, 246, 249)
+            : crystalSurface ? RGB(28, 32, 38) : RGB(38, 40, 45);
         SetTextColor(surface.memoryDc, foreground);
         const auto font = CreateFontW(
             -dipToPixels(14.0, surface),
             0,
             0,
             0,
-            FW_SEMIBOLD,
+            kCardTitleWeight,
             FALSE,
             FALSE,
             FALSE,
@@ -4508,6 +4516,11 @@ struct WindowsDesktopHost::Impl {
                 DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                 ResolveLayeredSurfaceTextQuality(),
                 DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Variable Text");
+            const auto actionSecondaryFont = CreateFontW(
+                -dipToPixels(11.0, surface), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                ResolveLayeredSurfaceTextQuality(),
+                DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Variable Text");
             const auto previousActionFont = actionFont == nullptr
                 ? nullptr : SelectObject(surface.memoryDc, actionFont);
             const auto drawTodoAction = [&] (
@@ -4549,6 +4562,9 @@ struct WindowsDesktopHost::Impl {
                 ? (darkSurface ? RGB(180, 186, 198) : RGB(70, 75, 84))
                 : (darkSurface ? RGB(112, 118, 129) : RGB(82, 87, 96));
             const auto archiveText = tr(L"归档", L"Archive");
+            if (actionSecondaryFont != nullptr) {
+                SelectObject(surface.memoryDc, actionSecondaryFont);
+            }
             drawTodoAction(archiveRect, archiveText,
                 crystalSurface && hasCompleted ? RGB(42, 52, 65) : archiveColor);
             auto remainingRect = todoRemainingRect(surface);
@@ -4563,6 +4579,7 @@ struct WindowsDesktopHost::Impl {
             drawTodoAction(remainingRect, remainingText, remainingColor);
             if (previousActionFont != nullptr) SelectObject(surface.memoryDc, previousActionFont);
             if (actionFont != nullptr) DeleteObject(actionFont);
+            if (actionSecondaryFont != nullptr) DeleteObject(actionSecondaryFont);
 
             const auto todoFont = CreateFontW(
                 -dipToPixels(13.0, surface), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
@@ -4572,7 +4589,7 @@ struct WindowsDesktopHost::Impl {
             const auto previousTodoFont = todoFont == nullptr
                 ? nullptr : SelectObject(surface.memoryDc, todoFont);
             const auto metadataFont = CreateFontW(
-                -dipToPixels(10.0, surface), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                -dipToPixels(kCardMetadataDip, surface), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
                 DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                 ResolveLayeredSurfaceTextQuality(),
                 DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Variable Text");
@@ -4586,6 +4603,15 @@ struct WindowsDesktopHost::Impl {
                     continue;
                 }
                 const auto& item = card.todoItems[entry.itemIndex];
+                if (surface.hoveredTodoRow == entry.itemIndex) {
+                    drawRoundedFill(
+                        row,
+                        dipToPixels(10.0, surface),
+                        darkSurface ? 0x00FFFFFFu : 0x0018212Fu,
+                        surface.pressedTodoCheckbox == entry.itemIndex
+                            ? (darkSurface ? 0.12 : 0.08)
+                            : (darkSurface ? 0.07 : 0.045));
+                }
                 const auto checkbox = todoCheckboxRect(surface, row);
                 if (surface.pressedTodoCheckbox == entry.itemIndex
                     && surface.hoveredTodoRow == entry.itemIndex) {
@@ -5226,11 +5252,10 @@ struct WindowsDesktopHost::Impl {
                     const auto& item = card.items[projected.itemIndex];
                     const auto ready = item.state == presentation::CardItemState::Ready
                         || item.state == presentation::CardItemState::IconUnavailable;
-                    SetTextColor(
-                        surface.memoryDc,
-                        ready
-                            ? foreground
-                            : (darkSurface ? RGB(148, 153, 162) : RGB(121, 126, 135)));
+                    const auto labelColor = ready
+                        ? foreground
+                        : (darkSurface ? RGB(148, 153, 162) : RGB(121, 126, 135));
+                    SetTextColor(surface.memoryDc, labelColor);
                     auto labelRect = itemLabelRect(
                         surface,
                         projected.column,
@@ -5433,7 +5458,9 @@ struct WindowsDesktopHost::Impl {
                 darkSurface ? 0.46 : 0.34);
         }
 
-        const auto surfaceAlpha = std::clamp(card.opacity, 0.0, 1.0) * 255.0;
+        const auto surfaceAlpha = (crystalSurface
+            ? crystalStyle.surfaceOpacity
+            : std::clamp(card.opacity, 0.0, 1.0)) * 255.0;
         const presentation::RoundedRectSpec surfaceShape{
             .width = static_cast<double>(surface.width),
             .height = static_cast<double>(visibleBottom),

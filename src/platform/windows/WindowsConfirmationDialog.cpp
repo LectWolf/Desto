@@ -12,14 +12,68 @@ namespace {
 constexpr wchar_t kClassName[] = L"Desto.CustomConfirmation";
 constexpr int kWidth = 470;
 constexpr int kHeight = 250;
+constexpr COLORREF kAccent = RGB(51, 136, 255);
+constexpr COLORREF kAccentOutline = RGB(117, 178, 255);
+
+struct DialogPalette {
+    COLORREF background = RGB(38, 40, 45);
+    COLORREF outline = RGB(72, 75, 82);
+    COLORREF title = RGB(245, 246, 248);
+    COLORREF message = RGB(183, 186, 193);
+    COLORREF cancelFill = RGB(45, 47, 52);
+    COLORREF cancelText = RGB(230, 232, 236);
+    COLORREF confirmText = RGB(255, 255, 255);
+};
 
 struct DialogState {
     HWND owner = nullptr;
     HWND window = nullptr;
     desto::ui::Dialog dialog;
+    DialogPalette palette{};
     bool result = false;
     bool done = false;
 };
+
+bool SystemAppsUseLightTheme() noexcept {
+    DWORD value = 1;
+    DWORD size = sizeof(value);
+    if (RegGetValueW(
+            HKEY_CURRENT_USER,
+            L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+            L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &value, &size)
+        != ERROR_SUCCESS) {
+        return true;
+    }
+    return value != 0;
+}
+
+DialogPalette CurrentDialogPalette() noexcept {
+    if (SystemAppsUseLightTheme()) {
+        return {
+            .background = RGB(246, 246, 246),
+            .outline = RGB(218, 218, 218),
+            .title = RGB(28, 32, 38),
+            .message = RGB(76, 81, 90),
+            .cancelFill = RGB(232, 232, 234),
+            .cancelText = RGB(38, 40, 45),
+            .confirmText = RGB(255, 255, 255),
+        };
+    }
+    return {};
+}
+
+HWND UsableOwner(HWND owner) noexcept {
+    if (owner == nullptr || !IsWindow(owner) || !IsWindowVisible(owner)) {
+        return nullptr;
+    }
+    return owner;
+}
+
+void DrainQueuedPointerMessages() noexcept {
+    MSG message{};
+    while (PeekMessageW(&message, nullptr, WM_MOUSEFIRST, WM_MOUSELAST, PM_REMOVE)) {
+    }
+}
 
 RECT NativeRect(const desto::ui::Rect& rect) noexcept {
     return {rect.x, rect.y, rect.x + rect.width, rect.y + rect.height};
@@ -30,7 +84,7 @@ void DrawTextBlock(HDC dc, const std::wstring& text, RECT rect, COLORREF color,
     const auto font = CreateFontW(
         -size, 0, 0, 0, weight, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-        DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+        DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Variable Text");
     const auto previous = SelectObject(dc, font);
     SetBkMode(dc, TRANSPARENT);
     SetTextColor(dc, color);
@@ -84,30 +138,28 @@ LRESULT CALLBACK DialogProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         state->dialog.layout({client.right, client.bottom});
         const auto view = state->dialog.snapshot();
         const auto& spec = state->dialog.spec();
-        const auto background = CreateSolidBrush(RGB(21, 23, 28));
+        const auto& palette = state->palette;
+        const auto background = CreateSolidBrush(palette.background);
         FillRect(dc, &client, background);
         DeleteObject(background);
         FillRoundRect(dc, {1, 1, client.right - 1, client.bottom - 1},
-            RGB(38, 41, 48), RGB(82, 86, 98));
-        auto titleRect = NativeRect(view.titleBounds);
-        DrawTextBlock(dc, spec.title,
-            titleRect, RGB(245, 247, 250), 18,
-            DT_SINGLELINE | DT_VCENTER, FW_SEMIBOLD);
-        auto messageRect = NativeRect(view.messageBounds);
-        DrawTextBlock(dc, spec.message, messageRect,
-            RGB(190, 194, 203), 13, DT_WORDBREAK | DT_TOP);
+            palette.background, palette.outline);
+        DrawTextBlock(dc, spec.title, NativeRect(view.titleBounds),
+            palette.title, 17, DT_SINGLELINE | DT_VCENTER, FW_SEMIBOLD);
+        DrawTextBlock(dc, spec.message, NativeRect(view.messageBounds),
+            palette.message, 12, DT_WORDBREAK | DT_TOP);
         auto confirmRect = NativeRect(view.confirmButton.bounds);
         if (view.cancelButton.has_value()) {
             auto cancelRect = NativeRect(view.cancelButton->bounds);
-            FillRoundRect(dc, cancelRect, RGB(49, 52, 60),
-                view.cancelButton->focused ? RGB(164, 175, 196) : RGB(86, 90, 101));
+            FillRoundRect(dc, cancelRect, palette.cancelFill,
+                view.cancelButton->focused ? kAccentOutline : palette.outline);
             DrawTextBlock(dc, view.cancelButton->label, cancelRect,
-                RGB(232, 235, 240), 12, DT_SINGLELINE | DT_CENTER | DT_VCENTER, FW_SEMIBOLD);
+                palette.cancelText, 11, DT_SINGLELINE | DT_CENTER | DT_VCENTER, FW_SEMIBOLD);
         }
-        FillRoundRect(dc, confirmRect, RGB(56, 126, 238),
-            view.confirmButton.focused ? RGB(176, 207, 255) : RGB(95, 157, 255));
+        FillRoundRect(dc, confirmRect, kAccent,
+            view.confirmButton.focused ? kAccentOutline : kAccent);
         DrawTextBlock(dc, view.confirmButton.label, confirmRect,
-            RGB(255, 255, 255), 12, DT_SINGLELINE | DT_CENTER | DT_VCENTER, FW_SEMIBOLD);
+            palette.confirmText, 11, DT_SINGLELINE | DT_CENTER | DT_VCENTER, FW_SEMIBOLD);
         EndPaint(window, &paint);
         return 0;
     }
@@ -177,12 +229,16 @@ bool ShowWindowsConfirmation(
 bool ShowWindowsDialog(HWND owner, desto::ui::DialogSpec spec) noexcept {
     try {
         if (!EnsureDialogClass()) return false;
+        DrainQueuedPointerMessages();
         DialogState state{
-            .owner = owner,
+            .owner = UsableOwner(owner),
             .dialog = desto::ui::Dialog(std::move(spec)),
+            .palette = CurrentDialogPalette(),
         };
         RECT workArea{};
-        const auto monitor = MonitorFromWindow(owner, MONITOR_DEFAULTTONEAREST);
+        const auto monitor = MonitorFromWindow(
+            state.owner != nullptr ? state.owner : GetDesktopWindow(),
+            MONITOR_DEFAULTTONEAREST);
         MONITORINFO info{.cbSize = sizeof(info)};
         if (monitor != nullptr && GetMonitorInfoW(monitor, &info)) {
             workArea = info.rcWork;
@@ -194,16 +250,15 @@ bool ShowWindowsDialog(HWND owner, desto::ui::DialogSpec spec) noexcept {
         state.window = CreateWindowExW(
             WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
             kClassName, L"", WS_POPUP,
-            left, top, kWidth, kHeight, owner, nullptr,
+            left, top, kWidth, kHeight, state.owner, nullptr,
             GetModuleHandleW(nullptr), &state);
         if (state.window == nullptr) return false;
-        // The popup is painted with a rounded surface; clip the native window
-        // as well so the dark backing rectangle cannot show at the corners.
-        const auto region = CreateRoundRectRgn(0, 0, kWidth + 1, kHeight + 1, 18, 18);
+        const auto region = CreateRoundRectRgn(0, 0, kWidth + 1, kHeight + 1, 20, 20);
         if (region != nullptr) SetWindowRgn(state.window, region, TRUE);
-        const auto ownerWasEnabled = owner != nullptr && IsWindowEnabled(owner) != FALSE;
-        if (ownerWasEnabled) EnableWindow(owner, FALSE);
-        ShowWindow(state.window, SW_SHOWNOACTIVATE);
+        const auto ownerWasEnabled = state.owner != nullptr
+            && IsWindowEnabled(state.owner) != FALSE;
+        if (ownerWasEnabled) EnableWindow(state.owner, FALSE);
+        ShowWindow(state.window, SW_SHOW);
         SetForegroundWindow(state.window);
         UpdateWindow(state.window);
         MSG message{};
@@ -224,9 +279,9 @@ bool ShowWindowsDialog(HWND owner, desto::ui::DialogSpec spec) noexcept {
             DestroyWindow(state.window);
             state.window = nullptr;
         }
-        if (ownerWasEnabled) {
-            EnableWindow(owner, TRUE);
-            SetForegroundWindow(owner);
+        if (ownerWasEnabled && state.owner != nullptr && IsWindow(state.owner)) {
+            EnableWindow(state.owner, TRUE);
+            if (IsWindowVisible(state.owner)) SetForegroundWindow(state.owner);
         }
         return state.result;
     } catch (...) {

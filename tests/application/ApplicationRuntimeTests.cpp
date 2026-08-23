@@ -441,6 +441,45 @@ void RunTests() {
     const auto missingPlacement = runtime.execute(RemovePlacement{"missing"});
     DESTO_CHECK(missingPlacement.status == CommandStatus::Rejected);
     DESTO_CHECK(missingPlacement.error == CommandError::PlacementNotFound);
+
+    ApplicationRuntime anchoredRuntime;
+    DESTO_CHECK(anchoredRuntime.execute(CreateApplicationCard{
+        .cardId = "anchored",
+        .relativeStoragePath = "cards/anchored",
+    }).status == CommandStatus::Applied);
+    DESTO_CHECK(anchoredRuntime.execute(UpdateDisplayTopology{{
+        {.id = "display-a", .workAreaWidth = 1280, .workAreaHeight = 720, .primary = true},
+    }}).status == CommandStatus::Applied);
+    const CardPlacement edgePlacement{
+        .id = "placement-anchored",
+        .cardId = "anchored",
+        .target = DisplayTarget::specific("display-a"),
+        .rect = {960, 200, 320, 220},
+        .horizontalAnchor = PlacementHorizontalAnchor::Left,
+        .verticalAnchor = PlacementVerticalAnchor::Free,
+        .referenceWorkAreaWidth = 1280,
+        .referenceWorkAreaHeight = 720,
+    };
+    DESTO_CHECK(anchoredRuntime.execute(SetPlacement{edgePlacement}).status
+                == CommandStatus::Applied);
+    auto snappedPlacement = edgePlacement;
+    snappedPlacement.horizontalAnchor = PlacementHorizontalAnchor::Right;
+    snappedPlacement.verticalAnchor = PlacementVerticalAnchor::Bottom;
+    const auto snapped = anchoredRuntime.execute(SetPlacement{snappedPlacement});
+    DESTO_CHECK(snapped.status == CommandStatus::Applied);
+    DESTO_CHECK(snapped.changes.layoutChanged);
+    DESTO_CHECK(anchoredRuntime.workspace().placements().front().horizontalAnchor
+                == PlacementHorizontalAnchor::Right);
+    DESTO_CHECK(anchoredRuntime.workspace().placements().front().verticalAnchor
+                == PlacementVerticalAnchor::Bottom);
+    DESTO_CHECK(anchoredRuntime.execute(SetPlacement{snappedPlacement}).status
+                == CommandStatus::NoChange);
+    DESTO_CHECK(anchoredRuntime.execute(UpdateDisplayTopology{{
+        {.id = "display-a", .workAreaWidth = 1920, .workAreaHeight = 1080, .primary = true},
+    }}).status == CommandStatus::Applied);
+    DESTO_CHECK(anchoredRuntime.projections().size() == 1);
+    DESTO_CHECK(anchoredRuntime.projections().front().rect.left == 1600);
+    DESTO_CHECK(anchoredRuntime.projections().front().rect.top == 560);
 }
 
 } // namespace
