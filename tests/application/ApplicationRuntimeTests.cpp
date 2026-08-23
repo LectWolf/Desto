@@ -2,6 +2,7 @@
 #include "ApplicationCardOrdering.h"
 #include "TestSupport.h"
 
+#include <array>
 #include <filesystem>
 
 using namespace desto::application;
@@ -480,6 +481,15 @@ void RunTests() {
     DESTO_CHECK(anchoredRuntime.projections().size() == 1);
     DESTO_CHECK(anchoredRuntime.projections().front().rect.left == 1600);
     DESTO_CHECK(anchoredRuntime.projections().front().rect.top == 560);
+
+    const auto exportText = FormatTodoArchiveExport(std::array{
+        TodoArchiveExportEntry{{2026, 3, 2}, 20, "later"},
+        TodoArchiveExportEntry{{2026, 3, 1}, 30, "second"},
+        TodoArchiveExportEntry{{2026, 3, 1}, 10, "first"},
+    });
+    DESTO_CHECK(exportText.find(
+        "2026-03-01\r\nfirst\r\nsecond\r\n\r\n2026-03-02\r\nlater\r\n")
+        != std::string::npos);
 }
 
 } // namespace

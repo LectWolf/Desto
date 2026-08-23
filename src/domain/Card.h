@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -148,6 +149,19 @@ struct TodoItem {
     const TodoItem& item,
     TodoDate currentDate,
     std::optional<std::int32_t> offsetMinutes = std::nullopt) noexcept;
+
+struct TodoDateViewItem {
+    std::size_t index = 0;
+    bool overdue = false;
+    bool archived = false;
+    TodoDate date{};
+};
+
+[[nodiscard]] std::vector<TodoDateViewItem> ResolveTodoDateView(
+    std::span<const TodoItem> items,
+    TodoDate today,
+    std::int32_t dateOffset,
+    std::optional<std::int32_t> timeZoneOffsetMinutes = std::nullopt);
 
 struct TodoCardPreferences {
     bool showCreatedTime = false;

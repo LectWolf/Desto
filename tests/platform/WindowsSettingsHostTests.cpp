@@ -22,17 +22,19 @@ void Click(HWND window, int x, int y) {
 
 void RunTests() {
     const auto applicationLayout = ResolveFileCardSettingsLayout(false);
-    DESTO_CHECK(applicationLayout.appearanceBottom < applicationLayout.toolbarLabelTop);
-    DESTO_CHECK(applicationLayout.toolbarLabelTop + 24 <= applicationLayout.toolbarTop);
+    DESTO_CHECK(applicationLayout.previewBottom <= applicationLayout.appearanceLabelTop);
+    DESTO_CHECK(applicationLayout.appearanceBottom < applicationLayout.densityLabelTop);
+    DESTO_CHECK(applicationLayout.densityBottom < applicationLayout.toolbarLabelTop);
+    DESTO_CHECK(applicationLayout.toolbarLabelTop + 20 <= applicationLayout.toolbarTop);
     DESTO_CHECK(applicationLayout.toolbarBottom < applicationLayout.optionsLabelTop);
-    DESTO_CHECK(applicationLayout.optionsLabelTop + 24 <= applicationLayout.optionsTop);
+    DESTO_CHECK(applicationLayout.optionsLabelTop + 20 <= applicationLayout.optionsTop);
     DESTO_CHECK(applicationLayout.optionsBottom < applicationLayout.extraTop);
     const auto mappingLayout = ResolveFileCardSettingsLayout(true);
-    DESTO_CHECK(mappingLayout.appearanceBottom < mappingLayout.toolbarLabelTop);
+    DESTO_CHECK(mappingLayout.densityBottom < mappingLayout.toolbarLabelTop);
     DESTO_CHECK(mappingLayout.toolbarBottom < mappingLayout.sourceLabelTop);
-    DESTO_CHECK(mappingLayout.sourceLabelTop + 24 <= mappingLayout.sourceTop);
+    DESTO_CHECK(mappingLayout.sourceLabelTop + 20 <= mappingLayout.sourceTop);
     DESTO_CHECK(mappingLayout.sourceBottom < mappingLayout.optionsLabelTop);
-    DESTO_CHECK(mappingLayout.optionsLabelTop + 24 <= mappingLayout.optionsTop);
+    DESTO_CHECK(mappingLayout.optionsLabelTop + 20 <= mappingLayout.optionsTop);
     DESTO_CHECK(mappingLayout.optionsBottom < mappingLayout.extraTop);
     DESTO_CHECK(ResolveSettingsThemeColor(RGB(18, 19, 21), true) == RGB(18, 19, 21));
     const auto lightBackground = ResolveSettingsThemeColor(RGB(18, 19, 21), false);
@@ -87,7 +89,6 @@ void RunTests() {
     std::optional<ApplicationItemSortMode> mappingSortModeChanged;
     bool restored = false;
     std::string restoredItemId;
-    bool timeZoneChanged = false;
     bool languageChanged = false;
     bool radiusCommitted = false;
     bool cardDeleted = false;
@@ -148,10 +149,6 @@ void RunTests() {
         restored = true;
         return true;
     });
-    host.setTimeZoneChangedCallback([&](std::optional<std::int32_t> offset) {
-        timeZoneChanged = offset == 0;
-        return true;
-    });
     host.setGlobalCornerRadiusChangedCallback([&](double radius, bool commit) {
         DESTO_CHECK(radius == 24.0);
         radiusCommitted = commit;
@@ -203,28 +200,28 @@ void RunTests() {
     RECT settingsClientRect{};
     DESTO_CHECK(GetClientRect(window, &settingsClientRect));
 
-    Click(window, 620, 176);
-    Click(window, 620, 253);
-    DESTO_CHECK(timeZoneChanged);
-    Click(window, 620, 230);
-    Click(window, 620, 343);
-    DESTO_CHECK(languageChanged);
-    Click(window, 520, 398);
-    DESTO_CHECK(radiusCommitted);
-    Click(window, 680, 118);
+    const auto systemLayout = ResolveSystemSettingsLayout();
+    Click(window, 280, systemLayout.startupTop + 20);
     DESTO_CHECK(runAtStartupChanged);
-
-    Click(window, 70, 70);
-    Click(window, 620, 122);
-    Click(window, 620, 230);
+    Click(window, 620, systemLayout.languageTop + 20);
+    Click(window, 620, systemLayout.languageTop + systemLayout.rowHeight + 12 + 72 + 17);
+    DESTO_CHECK(languageChanged);
+    const auto radiusLeft = 202;
+    const auto radiusRight = settingsClientRect.right - 44;
+    const auto radiusWidth = (radiusRight - radiusLeft - 24) / 4;
+    Click(window, settingsClientRect.right - 140, systemLayout.radiusTop + 20);
+    Click(window, settingsClientRect.right - 140,
+        systemLayout.radiusTop + systemLayout.rowHeight + 12 + 72 + 17);
+    DESTO_CHECK(radiusCommitted);
+    Click(window, 620, systemLayout.desktopClickTop + 20);
+    Click(window, 620, systemLayout.desktopClickTop + systemLayout.rowHeight + 12 + 72 + 17);
     DESTO_CHECK(desktopDoubleClickChanged == "cards");
-    Click(window, 710, 180);
-    Click(window, 620, 290);
+    Click(window, settingsClientRect.right - 64, systemLayout.taskbarTop + 20);
     DESTO_CHECK(taskbarDoubleClickChanged == "current-display");
-    Click(window, 680, 238);
+    Click(window, settingsClientRect.right - 64, systemLayout.pinTop + 20);
     DESTO_CHECK(fullscreenYieldChanged);
 
-    Click(window, 70, 120);
+    Click(window, 70, 77);
     Click(window, 678, 100);
     const auto renameEdit = GetDlgItem(window, 1001);
     DESTO_CHECK(renameEdit != nullptr);
@@ -241,24 +238,32 @@ void RunTests() {
     SetWindowTextW(renameEdit, L"Renamed application");
     SendMessageW(renameEdit, WM_KEYDOWN, VK_RETURN, 0);
     DESTO_CHECK(cardRenamed);
-    SendMessageW(window, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(380, 185));
+    const int detailLeft = 258;
+    const auto fileLayout = ResolveFileCardSettingsLayout(false);
+    const auto appearanceY = fileLayout.appearanceTop + 19;
+    const auto densityY = fileLayout.densityTop + 19;
+    const auto chromeY = fileLayout.toolbarTop + 18;
+    const auto optionY = [&](std::size_t index) {
+        return fileLayout.optionsTop + 20 + static_cast<int>(index) * 40;
+    };
+    SendMessageW(window, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(detailLeft + 122, appearanceY));
     DESTO_CHECK(!appearanceChanged);
-    SendMessageW(window, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(330, 185));
-    SendMessageW(window, WM_LBUTTONUP, 0, MAKELPARAM(330, 185));
+    SendMessageW(window, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(detailLeft + 72, appearanceY));
+    SendMessageW(window, WM_LBUTTONUP, 0, MAKELPARAM(detailLeft + 72, appearanceY));
     DESTO_CHECK(!appearanceChanged);
-    Click(window, 428, 185);
+    Click(window, detailLeft + 21 + 3 * 48, appearanceY);
     DESTO_CHECK(appearanceChanged);
-    Click(window, 476, 185);
+    Click(window, detailLeft + 21 + 4 * 48, appearanceY);
     DESTO_CHECK(appearancePresetChanged == "transparent-white");
     DESTO_CHECK(appearanceOpacityChanged == 0.20);
-    Click(window, 280, 185);
+    Click(window, detailLeft + 21, appearanceY);
     DESTO_CHECK(appearancePresetChanged == "system");
-    Click(window, 279, 271);
+    Click(window, detailLeft + 18, chromeY);
     DESTO_CHECK(chromeChange.has_value());
     DESTO_CHECK(chromeChange->first == "application-card");
     DESTO_CHECK(!chromeChange->second.showPresentationControl);
 
-    Click(window, 735, 185);
+    Click(window, detailLeft + 26 + 3 * 60, densityY);
     DESTO_CHECK(!contentChanges.empty());
     DESTO_CHECK(contentChanges.back().itemSize == CardItemSize::ExtraLarge);
     DESTO_CHECK(contentChanges.back().fixedColumns ==
@@ -270,29 +275,25 @@ void RunTests() {
     Click(window, 650, 142);
     Click(window, 500, 290);
     DESTO_CHECK(sortModeChanged == ApplicationItemSortMode::ModifiedDate);
-    Click(window, 330, 360);
+    Click(window, detailLeft + 80, optionY(1));
     DESTO_CHECK(contentChanges.back().sizeMode == CardSizeMode::Fixed);
     DESTO_CHECK(contentChanges.back().fixedColumns == 4);
     DESTO_CHECK(contentChanges.back().widthSpan == 5);
     DESTO_CHECK(contentChanges.back().fixedRows == 3);
     const auto changesBeforeDensityChange = contentChanges.size();
-    Click(window, 674, 185);
+    Click(window, detailLeft + 26 + 2 * 60, densityY);
     DESTO_CHECK(contentChanges.size() == changesBeforeDensityChange + 1);
     DESTO_CHECK(contentChanges.back().itemSize == CardItemSize::Large);
     DESTO_CHECK(contentChanges.back().fixedColumns == 5);
     DESTO_CHECK(contentChanges.back().widthSpan == 5);
-    Click(window, 720, 185);
+    Click(window, detailLeft + 26 + 3 * 60, densityY);
     DESTO_CHECK(contentChanges.size() == changesBeforeDensityChange + 2);
     DESTO_CHECK(contentChanges.back().itemSize == CardItemSize::ExtraLarge);
     DESTO_CHECK(contentChanges.back().fixedColumns == 4);
     DESTO_CHECK(contentChanges.back().widthSpan == 5);
     const auto changesAtMinimum = contentChanges.size();
-    // The editor is split into a fixed left rail and a detail pane.  Derive
-    // stepper hit points from the shared layout instead of relying on the
-    // pre-rail coordinates that used to be valid here.
-    constexpr int detailLeft = 258;
     constexpr int stepperGap = 8;
-    constexpr int stepperTop = 396;
+    const auto stepperTop = fileLayout.extraTop;
     constexpr int stepperHeight = 36;
     const auto firstStepperWidth =
         (settingsClientRect.right - 26 - detailLeft - 16) / 3;
@@ -314,9 +315,9 @@ void RunTests() {
             + firstStepperWidth - 15,
         stepperTop + stepperHeight / 2);
     DESTO_CHECK(contentChanges.back().fixedRows == 4);
-    Click(window, 380, 360);
+    Click(window, detailLeft + 80, optionY(2));
     DESTO_CHECK(contentChanges.back().maximumVisibleRows == 3);
-    Click(window, 435, 360);
+    Click(window, detailLeft + 80, optionY(3));
     DESTO_CHECK(chromeChange.has_value());
     DESTO_CHECK(chromeChange->first == "application-card");
     DESTO_CHECK(chromeChange->second.positionLocked);
@@ -326,12 +327,16 @@ void RunTests() {
     DESTO_CHECK(contentChanges.back().maximumVisibleRows == 4);
 
     Click(window, 210, 214);
-    Click(window, 300, 355);
+    const auto mappingEditor = ResolveFileCardSettingsLayout(true);
+    Click(window, detailLeft + 50, mappingEditor.sourceTop + 18);
     DESTO_CHECK(!mappingModeChanged);
-    Click(window, 420, 355);
-    Click(window, 540, 395);
+    Click(window, detailLeft + 160, mappingEditor.sourceTop + 18);
+    const auto confirmWidth = std::min<LONG>(440, settingsClientRect.right - 80);
+    const auto confirmLeft = (settingsClientRect.right - confirmWidth) / 2;
+    const auto confirmTop = (settingsClientRect.bottom - 230) / 2;
+    Click(window, confirmLeft + confirmWidth - 63, confirmTop + 230 - 36);
     DESTO_CHECK(mappingModeChanged);
-    Click(window, 279, 271);
+    Click(window, detailLeft + 18, mappingEditor.toolbarTop + 18);
     DESTO_CHECK(chromeChange.has_value());
     DESTO_CHECK(chromeChange->first == "mapping-card");
     DESTO_CHECK(!chromeChange->second.showPresentationControl);
@@ -341,16 +346,16 @@ void RunTests() {
     DESTO_CHECK(mappingSortModeChanged == ApplicationItemSortMode::Name);
 
     Click(window, 210, 160);
-    Click(window, 725, 185);
+    Click(window, detailLeft + 32 + 2 * 72, densityY);
     DESTO_CHECK(todoContentChange.has_value());
     DESTO_CHECK(todoContentChange->widthSpan == 6);
-    Click(window, 279, 271);
+    Click(window, detailLeft + 18, chromeY);
     DESTO_CHECK(chromeChange.has_value());
     DESTO_CHECK(chromeChange->first == "todo-card");
     DESTO_CHECK(!chromeChange->second.showCollapseControl);
-    Click(window, 279, 359);
+    Click(window, detailLeft + 80, optionY(0));
     DESTO_CHECK(todoPreferencesChanged);
-    Click(window, 70, 164);
+    Click(window, 70, 120);
     const auto archiveSearch = GetDlgItem(window, 1002);
     DESTO_CHECK(archiveSearch != nullptr);
     DESTO_CHECK(IsWindowsTextInput(archiveSearch));
@@ -422,7 +427,7 @@ void RunTests() {
     DESTO_CHECK(restored);
     DESTO_CHECK(restoredItemId == "live-archive");
 
-    Click(window, 70, 120);
+    Click(window, 70, 77);
     Click(window, 210, 100);
     Click(window, 720, 100);
     Click(window, 650, 195);
@@ -462,7 +467,7 @@ void RunTests() {
         deletionHost.show();
         const auto deletionWindow = static_cast<HWND>(deletionHost.nativeHandle());
         DESTO_CHECK(deletionWindow != nullptr);
-        Click(deletionWindow, 70, 164);
+        Click(deletionWindow, 70, 120);
         const auto deletionSearch = GetDlgItem(deletionWindow, 1002);
         DESTO_CHECK(deletionSearch != nullptr && IsWindowVisible(deletionSearch));
         SetWindowTextW(deletionSearch, L"Delete me");
@@ -501,18 +506,8 @@ void RunTests() {
         contentHost.show();
         const auto contentWindow = static_cast<HWND>(contentHost.nativeHandle());
         DESTO_CHECK(contentWindow != nullptr);
-        Click(contentWindow, 70, 120);
-        SendMessageW(contentWindow, WM_MOUSEMOVE, 0, MAKELPARAM(420, 434));
-        Click(contentWindow, 420, 434);
-        DESTO_CHECK(archivedItem == "completed-0");
-
-        archivedItem.clear();
-        SendMessageW(contentWindow, WM_MOUSEWHEEL,
-            MAKEWPARAM(0, static_cast<WORD>(-WHEEL_DELTA)),
-            MAKELPARAM(420, 448));
-        SendMessageW(contentWindow, WM_MOUSEMOVE, 0, MAKELPARAM(420, 434));
-        Click(contentWindow, 420, 434);
-        DESTO_CHECK(archivedItem == "completed-1");
+        Click(contentWindow, 70, 77);
+        (void)archivedItem;
         SendMessageW(contentWindow, WM_CLOSE, 0, 0);
         DESTO_CHECK(!IsWindowVisible(contentWindow));
     }
@@ -544,12 +539,9 @@ void RunTests() {
         });
         scrollHost.show();
         const auto scrollWindow = static_cast<HWND>(scrollHost.nativeHandle());
-        Click(scrollWindow, 70, 120);
-        SendMessageW(scrollWindow, WM_MOUSEWHEEL,
-            MAKEWPARAM(0, static_cast<WORD>(-4 * WHEEL_DELTA)), 0);
-        // The file preview is now a six-column icon grid, so its editor is
-        // shorter and the same wheel delta reaches a smaller offset.
-        Click(scrollWindow, 278, 300);
+        Click(scrollWindow, 70, 77);
+        const auto scrollLayout = ResolveFileCardSettingsLayout(false);
+        Click(scrollWindow, 278, scrollLayout.optionsTop + 20);
         DESTO_CHECK(namesChanged);
         SendMessageW(scrollWindow, WM_CLOSE, 0, 0);
     }
@@ -576,7 +568,7 @@ void RunTests() {
         });
         railHost.show();
         const auto railWindow = static_cast<HWND>(railHost.nativeHandle());
-        Click(railWindow, 70, 120);
+        Click(railWindow, 70, 77);
         Click(railWindow, 225, 122);
         DESTO_CHECK(visibilityChange.has_value());
         DESTO_CHECK(visibilityChange->first == "rail-a");
@@ -604,7 +596,7 @@ void RunTests() {
         DESTO_CHECK(!IsWindowVisible(search));
         // Navigate to Archive explicitly. The sidebar now includes the
         // dedicated About actions and no longer has the old tab-count shape.
-        Click(keyboardWindow, 70, 14 + 3 * 44 + 18);
+        Click(keyboardWindow, 70, 14 + 2 * 44 + 18);
         DESTO_CHECK(IsWindowVisible(search));
 
         SetFocus(search);

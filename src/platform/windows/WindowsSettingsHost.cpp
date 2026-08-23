@@ -24,6 +24,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string_view>
+#include <thread>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -68,29 +69,47 @@ std::uint32_t ResolveSettingsThemeColor(
 
 FileCardSettingsLayout ResolveFileCardSettingsLayout(bool mappingCard) noexcept {
     FileCardSettingsLayout result{};
-    // Keep every section derived from the previous section. This is the
-    // single source of truth for the editor's vertical rhythm; type-specific
-    // rows may be inserted without reintroducing overlapping fixed offsets.
     constexpr int sectionGap = 16;
-    constexpr int labelToControlGap = 30;
-    constexpr int controlHeight = 42;
-    result.appearanceTop = 166;
-    result.appearanceBottom = 204;
-    result.toolbarLabelTop = result.appearanceBottom + sectionGap;
+    constexpr int labelToControlGap = 26;
+    constexpr int swatchHeight = 38;
+    constexpr int rowHeight = 40;
+    result.previewTop = 148;
+    result.previewBottom = 148;
+    auto cursor = 148;
+    result.appearanceLabelTop = cursor;
+    result.appearanceTop = result.appearanceLabelTop + labelToControlGap;
+    result.appearanceBottom = result.appearanceTop + swatchHeight;
+    cursor = result.appearanceBottom + sectionGap;
+    result.densityLabelTop = cursor;
+    result.densityTop = result.densityLabelTop + labelToControlGap;
+    result.densityBottom = result.densityTop + swatchHeight;
+    cursor = result.densityBottom + sectionGap;
+    result.toolbarLabelTop = cursor;
     result.toolbarTop = result.toolbarLabelTop + labelToControlGap;
-    result.toolbarBottom = result.toolbarTop + controlHeight;
-    auto cursor = result.toolbarBottom + sectionGap;
+    result.toolbarBottom = result.toolbarTop + 36;
+    cursor = result.toolbarBottom + sectionGap;
     if (mappingCard) {
         result.sourceLabelTop = cursor;
         result.sourceTop = result.sourceLabelTop + labelToControlGap;
         result.sourceBottom = result.sourceTop + 38;
-        cursor = result.sourceBottom + sectionGap + 2;
+        cursor = result.sourceBottom + sectionGap;
     }
     result.optionsLabelTop = cursor;
     result.optionsTop = result.optionsLabelTop + labelToControlGap;
-    result.optionsBottom = result.optionsTop + controlHeight;
-    result.extraTop = result.optionsBottom + sectionGap;
+    result.optionsBottom = result.optionsTop + rowHeight * 4;
+    result.extraTop = result.optionsBottom + 12;
     return result;
+}
+
+SystemSettingsLayout ResolveSystemSettingsLayout() noexcept {
+    return {};
+}
+
+RECT FileCardSettingRowRect(
+    int detailLeft, int detailRight, int sectionTop, std::size_t index) noexcept {
+    constexpr int rowHeight = 40;
+    const auto top = sectionTop + static_cast<int>(index) * rowHeight;
+    return {detailLeft, top, detailRight, top + rowHeight};
 }
 
 namespace {
@@ -253,7 +272,6 @@ constexpr DWORD kDwmTextColorAttribute = 36;
 
 enum class SettingsPage {
     System,
-    Features,
     Cards,
     Archive,
     About,
@@ -261,8 +279,18 @@ enum class SettingsPage {
 
 enum class UpdateCheckState {
     Idle,
+    Checking,
     Latest,
     Available,
+};
+
+constexpr UINT WmUpdateCheckFinished = WM_APP + 0x74;
+
+struct UpdateCheckFinished {
+    bool ok = false;
+    bool hasUpdate = false;
+    std::wstring tag;
+    std::wstring url;
 };
 
 enum class SettingsActionKind {
@@ -312,6 +340,7 @@ enum class SettingsActionKind {
     GlobalCornerRadius,
     SelectTimeZone,
     SelectLanguage,
+    SelectCornerRadius,
     SelectTimeZoneOption,
     SelectLanguageOption,
     DismissSystemDropdown,
@@ -370,6 +399,7 @@ enum class SystemDropdown {
     TimeZone,
     Language,
     DesktopDoubleClick,
+    CornerRadius,
 };
 
 struct SettingsAction {
@@ -896,7 +926,7 @@ struct WindowsSettingsHost::Impl {
             .controlId = kArchiveSearchEditId,
             .bounds = RECT{0, 0, 1, 1},
             .maximumLength = 512,
-            .placeholder = tr(L"按日期、内容或卡片名称搜索", L"Search date, task, or card"),
+            .placeholder = tr(L"搜索日期、待办或卡片", L"Search tasks or cards"),
             .style = settingsInputStyle(true),
         });
         if (archiveSearchEdit == nullptr) {
@@ -982,6 +1012,14 @@ struct WindowsSettingsHost::Impl {
         }
         if (instance == nullptr) return DefWindowProcW(window, message, wParam, lParam);
         switch (message) {
+        case WmUpdateCheckFinished: {
+            auto* payload = reinterpret_cast<UpdateCheckFinished*>(lParam);
+            if (payload != nullptr) {
+                instance->finishUpdateCheck(*payload);
+                delete payload;
+            }
+            return 0;
+        }
         case WM_SETTINGCHANGE:
         case WM_THEMECHANGED:
             instance->refreshSystemTheme();
@@ -1217,22 +1255,18 @@ struct WindowsSettingsHost::Impl {
             left + 42 + static_cast<int>(index) * 48, layout.appearanceBottom);
     }
     RECT itemSizeRect(std::size_t index) const noexcept {
-        constexpr int size = 38;
-        constexpr int gap = 7;
-        const auto groupWidth = size * 4 + gap * 3;
-        const auto left = clientRight() - 26 - groupWidth;
-        const auto itemLeft = left + static_cast<int>(index) * (size + gap);
+        constexpr int size = 52;
+        constexpr int gap = 8;
+        const auto left = cardDetailLeft() + static_cast<int>(index) * (size + gap);
         const auto layout = ResolveFileCardSettingsLayout(false);
-        return Rect(itemLeft, layout.appearanceTop, itemLeft + size, layout.appearanceBottom);
+        return Rect(left, layout.densityTop, left + size, layout.densityBottom);
     }
     RECT compactCardSizeRect(std::size_t index) const noexcept {
-        constexpr int width = 54;
-        constexpr int height = 38;
-        constexpr int gap = 7;
-        const auto groupWidth = width * 3 + gap * 2;
-        const auto left = clientRight() - 26 - groupWidth;
-        const auto itemLeft = left + static_cast<int>(index) * (width + gap);
-        return Rect(itemLeft, 166, itemLeft + width, 166 + height);
+        constexpr int width = 64;
+        constexpr int gap = 8;
+        const auto left = cardDetailLeft() + static_cast<int>(index) * (width + gap);
+        const auto layout = ResolveFileCardSettingsLayout(false);
+        return Rect(left, layout.densityTop, left + width, layout.densityBottom);
     }
     RECT itemNamesRect() const noexcept {
         return optionButtonRect(0);
@@ -1266,11 +1300,16 @@ struct WindowsSettingsHost::Impl {
             && cards[selectedCard].type == domain::CardType::Mapping;
     }
     RECT fileToolbarButtonRect(std::size_t index) const noexcept {
-        constexpr int size = 42;
-        constexpr int gap = 10;
+        constexpr int size = 36;
+        constexpr int gap = 8;
         const auto layout = ResolveFileCardSettingsLayout(selectedMappingCard());
         const auto left = cardDetailLeft() + static_cast<int>(index) * (size + gap);
-        return Rect(left, layout.toolbarTop, left + size, layout.toolbarBottom);
+        return Rect(left, layout.toolbarTop, left + size, layout.toolbarTop + size);
+    }
+    RECT cornerRadiusRect() const noexcept {
+        const auto layout = ResolveSystemSettingsLayout();
+        return Rect(clientRight() - 244, layout.radiusTop,
+            clientRight() - 44, layout.radiusTop + layout.rowHeight);
     }
     RECT filePresentationRect() const noexcept {
         return fileToolbarButtonRect(0);
@@ -1284,27 +1323,14 @@ struct WindowsSettingsHost::Impl {
         return Rect(itemLeft, top, itemLeft + width, top + 36);
     }
     RECT optionButtonRect(std::size_t index) const noexcept {
-        constexpr int size = 42;
-        constexpr int gap = 10;
-        const auto left = cardDetailLeft() + static_cast<int>(index) * (size + gap);
-        const auto top = ResolveFileCardSettingsLayout(selectedMappingCard()).optionsTop;
-        return Rect(left, top, left + size, top + size);
+        const auto layout = ResolveFileCardSettingsLayout(selectedMappingCard());
+        return FileCardSettingRowRect(
+            cardDetailLeft(), clientRight() - 26, layout.optionsTop, index);
     }
-    RECT contentPreviewRect(const presentation::CardView& card) const {
-        const auto total = contentItemIndices(card).size();
-        const auto rows = (card.type == domain::CardType::Application
-                || card.type == domain::CardType::Mapping)
-            ? std::max<std::size_t>(1, (total + 5) / 6)
-            : std::max<std::size_t>(1, total);
-        const auto hasExtraSettings = card.content.sizeMode == domain::CardSizeMode::Fixed
-            || card.content.maximumVisibleRows.has_value();
-        const auto layout = ResolveFileCardSettingsLayout(
-            card.type == domain::CardType::Mapping);
-        const auto top = hasExtraSettings ? layout.extraTop + 52 : layout.extraTop;
-        return Rect(cardDetailLeft(), top, clientRight() - 26,
-            top + 44 + static_cast<int>(rows)
-                * ((card.type == domain::CardType::Application
-                    || card.type == domain::CardType::Mapping) ? 58 : 28) + 12);
+    RECT contentPreviewRect(const presentation::CardView&) const {
+        const auto layout = ResolveFileCardSettingsLayout(selectedMappingCard());
+        return Rect(cardDetailLeft(), layout.previewTop, clientRight() - 26,
+            layout.previewBottom);
     }
 
     RECT contentPreviewRowRect(const RECT& panel, std::size_t visibleIndex) const noexcept {
@@ -1336,7 +1362,7 @@ struct WindowsSettingsHost::Impl {
         return optionButtonRect(1);
     }
     RECT todoMaximumVisibleRowsRect() const noexcept {
-        return extraFileSettingRect(0);
+        return optionButtonRect(3);
     }
     static RECT decrementRect(RECT stepper) noexcept {
         stepper.right = stepper.left + 30;
@@ -1349,56 +1375,68 @@ struct WindowsSettingsHost::Impl {
     RECT createdTimeRect() const noexcept {
         return optionButtonRect(0);
     }
-    RECT todoContentPreviewRect(const presentation::CardView& card) const {
-        const auto rows = std::max<std::size_t>(1, contentItemIndices(card).size());
+    RECT todoContentPreviewRect(const presentation::CardView&) const {
         const auto layout = ResolveFileCardSettingsLayout(false);
-        const auto top = card.content.maximumVisibleRows.has_value()
-            ? layout.extraTop + 52 : layout.extraTop;
-        return Rect(cardDetailLeft(), top, clientRight() - 26,
-            top + 44 + static_cast<int>(rows) * 28 + 12);
+        return Rect(cardDetailLeft(), layout.previewTop, clientRight() - 26,
+            layout.previewBottom);
     }
 
-    RECT timeZoneRect() const noexcept {
-        return Rect(clientRight() - 244, 158, clientRight() - 44, 194);
-    }
     RECT languageRect() const noexcept {
-        return Rect(clientRight() - 244, 212, clientRight() - 44, 248);
+        const auto layout = ResolveSystemSettingsLayout();
+        return Rect(clientRight() - 244, layout.languageTop,
+            clientRight() - 44, layout.languageTop + layout.rowHeight);
     }
     RECT storageRootRect() const noexcept {
-        return Rect(clientRight() - 126, 266, clientRight() - 44, 302);
+        const auto layout = ResolveSystemSettingsLayout();
+        const auto top = layout.storageTop + (layout.storageHeight - 32) / 2;
+        return Rect(clientRight() - 126, top, clientRight() - 44, top + 32);
     }
     RECT runAtStartupRect() const noexcept {
-        return Rect(kContentLeft + 18, 104, clientRight() - 44, 132);
+        const auto layout = ResolveSystemSettingsLayout();
+        return Rect(kContentLeft + 18, layout.startupTop,
+            clientRight() - 44, layout.startupTop + layout.rowHeight);
     }
     RECT desktopDoubleClickRect() const noexcept {
-        return Rect(clientRight() - 244, 104, clientRight() - 44, 140);
+        const auto layout = ResolveSystemSettingsLayout();
+        return Rect(clientRight() - 244, layout.desktopClickTop,
+            clientRight() - 44, layout.desktopClickTop + layout.rowHeight);
     }
     RECT taskbarDoubleClickRowRect() const noexcept {
-        return Rect(kContentLeft + 18, 164, clientRight() - 44, 192);
+        const auto layout = ResolveSystemSettingsLayout();
+        return Rect(kContentLeft + 18, layout.taskbarTop,
+            clientRight() - 44, layout.taskbarTop + layout.rowHeight);
     }
     RECT taskbarDoubleClickRect() const noexcept {
-        return Rect(clientRight() - 84, 164, clientRight() - 44, 192);
+        const auto layout = ResolveSystemSettingsLayout();
+        return Rect(clientRight() - 84, layout.taskbarTop,
+            clientRight() - 44, layout.taskbarTop + layout.rowHeight);
     }
     RECT pinnedFullscreenRect() const noexcept {
-        return Rect(kContentLeft + 18, 224, clientRight() - 44, 252);
+        const auto layout = ResolveSystemSettingsLayout();
+        return Rect(kContentLeft + 18, layout.pinTop,
+            clientRight() - 44, layout.pinTop + layout.rowHeight);
     }
     RECT iconBackgroundFrameRect() const noexcept {
-        return Rect(kContentLeft + 18, 260, clientRight() - 44, 288);
+        const auto layout = ResolveSystemSettingsLayout();
+        return Rect(kContentLeft + 18, layout.iconFrameTop,
+            clientRight() - 44, layout.iconFrameTop + layout.rowHeight);
     }
     RECT fileDeletionConfirmationRect() const noexcept {
-        return Rect(kContentLeft + 18, 296, clientRight() - 44, 324);
-    }
-    RECT openProjectRect() const noexcept {
-        const auto center = (kContentLeft + clientRight() - 26) / 2;
-        return Rect(center - 115, 300, center + 115, 334);
+        const auto layout = ResolveSystemSettingsLayout();
+        return Rect(kContentLeft + 18, layout.deleteConfirmTop,
+            clientRight() - 44, layout.deleteConfirmTop + layout.rowHeight);
     }
     RECT checkForUpdatesRect() const noexcept {
         const auto center = (kContentLeft + clientRight() - 26) / 2;
-        return Rect(center - 115, 342, center + 115, 376);
+        return Rect(center - 115, 304, center + 115, 344);
     }
-    RECT updateChannelRect() const noexcept {
+    RECT openProjectRect() const noexcept {
         const auto center = (kContentLeft + clientRight() - 26) / 2;
-        return Rect(center - 115, 384, center + 115, 418);
+        return Rect(center - 115, 356, center + 115, 392);
+    }
+    RECT updateChannelToggleRect() const noexcept {
+        return Rect(kContentLeft, clientBottom() - 46, clientRight() - 26,
+            clientBottom() - 18);
     }
     RECT radiusOptionRect(std::size_t index) const noexcept {
         const auto left = kContentLeft + 18;
@@ -1406,31 +1444,34 @@ struct WindowsSettingsHost::Impl {
         constexpr int gap = 8;
         const auto width = std::max(1, (right - left - gap * 3) / 4);
         const auto itemLeft = left + static_cast<int>(index) * (width + gap);
-        return Rect(itemLeft, 378, itemLeft + width, 418);
+        const auto layout = ResolveSystemSettingsLayout();
+        return Rect(itemLeft, layout.radiusTop, itemLeft + width,
+            layout.radiusTop + layout.rowHeight);
     }
     std::size_t systemDropdownOptionCount() const noexcept {
-        if (activeSystemDropdown == SystemDropdown::TimeZone) return 4;
+        if (activeSystemDropdown == SystemDropdown::TimeZone) return 0;
         if (activeSystemDropdown == SystemDropdown::Language) return 3;
         if (activeSystemDropdown == SystemDropdown::DesktopDoubleClick) return 4;
+        if (activeSystemDropdown == SystemDropdown::CornerRadius) return 4;
         return 0;
     }
     RECT systemDropdownOptionRect(std::size_t index) const noexcept {
-        const auto anchor = activeSystemDropdown == SystemDropdown::TimeZone
-            ? timeZoneRect()
-            : activeSystemDropdown == SystemDropdown::Language
+        const auto anchor = activeSystemDropdown == SystemDropdown::Language
             ? languageRect()
+            : activeSystemDropdown == SystemDropdown::CornerRadius
+            ? cornerRadiusRect()
             : desktopDoubleClickRect();
-        const auto top = anchor.bottom + 6 + static_cast<int>(index) * 36;
+        const auto top = anchor.bottom + 12 + static_cast<int>(index) * 36;
         return Rect(anchor.left + 4, top, anchor.right - 4, top + 34);
     }
     RECT systemDropdownPanelRect() const noexcept {
-        const auto anchor = activeSystemDropdown == SystemDropdown::TimeZone
-            ? timeZoneRect()
-            : activeSystemDropdown == SystemDropdown::Language
+        const auto anchor = activeSystemDropdown == SystemDropdown::Language
             ? languageRect()
+            : activeSystemDropdown == SystemDropdown::CornerRadius
+            ? cornerRadiusRect()
             : desktopDoubleClickRect();
-        return Rect(anchor.left, anchor.bottom + 2, anchor.right,
-            anchor.bottom + 10 + static_cast<int>(systemDropdownOptionCount()) * 36);
+        return Rect(anchor.left, anchor.bottom + 8, anchor.right,
+            anchor.bottom + 16 + static_cast<int>(systemDropdownOptionCount()) * 36);
     }
     RECT archiveSearchRect() const noexcept {
         return Rect(kContentLeft, 132, clientRight() - 26, 172);
@@ -1451,7 +1492,7 @@ struct WindowsSettingsHost::Impl {
     }
     RECT archiveOverlayEditRect() const noexcept {
         const auto panel = archiveOverlayRect();
-        return Rect(panel.left + 20, panel.top + 112, panel.right - 20, panel.top + 156);
+        return Rect(panel.left + 20, panel.top + 62, panel.right - 20, panel.top + 106);
     }
     RECT archiveOverlayConfirmRect() const noexcept {
         const auto panel = archiveOverlayRect();
@@ -1672,6 +1713,26 @@ struct WindowsSettingsHost::Impl {
         return result;
     }
 
+    std::size_t archivedCountOn(domain::TodoDate date) const noexcept {
+        std::size_t count = 0;
+        const auto today = domain::CurrentTodoDate(timeZoneOffsetMinutes);
+        for (const auto& card : cards) {
+            if (card.type != domain::CardType::Todo) continue;
+            for (const auto& item : card.todoItems) {
+                if (!domain::IsTodoItemArchived(item, today, timeZoneOffsetMinutes)) {
+                    continue;
+                }
+                const auto timestamp = item.completedAtUnixMilliseconds > 0
+                    ? item.completedAtUnixMilliseconds : item.createdAtUnixMilliseconds;
+                if (timestamp > 0 && domain::TodoDateAtUnixMilliseconds(
+                        timestamp, timeZoneOffsetMinutes) == date) {
+                    ++count;
+                }
+            }
+        }
+        return count;
+    }
+
     std::size_t visibleArchiveRows() const noexcept {
         return static_cast<std::size_t>(std::max(1, (clientBottom() - 196) / 76));
     }
@@ -1738,8 +1799,15 @@ struct WindowsSettingsHost::Impl {
     }
 
     int cardEditorContentBottom(const presentation::CardView& card) const {
-        return (card.type == domain::CardType::Todo
-            ? todoContentPreviewRect(card) : contentPreviewRect(card)).bottom + 18;
+        const auto layout = ResolveFileCardSettingsLayout(
+            card.type == domain::CardType::Mapping);
+        auto bottom = layout.extraTop + 8;
+        if (card.content.sizeMode == domain::CardSizeMode::Fixed) bottom += 44;
+        if (card.content.maximumVisibleRows.has_value()
+            && card.type != domain::CardType::Todo) {
+            bottom += 44;
+        }
+        return bottom;
     }
 
     int maximumCardEditorOffset(const presentation::CardView& card) const {
@@ -1820,9 +1888,6 @@ struct WindowsSettingsHost::Impl {
                 return {SettingsActionKind::CancelArchiveOverlay};
             }
             if (archiveOverlay == ArchiveOverlay::Add) {
-                if (Contains(archiveOverlayCardRect(), x, y)) {
-                    return {SettingsActionKind::CycleHistoricalArchiveCard};
-                }
                 if (Contains(archiveOverlayConfirmRect(), x, y)) {
                     return {SettingsActionKind::ConfirmHistoricalArchive};
                 }
@@ -1887,42 +1952,29 @@ struct WindowsSettingsHost::Impl {
             if (activeSystemDropdown != SystemDropdown::None) {
                 for (std::size_t index = 0; index < systemDropdownOptionCount(); ++index) {
                     if (Contains(systemDropdownOptionRect(index), x, y)) {
-                        const auto kind = activeSystemDropdown == SystemDropdown::TimeZone
-                            ? SettingsActionKind::SelectTimeZoneOption
-                            : activeSystemDropdown == SystemDropdown::Language
+                        const auto kind = activeSystemDropdown == SystemDropdown::Language
                             ? SettingsActionKind::SelectLanguageOption
+                            : activeSystemDropdown == SystemDropdown::CornerRadius
+                            ? SettingsActionKind::GlobalCornerRadius
                             : SettingsActionKind::SelectDesktopDoubleClickOption;
                         return {kind, index};
                     }
                 }
-                if (Contains(timeZoneRect(), x, y)) return {SettingsActionKind::SelectTimeZone};
                 if (Contains(languageRect(), x, y)) return {SettingsActionKind::SelectLanguage};
-                return {SettingsActionKind::DismissSystemDropdown};
-            }
-            for (std::size_t index = 0; index < 4; ++index) {
-                if (Contains(radiusOptionRect(index), x, y)) {
-                    return {SettingsActionKind::GlobalCornerRadius, index};
-                }
-            }
-            if (Contains(timeZoneRect(), x, y)) return {SettingsActionKind::SelectTimeZone};
-            if (Contains(languageRect(), x, y)) return {SettingsActionKind::SelectLanguage};
-            if (Contains(storageRootRect(), x, y)) return {SettingsActionKind::ChangeStorageRoot};
-            if (Contains(runAtStartupRect(), x, y)) return {SettingsActionKind::ToggleRunAtStartup};
-        }
-        if (page == SettingsPage::Features) {
-            if (activeSystemDropdown != SystemDropdown::None) {
-                for (std::size_t index = 0; index < systemDropdownOptionCount(); ++index) {
-                    if (Contains(systemDropdownOptionRect(index), x, y)) {
-                        return {
-                            SettingsActionKind::SelectDesktopDoubleClickOption,
-                            index};
-                    }
+                if (Contains(cornerRadiusRect(), x, y)) {
+                    return {SettingsActionKind::SelectCornerRadius};
                 }
                 if (Contains(desktopDoubleClickRect(), x, y)) {
                     return {SettingsActionKind::SelectDesktopDoubleClick};
                 }
                 return {SettingsActionKind::DismissSystemDropdown};
             }
+            if (Contains(languageRect(), x, y)) return {SettingsActionKind::SelectLanguage};
+            if (Contains(cornerRadiusRect(), x, y)) {
+                return {SettingsActionKind::SelectCornerRadius};
+            }
+            if (Contains(storageRootRect(), x, y)) return {SettingsActionKind::ChangeStorageRoot};
+            if (Contains(runAtStartupRect(), x, y)) return {SettingsActionKind::ToggleRunAtStartup};
             if (Contains(desktopDoubleClickRect(), x, y)) {
                 return {SettingsActionKind::SelectDesktopDoubleClick};
             }
@@ -1942,7 +1994,9 @@ struct WindowsSettingsHost::Impl {
         if (page == SettingsPage::About) {
             if (Contains(openProjectRect(), x, y)) return {SettingsActionKind::OpenProject};
             if (Contains(checkForUpdatesRect(), x, y)) return {SettingsActionKind::CheckForUpdates};
-            if (Contains(updateChannelRect(), x, y)) return {SettingsActionKind::ToggleUpdateChannel};
+            if (Contains(updateChannelToggleRect(), x, y)) {
+                return {SettingsActionKind::ToggleUpdateChannel};
+            }
         }
         if (page == SettingsPage::Cards) {
             if (Contains(addCardRect(), x, y)) return {SettingsActionKind::AddCard};
@@ -2183,21 +2237,18 @@ struct WindowsSettingsHost::Impl {
         };
 
         if (page == SettingsPage::System) {
-            append({SettingsActionKind::SelectTimeZone});
-            append({SettingsActionKind::SelectLanguage});
-            append({SettingsActionKind::ChangeStorageRoot});
             append({SettingsActionKind::ToggleRunAtStartup});
+            append({SettingsActionKind::SelectLanguage});
+            append({SettingsActionKind::SelectCornerRadius});
+            append({SettingsActionKind::ChangeStorageRoot});
             for (std::size_t index = 0; index < 4; ++index) {
                 append({SettingsActionKind::GlobalCornerRadius, index});
             }
-            appendSystemDropdown();
-            return result;
-        }
-        if (page == SettingsPage::Features) {
             append({SettingsActionKind::SelectDesktopDoubleClick});
             append({SettingsActionKind::ToggleTaskbarDesktop});
             append({SettingsActionKind::TogglePinnedCardsYieldToFullscreen});
             append({SettingsActionKind::ToggleIconBackgroundFrame});
+            append({SettingsActionKind::ToggleFileDeletionConfirmation});
             appendSystemDropdown();
             return result;
         }
@@ -2299,6 +2350,7 @@ struct WindowsSettingsHost::Impl {
         if (page == SettingsPage::About) {
             append({SettingsActionKind::OpenProject});
             append({SettingsActionKind::CheckForUpdates});
+            append({SettingsActionKind::ToggleUpdateChannel});
         }
         return result;
     }
@@ -2504,6 +2556,14 @@ struct WindowsSettingsHost::Impl {
         return tr(L"跟随系统", L"System");
     }
 
+    std::wstring cornerRadiusText() const {
+        if (std::abs(globalCornerRadius - 0.0) < 0.5) return tr(L"直角", L"Square");
+        if (std::abs(globalCornerRadius - 12.0) < 0.5) return L"Windows";
+        if (std::abs(globalCornerRadius - 24.0) < 0.5) return L"macOS";
+        if (std::abs(globalCornerRadius - 32.0) < 0.5) return tr(L"饱满圆角", L"Full");
+        return std::to_wstring(static_cast<int>(globalCornerRadius)) + L" DIP";
+    }
+
     std::wstring desktopDoubleClickText() const {
         if (desktopDoubleClickAction == "none") return tr(L"不处理", L"Do nothing");
         if (desktopDoubleClickAction == "icons") return tr(L"桌面图标", L"Desktop icons");
@@ -2559,57 +2619,63 @@ struct WindowsSettingsHost::Impl {
                     if (updateRequested) updateRequested();
                     return;
                 }
-                std::optional<std::string> metadata;
-                const bool developmentChannel = updateChannel == "development";
-                if (developmentChannel) {
-                    metadata = DownloadUpdateMetadata(L"api.github.com",
-                        L"/repos/LectWolf/Desto/releases?per_page=1");
-                } else {
-                    metadata = DownloadUpdateMetadata(L"github.com",
-                        L"/LectWolf/Desto/releases/latest/download/release-manifest.json");
-                }
-                if (!metadata) {
-                    metadata = DownloadUpdateMetadata(L"github.chenc.dev",
-                        developmentChannel
-                            ? L"/https://api.github.com/repos/LectWolf/Desto/releases?per_page=1"
-                            : L"/https://github.com/LectWolf/Desto/releases/latest/download/release-manifest.json");
-                }
-                if (!metadata) {
-                    updateState = UpdateCheckState::Idle;
-                    (void)ShowWindowsAlert(window, tr(L"检查更新失败", L"Update check failed"),
-                        tr(L"暂时无法连接更新服务器，请稍后重试。",
-                            L"Unable to reach the update servers. Please try again later."));
-                    return;
-                }
-                auto tag = JsonStringField(*metadata,
-                    developmentChannel ? "tag_name" : "version");
-                std::wstring download = developmentChannel
-                    ? JsonInstallerUrl(*metadata) : std::wstring{};
-                if (!developmentChannel) {
-                    const auto installerName = JsonInstallerName(*metadata);
-                    if (!installerName.empty()) {
-                        download = L"https://github.com/LectWolf/Desto/releases/latest/download/"
-                            + installerName;
-                    }
-                }
-                if (!tag.empty() && tag.front() == L'v') tag.erase(tag.begin());
-                const auto current = CurrentDestoVersion(developmentChannel);
-                if (tag.empty() || CompareDestoVersions(tag, current) <= 0) {
-                    updateState = UpdateCheckState::Latest;
-                    latestVersion.clear();
-                    installerUrl.clear();
-                    InvalidateRect(window, nullptr, FALSE);
-                    return;
-                }
-                updateState = UpdateCheckState::Available;
-                latestVersion = tag;
-                installerUrl = download;
+                if (updateState == UpdateCheckState::Checking) return;
+                updateState = UpdateCheckState::Checking;
                 InvalidateRect(window, nullptr, FALSE);
+                const bool developmentChannel = updateChannel == "development";
+                const auto hwnd = window;
+                std::thread([hwnd, developmentChannel] {
+                    auto payload = std::make_unique<UpdateCheckFinished>();
+                    std::optional<std::string> metadata;
+                    if (developmentChannel) {
+                        metadata = DownloadUpdateMetadata(L"api.github.com",
+                            L"/repos/LectWolf/Desto/releases?per_page=1");
+                    } else {
+                        metadata = DownloadUpdateMetadata(L"github.com",
+                            L"/LectWolf/Desto/releases/latest/download/release-manifest.json");
+                    }
+                    if (!metadata) {
+                        metadata = DownloadUpdateMetadata(L"github.chenc.dev",
+                            developmentChannel
+                                ? L"/https://api.github.com/repos/LectWolf/Desto/releases?per_page=1"
+                                : L"/https://github.com/LectWolf/Desto/releases/latest/download/release-manifest.json");
+                    }
+                    if (!metadata) {
+                        PostMessageW(hwnd, WmUpdateCheckFinished, 0,
+                            reinterpret_cast<LPARAM>(payload.release()));
+                        return;
+                    }
+                    payload->ok = true;
+                    auto tag = JsonStringField(*metadata,
+                        developmentChannel ? "tag_name" : "version");
+                    std::wstring download = developmentChannel
+                        ? JsonInstallerUrl(*metadata) : std::wstring{};
+                    if (!developmentChannel) {
+                        const auto installerName = JsonInstallerName(*metadata);
+                        if (!installerName.empty()) {
+                            download = L"https://github.com/LectWolf/Desto/releases/latest/download/"
+                                + installerName;
+                        }
+                    }
+                    if (!tag.empty() && tag.front() == L'v') tag.erase(tag.begin());
+                    const auto current = CurrentDestoVersion(developmentChannel);
+                    payload->hasUpdate = !tag.empty()
+                        && CompareDestoVersions(tag, current) > 0;
+                    payload->tag = std::move(tag);
+                    payload->url = std::move(download);
+                    PostMessageW(hwnd, WmUpdateCheckFinished, 0,
+                        reinterpret_cast<LPARAM>(payload.release()));
+                }).detach();
                 return;
             }
             if (action.kind == SettingsActionKind::ToggleUpdateChannel) {
                 const auto next = updateChannel == "development" ? "stable" : "development";
-                if (updateChannelChanged && updateChannelChanged(next)) updateChannel = next;
+                if (updateChannelChanged && updateChannelChanged(next)) {
+                    updateChannel = next;
+                    updateState = UpdateCheckState::Idle;
+                    latestVersion.clear();
+                    installerUrl.clear();
+                }
                 InvalidateRect(window, nullptr, FALSE);
                 return;
             }
@@ -2671,7 +2737,7 @@ struct WindowsSettingsHost::Impl {
                     archiveOverlay = ArchiveOverlay::Export;
                     archiveCalendarOpen = false;
                     archiveExportEnd = selectedArchiveDate();
-                    archiveExportBegin = domain::AddTodoDays(archiveExportEnd, -6);
+                    archiveExportBegin = domain::AddTodoDays(archiveExportEnd, -29);
                     archiveExportCalendarMonth = {
                         archiveExportEnd.year, archiveExportEnd.month, 1};
                     archiveExportDateField = ArchiveExportDateField::None;
@@ -2731,8 +2797,16 @@ struct WindowsSettingsHost::Impl {
                 return;
             }
             if (action.kind == SettingsActionKind::SelectTimeZone) {
-                activeSystemDropdown = activeSystemDropdown == SystemDropdown::TimeZone
-                    ? SystemDropdown::None : SystemDropdown::TimeZone;
+                const auto next = timeZoneOffsetMinutes.has_value()
+                    ? std::optional<std::int32_t>{}
+                    : std::optional<std::int32_t>{0};
+                if (timeZoneChanged && timeZoneChanged(next)) timeZoneOffsetMinutes = next;
+                activeSystemDropdown = SystemDropdown::None;
+                return;
+            }
+            if (action.kind == SettingsActionKind::SelectCornerRadius) {
+                activeSystemDropdown = activeSystemDropdown == SystemDropdown::CornerRadius
+                    ? SystemDropdown::None : SystemDropdown::CornerRadius;
                 return;
             }
             if (action.kind == SettingsActionKind::SelectLanguage) {
@@ -2759,8 +2833,7 @@ struct WindowsSettingsHost::Impl {
                 return;
             }
             if (action.kind == SettingsActionKind::SelectTimeZoneOption) {
-                const std::array<std::optional<std::int32_t>, 4> values{
-                    std::nullopt, 0, 8 * 60, -5 * 60};
+                const std::array<std::int32_t, 3> values{0, 8 * 60, -5 * 60};
                 if (action.index < values.size() && timeZoneChanged
                     && timeZoneChanged(values[action.index])) {
                     timeZoneOffsetMinutes = values[action.index];
@@ -2773,7 +2846,14 @@ struct WindowsSettingsHost::Impl {
                     "system", "zh-CN", "en-US"};
                 if (action.index < values.size()) {
                     const std::string next(values[action.index]);
-                    if (languageChanged && languageChanged(next)) language = next;
+                    if (languageChanged && languageChanged(next)) {
+                        language = next;
+                        SetWindowsTextInputPlaceholder(
+                            archiveSearchEdit,
+                            tr(L"搜索日期、待办或卡片", L"Search tasks or cards"));
+                        SetWindowsTextInputPlaceholder(
+                            archiveAddEdit, tr(L"待办内容", L"Task"));
+                    }
                 }
                 activeSystemDropdown = SystemDropdown::None;
                 return;
@@ -2822,6 +2902,7 @@ struct WindowsSettingsHost::Impl {
                     globalCornerRadius = radii[action.index];
                     for (auto& card : cards) card.cornerRadius = radii[action.index];
                 }
+                activeSystemDropdown = SystemDropdown::None;
                 return;
             }
             if (action.kind == SettingsActionKind::ChangeStorageRoot) {
@@ -3356,7 +3437,6 @@ struct WindowsSettingsHost::Impl {
         paintSidebar(canvas, client);
         switch (page) {
         case SettingsPage::System: paintSystem(canvas); break;
-        case SettingsPage::Features: paintFeatures(canvas); break;
         case SettingsPage::Cards: paintCards(canvas); break;
         case SettingsPage::Archive: paintArchive(canvas); break;
         case SettingsPage::About: paintAbout(canvas); break;
@@ -3377,12 +3457,11 @@ struct WindowsSettingsHost::Impl {
             RGB(25, 26, 29), RGB(255, 255, 255)));
         FillRect(dc, &sidebar, brush);
         DeleteObject(brush);
-        const std::array<std::wstring, 5> labels{
-            tr(L"系统", L"System"), tr(L"功能", L"Features"),
-            tr(L"卡片", L"Cards"), tr(L"归档", L"Archive"),
-            tr(L"关于", L"About")};
+        const std::array<std::wstring, 4> labels{
+            tr(L"系统", L"System"), tr(L"卡片", L"Cards"),
+            tr(L"归档", L"Archive"), tr(L"关于", L"About")};
         const std::array glyphs{
-            L"\uE713", L"\uE713", L"\uE8B7", L"\uE7B8", L"\uE946"};
+            L"\uE713", L"\uE8B7", L"\uE7B8", L"\uE946"};
         for (std::size_t index = 0; index < labels.size(); ++index) {
             const auto action = SettingsAction{SettingsActionKind::Navigate, index};
             auto row = navigationRect(index);
@@ -3406,6 +3485,12 @@ struct WindowsSettingsHost::Impl {
                     Rect(row.left + 40, row.top, row.right - 8, row.bottom), color, 12);
             }
         }
+        DrawLabel(dc, L"Desto",
+            Rect(10, client.bottom - 52, kSidebarWidth - 10, client.bottom - 32),
+            RGB(126, 130, 138), 11, FW_SEMIBOLD, DT_CENTER | DT_BOTTOM);
+        DrawLabel(dc, L"v" + CurrentDestoVersion(updateChannel == "development"),
+            Rect(10, client.bottom - 32, kSidebarWidth - 10, client.bottom - 14),
+            RGB(98, 102, 110), 10, FW_NORMAL, DT_CENTER | DT_TOP);
     }
 
     void paintPageTitle(HDC dc, std::wstring_view titleText, std::wstring_view subtitle) noexcept {
@@ -3427,9 +3512,21 @@ struct WindowsSettingsHost::Impl {
 
     void paintSystem(HDC dc) noexcept {
         paintPageTitle(dc, tr(L"系统", L"System"),
-            tr(L"Desto 的全局行为与视觉偏好", L"Global behavior and appearance"));
-        const auto section = Rect(kContentLeft, 92, clientRight() - 26, 452);
-        paintSection(dc, section);
+            tr(L"语言、启动与桌面交互", L"Language, startup, and desktop"));
+        const auto layout = ResolveSystemSettingsLayout();
+        const auto general = Rect(kContentLeft, layout.generalLabelTop - 8,
+            clientRight() - 26, layout.radiusTop + layout.rowHeight + 12);
+        const auto desktop = Rect(kContentLeft, layout.desktopLabelTop - 8,
+            clientRight() - 26, layout.deleteConfirmTop + layout.rowHeight + 12);
+        paintSection(dc, general);
+        paintSection(dc, desktop);
+        DrawLabel(dc, tr(L"常规", L"General"),
+            Rect(kContentLeft + 18, layout.generalLabelTop, clientRight() - 44,
+                layout.startupTop - 4), RGB(150, 153, 161), 11, FW_SEMIBOLD);
+        DrawLabel(dc, tr(L"桌面", L"Desktop"),
+            Rect(kContentLeft + 18, layout.desktopLabelTop, clientRight() - 44,
+                layout.desktopClickTop - 4), RGB(150, 153, 161), 11, FW_SEMIBOLD);
+        const auto section = general;
         const auto paintValue = [&](RECT rect, const SettingsAction& action,
                                     std::wstring_view value, bool open) {
             FillRounded(dc, rect,
@@ -3445,40 +3542,23 @@ struct WindowsSettingsHost::Impl {
                 Rect(rect.right - 25, rect.top, rect.right - 7, rect.bottom),
                 RGB(157, 161, 169), 9);
         };
-        DrawLabel(dc, tr(L"开机启动", L"Run at startup"),
-            Rect(section.left + 18, 100, section.right - 66, 136),
-            RGB(234, 235, 238), 12, FW_NORMAL);
-        const auto startupAction = SettingsAction{SettingsActionKind::ToggleRunAtStartup};
-        const auto startupRect = runAtStartupRect();
-        const auto startupToggle = Rect(startupRect.right - 40, startupRect.top + 3,
-            startupRect.right, startupRect.bottom - 5);
-        FillRounded(dc, startupToggle,
-            pressed == startupAction ? kAccentPressed
-                : runAtStartup ? kAccent
-                : hovered == startupAction ? RGB(64, 67, 74) : RGB(55, 57, 63), 10);
-        DrawRoundedOutline(dc, startupToggle,
-            runAtStartup ? kAccentOutline : RGB(88, 91, 99), 10);
-        const auto startupKnob = runAtStartup
-            ? Rect(startupToggle.right - 17, startupToggle.top + 3, startupToggle.right - 3, startupToggle.bottom - 3)
-            : Rect(startupToggle.left + 3, startupToggle.top + 3, startupToggle.left + 17, startupToggle.bottom - 3);
-        FillRoundedRaw(dc, startupKnob, RGB(241, 243, 246), 7);
-
-        DrawLabel(dc, tr(L"时区", L"Time zone"),
-            Rect(section.left + 18, 154, section.right - 230, 194),
-            RGB(234, 235, 238), 12, FW_NORMAL);
-        paintValue(timeZoneRect(), {SettingsActionKind::SelectTimeZone}, timeZoneText(),
-            activeSystemDropdown == SystemDropdown::TimeZone);
+        paintSettingRow(dc, runAtStartupRect(), {},
+            tr(L"开机启动", L"Run at startup"), runAtStartup,
+            SettingsAction{SettingsActionKind::ToggleRunAtStartup});
         DrawLabel(dc, tr(L"语言", L"Language"),
-            Rect(section.left + 18, 208, section.right - 230, 248),
-            RGB(234, 235, 238), 12, FW_NORMAL);
+            Rect(section.left + 18, layout.languageTop, section.right - 230,
+                layout.languageTop + layout.rowHeight),
+            RGB(234, 235, 238), 12, FW_NORMAL, DT_LEFT | DT_VCENTER);
         paintValue(languageRect(), {SettingsActionKind::SelectLanguage}, languageText(),
             activeSystemDropdown == SystemDropdown::Language);
-        DrawLabel(dc, tr(L"数据存储位置", L"Data location"),
-            Rect(section.left + 18, 262, section.right - 142, 286),
-            RGB(234, 235, 238), 12, FW_NORMAL);
+        DrawLabel(dc, tr(L"存储位置", L"Storage location"),
+            Rect(section.left + 18, layout.storageTop, storageRootRect().left - 12,
+                layout.storageTop + 22),
+            RGB(234, 235, 238), 12, FW_NORMAL, DT_LEFT | DT_VCENTER);
         DrawLabel(dc, storageRoot.wstring(),
-            Rect(section.left + 18, 286, section.right - 142, 310),
-            RGB(143, 147, 155), 10);
+            Rect(section.left + 18, layout.storageTop + 22, storageRootRect().left - 12,
+                layout.storageTop + layout.storageHeight),
+            RGB(143, 147, 155), 10, FW_NORMAL, DT_LEFT | DT_VCENTER | DT_END_ELLIPSIS);
         const auto storageAction = SettingsAction{SettingsActionKind::ChangeStorageRoot};
         const auto storageButton = storageRootRect();
         FillRounded(dc, storageButton,
@@ -3490,31 +3570,33 @@ struct WindowsSettingsHost::Impl {
             RGB(225, 227, 231), 11, FW_SEMIBOLD, DT_CENTER | DT_VCENTER);
 
         DrawLabel(dc, tr(L"卡片圆角", L"Card corners"),
-            Rect(section.left + 18, 342, section.right - 18, 372),
-            RGB(234, 235, 238), 12, FW_NORMAL);
-        const std::array<std::wstring, 4> labels{
-            tr(L"直角", L"Square"), L"Windows", L"macOS",
-            tr(L"饱满圆角", L"Full")};
-        constexpr std::array<double, 4> radii{0.0, 12.0, 24.0, 32.0};
-        for (std::size_t index = 0; index < radii.size(); ++index) {
-            const auto action = SettingsAction{SettingsActionKind::GlobalCornerRadius, index};
-            const auto selected = std::abs(globalCornerRadius - radii[index]) < 0.5;
-            const auto rect = radiusOptionRect(index);
-            FillRounded(dc, rect,
-                pressed == action ? kAccentPressed
-                    : selected ? kAccent
-                    : hovered == action ? RGB(49, 52, 58) : RGB(32, 34, 38), 7);
-            DrawRoundedOutline(dc, rect,
-                selected ? kAccentOutline
-                    : hovered == action ? RGB(83, 101, 128) : RGB(62, 65, 71), 7);
-            if (selected) {
-                DrawLabelRaw(dc, labels[index], rect, RGB(255, 255, 255), 11,
-                    FW_SEMIBOLD, DT_CENTER | DT_VCENTER);
-            } else {
-                DrawLabel(dc, labels[index], rect, RGB(232, 234, 238), 11,
-                    FW_NORMAL, DT_CENTER | DT_VCENTER);
-            }
-        }
+            Rect(section.left + 18, layout.radiusTop, section.right - 230,
+                layout.radiusTop + layout.rowHeight),
+            RGB(234, 235, 238), 12, FW_NORMAL, DT_LEFT | DT_VCENTER);
+        paintValue(cornerRadiusRect(), {SettingsActionKind::SelectCornerRadius},
+            cornerRadiusText(), activeSystemDropdown == SystemDropdown::CornerRadius);
+        paintValue(desktopDoubleClickRect(),
+            {SettingsActionKind::SelectDesktopDoubleClick}, desktopDoubleClickText(),
+            activeSystemDropdown == SystemDropdown::DesktopDoubleClick);
+        DrawLabel(dc, tr(L"双击桌面空白处", L"Double-click desktop"),
+            Rect(desktop.left + 18, layout.desktopClickTop, desktopDoubleClickRect().left - 12,
+                layout.desktopClickTop + layout.rowHeight),
+            RGB(234, 235, 238), 12, FW_NORMAL, DT_LEFT | DT_VCENTER);
+        paintSettingRow(dc, taskbarDoubleClickRowRect(), {},
+            tr(L"双击任务栏返回桌面", L"Double-click taskbar to show desktop"),
+            taskbarDoubleClickAction != "none",
+            SettingsAction{SettingsActionKind::ToggleTaskbarDesktop});
+        paintSettingRow(dc, pinnedFullscreenRect(), {},
+            tr(L"全屏时隐藏置顶卡片", L"Hide pinned cards in fullscreen"),
+            pinnedCardsYieldToFullscreen,
+            SettingsAction{SettingsActionKind::TogglePinnedCardsYieldToFullscreen});
+        paintSettingRow(dc, iconBackgroundFrameRect(), {},
+            tr(L"显示图标底框", L"Show icon frames"), showIconBackgroundFrame,
+            SettingsAction{SettingsActionKind::ToggleIconBackgroundFrame});
+        paintSettingRow(dc, fileDeletionConfirmationRect(), {},
+            tr(L"删除文件前确认", L"Confirm before deleting files"),
+            confirmFileDeletion,
+            SettingsAction{SettingsActionKind::ToggleFileDeletionConfirmation});
         paintSystemDropdown(dc);
     }
 
@@ -3524,16 +3606,14 @@ struct WindowsSettingsHost::Impl {
         FillRounded(dc, panel, RGB(31, 32, 36), 8);
         DrawRoundedOutline(dc, panel, RGB(67, 70, 77), 8);
 
-        const std::array<std::wstring, 4> timeZoneLabels{
-            tr(L"跟随系统", L"System"), L"UTC+00:00", L"UTC+08:00", L"UTC-05:00"};
         const std::array<std::wstring, 3> languageLabels{
             tr(L"跟随系统", L"System"), L"简体中文", L"English"};
         const std::array<std::wstring, 4> desktopLabels{
             tr(L"不处理", L"Do nothing"), tr(L"隐藏桌面图标", L"Desktop icons"),
             tr(L"隐藏桌面卡片", L"Desktop cards"), tr(L"同时隐藏", L"Icons and cards")};
-        const std::array<std::wstring, 3> taskbarLabels{
-            tr(L"不处理", L"Do nothing"), tr(L"全部屏幕", L"All displays"),
-            tr(L"当前屏幕", L"Current display")};
+        const std::array<std::wstring, 4> cornerLabels{
+            tr(L"直角", L"Square"), L"Windows", L"macOS",
+            tr(L"饱满圆角", L"Full")};
         const auto selectedTimeZone = [&]() -> std::size_t {
             if (!timeZoneOffsetMinutes.has_value()) return 0;
             if (*timeZoneOffsetMinutes == 0) return 1;
@@ -3546,16 +3626,18 @@ struct WindowsSettingsHost::Impl {
             : desktopDoubleClickAction == "cards" ? std::size_t{2}
             : desktopDoubleClickAction == "all" ? std::size_t{3} : std::size_t{0};
         for (std::size_t index = 0; index < systemDropdownOptionCount(); ++index) {
-            const auto kind = activeSystemDropdown == SystemDropdown::TimeZone
-                ? SettingsActionKind::SelectTimeZoneOption
-                : activeSystemDropdown == SystemDropdown::Language
+            const auto kind = activeSystemDropdown == SystemDropdown::Language
                 ? SettingsActionKind::SelectLanguageOption
+                : activeSystemDropdown == SystemDropdown::CornerRadius
+                ? SettingsActionKind::GlobalCornerRadius
                 : SettingsActionKind::SelectDesktopDoubleClickOption;
             const auto action = SettingsAction{kind, index};
-            const auto selected = activeSystemDropdown == SystemDropdown::TimeZone
-                ? index == selectedTimeZone
-                : activeSystemDropdown == SystemDropdown::Language
+            const auto selectedCorner = std::abs(globalCornerRadius
+                - (index == 0 ? 0.0 : index == 1 ? 12.0 : index == 2 ? 24.0 : 32.0)) < 0.5;
+            const auto selected = activeSystemDropdown == SystemDropdown::Language
                 ? index == selectedLanguage
+                : activeSystemDropdown == SystemDropdown::CornerRadius
+                ? selectedCorner
                 : activeSystemDropdown == SystemDropdown::DesktopDoubleClick
                 ? index == selectedDesktop : false;
             const auto row = systemDropdownOptionRect(index);
@@ -3564,12 +3646,11 @@ struct WindowsSettingsHost::Impl {
                     pressed == action ? kAccentPressed
                         : selected ? kAccent : RGB(46, 48, 53), 6);
             }
-            const auto label = activeSystemDropdown == SystemDropdown::TimeZone
-                ? timeZoneLabels[index]
-                : activeSystemDropdown == SystemDropdown::Language
+            const auto label = activeSystemDropdown == SystemDropdown::Language
                 ? languageLabels[index]
-                : activeSystemDropdown == SystemDropdown::DesktopDoubleClick
-                ? desktopLabels[index] : taskbarLabels[index];
+                : activeSystemDropdown == SystemDropdown::CornerRadius
+                ? cornerLabels[index]
+                : desktopLabels[index];
             if (selected) {
                 DrawLabelRaw(dc, label,
                     Rect(row.left + 10, row.top, row.right - 10, row.bottom),
@@ -3695,13 +3776,8 @@ struct WindowsSettingsHost::Impl {
     void paintCards(HDC dc) noexcept {
         paintPageTitle(dc, tr(L"卡片", L"Cards"),
             tr(L"添加、重命名或调整每张卡片", L"Add, rename, and customize each card"));
-        const auto addAction = SettingsAction{SettingsActionKind::AddCard};
-        const auto add = addCardRect();
-        FillRounded(dc, add,
-            pressed == addAction ? kAccentPressed
-                : hovered == addAction ? kAccentHover : kAccent, 7);
-        DrawGlyphRaw(dc, L"\uE710", Rect(add.left + 8, add.top, add.left + 30, add.bottom), RGB(255, 255, 255), 14);
-        DrawLabelRaw(dc, tr(L"添加", L"Add"), Rect(add.left + 32, add.top, add.right - 8, add.bottom), RGB(255, 255, 255), 12, FW_SEMIBOLD);
+        paintAccentCommand(dc, addCardRect(), {SettingsActionKind::AddCard},
+            L"\uE710", tr(L"添加", L"Add"));
 
         if (cards.empty()) {
             const auto empty = Rect(kContentLeft, 94, clientRight() - 26, 214);
@@ -3742,7 +3818,16 @@ struct WindowsSettingsHost::Impl {
                 : selected ? RGB(43, 51, 63)
                 : hovered == select ? RGB(41, 42, 47) : RGB(34, 35, 39), 7);
         DrawGlyph(dc, CardTypeGlyph(cards[index].type),
-            row, selected ? RGB(118, 174, 255) : RGB(188, 191, 198), 17);
+            Rect(row.left + 8, row.top + 8, row.left + 36, row.bottom - 8),
+            selected ? RGB(118, 174, 255) : RGB(188, 191, 198), 15);
+        DrawLabel(dc, DefaultCardTitle(cards[index], usesEnglish()),
+            Rect(row.left + 42, row.top + 6, row.right - 24, row.top + 28),
+            selected ? RGB(236, 238, 242) : RGB(214, 217, 223), 11, FW_SEMIBOLD,
+            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        DrawLabel(dc, CardTypeName(cards[index].type, usesEnglish()),
+            Rect(row.left + 42, row.top + 26, row.right - 24, row.bottom - 4),
+            RGB(148, 152, 160), 10, FW_NORMAL,
+            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
         const auto visibilityAction = SettingsAction{
             SettingsActionKind::ToggleCardVisibility, index};
         const auto visibility = cardVisibilityRect(index);
@@ -3894,7 +3979,7 @@ struct WindowsSettingsHost::Impl {
         }
         DrawGlyph(dc, L"\uE70F", rename,
             editing ? RGB(111, 169, 255) : RGB(190, 193, 200), 13);
-        DrawLabel(dc, CardTypeName(card.type, usesEnglish()), Rect(left, 112, clientRight() - 26, 136), RGB(143, 146, 154), 11);
+        paintTypeBadge(dc, left, 114, CardTypeName(card.type, usesEnglish()));
         const auto menuAction = SettingsAction{SettingsActionKind::OpenCardMenu, selectedCard};
         const auto menu = cardMenuButtonRect();
         if (hovered == menuAction || pressed == menuAction || cardMenuOpen) {
@@ -3907,10 +3992,9 @@ struct WindowsSettingsHost::Impl {
         // future width changes cannot make them overlap again.
         const auto fileCard = card.type == domain::CardType::Application
             || card.type == domain::CardType::Mapping;
-        const auto sizeCaptionLeft = fileCard
-            ? itemSizeRect(0).left : compactCardSizeRect(0).left;
+        const auto layout = ResolveFileCardSettingsLayout(false);
         DrawLabel(dc, tr(L"外观", L"Appearance"),
-            Rect(left, 136, sizeCaptionLeft - 12, 160),
+            Rect(left, layout.appearanceLabelTop, clientRight() - 26, layout.appearanceTop - 4),
             RGB(216, 218, 223), 12, FW_SEMIBOLD,
             DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
         const std::array kinds{
@@ -3964,7 +4048,7 @@ struct WindowsSettingsHost::Impl {
         }
         if (!fileCard) {
             DrawLabel(dc, tr(L"卡片大小", L"Card size"),
-                Rect(compactCardSizeRect(0).left, 136, clientRight() - 26, 160),
+                Rect(left, layout.densityLabelTop, clientRight() - 26, layout.densityTop - 4),
                 RGB(216, 218, 223), 12, FW_SEMIBOLD,
                 DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
             const std::array<std::wstring, 3> labels{
@@ -4184,11 +4268,11 @@ struct WindowsSettingsHost::Impl {
         const auto layout = ResolveFileCardSettingsLayout(
             card.type == domain::CardType::Mapping);
         DrawLabel(dc, tr(L"图标大小", L"Icon size"),
-            Rect(itemSizeRect(0).left, 136, clientRight() - 26, 160),
+            Rect(left, layout.densityLabelTop, clientRight() - 26, layout.densityTop - 4),
             RGB(216, 218, 223), 12, FW_SEMIBOLD);
         const std::array<std::wstring, 4> labels{
             tr(L"小", L"Small"), tr(L"中", L"Medium"),
-            tr(L"大", L"Large"), tr(L"特大", L"Extra large")};
+            tr(L"大", L"Large"), tr(L"特大", L"XL")};
         const std::array values{domain::CardItemSize::Small, domain::CardItemSize::Medium, domain::CardItemSize::Large, domain::CardItemSize::ExtraLarge};
         const std::array kinds{SettingsActionKind::SmallItems, SettingsActionKind::MediumItems, SettingsActionKind::LargeItems, SettingsActionKind::ExtraLargeItems};
         for (std::size_t index = 0; index < labels.size(); ++index) {
@@ -4241,29 +4325,33 @@ struct WindowsSettingsHost::Impl {
                 }
             }
         }
-        DrawLabel(dc, tr(L"卡片工具栏", L"Card toolbar"),
+        DrawLabel(dc, tr(L"操作按钮", L"Action buttons"),
             Rect(left, layout.toolbarLabelTop,
                 clientRight() - 26, layout.toolbarTop - 6),
             RGB(216, 218, 223), 12, FW_SEMIBOLD);
-        paintOptionButton(dc, filePresentationRect(), L"\uE71B",
+        paintChromeIconButton(dc, filePresentationRect(), L"\uE8F1",
             card.showPresentationControl, SettingsActionKind::TogglePresentationControl);
-        paintOptionButton(dc, collapseRect(), L"\uE70E", card.showCollapseControl,
-            SettingsActionKind::ToggleCollapseControl);
-        paintOptionButton(dc, pinControlSettingRect(), L"\uE718", card.showPinControl,
-            SettingsActionKind::TogglePinControl);
-        DrawLabel(dc, tr(L"卡片选项", L"Card options"),
+        paintChromeIconButton(dc, collapseRect(), L"\uE76B",
+            card.showCollapseControl, SettingsActionKind::ToggleCollapseControl);
+        paintChromeIconButton(dc, pinControlSettingRect(), L"\uE840",
+            card.showPinControl, SettingsActionKind::TogglePinControl);
+        DrawLabel(dc, tr(L"行为", L"Behavior"),
             Rect(left, layout.optionsLabelTop,
                 clientRight() - 26, layout.optionsTop - 6),
             RGB(216, 218, 223), 12, FW_SEMIBOLD);
-        paintOptionButton(dc, itemNamesRect(), L"\uE8D2", card.content.showItemNames,
+        paintSettingRow(dc, itemNamesRect(), L"\uE8D2",
+            tr(L"显示文件名", L"Show file names"), card.content.showItemNames,
             SettingsActionKind::ToggleItemNames);
-        paintOptionButton(dc, sizeModeRect(), L"\uE740",
+        paintSettingRow(dc, sizeModeRect(), L"\uE740",
+            tr(L"自适应尺寸", L"Adaptive size"),
             card.content.sizeMode == domain::CardSizeMode::Adaptive,
             SettingsActionKind::ToggleSizeMode);
-        paintOptionButton(dc, heightLimitRect(), L"\uE74B",
+        paintSettingRow(dc, heightLimitRect(), L"\uE74B",
+            tr(L"限制高度", L"Limit height"),
             card.content.maximumVisibleRows.has_value(),
             SettingsActionKind::ToggleHeightLimit);
-        paintOptionButton(dc, positionLockRect(), L"\uE72E",
+        paintSettingRow(dc, positionLockRect(), L"\uE72E",
+            tr(L"锁定卡片", L"Lock card"),
             card.positionLocked, SettingsActionKind::TogglePositionLock);
         if (card.content.sizeMode == domain::CardSizeMode::Fixed) {
             const auto paintStepper = [&](RECT rect, std::wstring label,
@@ -4329,29 +4417,31 @@ struct WindowsSettingsHost::Impl {
                 RGB(232, 234, 238), 10, FW_SEMIBOLD,
                 DT_CENTER | DT_VCENTER);
         }
-        paintCardContentPreview(dc, card);
     }
 
     void paintTodoSettings(HDC dc, const presentation::CardView& card) noexcept {
         const auto left = cardDetailLeft();
         const auto layout = ResolveFileCardSettingsLayout(false);
-        DrawLabel(dc, tr(L"卡片工具栏", L"Card toolbar"),
+        DrawLabel(dc, tr(L"操作按钮", L"Action buttons"),
             Rect(left, layout.toolbarLabelTop,
                 clientRight() - 26, layout.toolbarTop - 6),
             RGB(216, 218, 223), 12, FW_SEMIBOLD);
-        paintOptionButton(dc, collapseRect(), L"\uE70E", card.showCollapseControl,
-            SettingsActionKind::ToggleCollapseControl);
-        paintOptionButton(dc, pinControlSettingRect(), L"\uE718", card.showPinControl,
-            SettingsActionKind::TogglePinControl);
-        DrawLabel(dc, tr(L"卡片选项", L"Card options"),
+        paintChromeIconButton(dc, collapseRect(), L"\uE76B",
+            card.showCollapseControl, SettingsActionKind::ToggleCollapseControl);
+        paintChromeIconButton(dc, pinControlSettingRect(), L"\uE840",
+            card.showPinControl, SettingsActionKind::TogglePinControl);
+        DrawLabel(dc, tr(L"行为", L"Behavior"),
             Rect(left, layout.optionsLabelTop,
                 clientRight() - 26, layout.optionsTop - 6),
             RGB(216, 218, 223), 12, FW_SEMIBOLD);
-        paintOptionButton(dc, createdTimeRect(), L"\uE823",
+        paintSettingRow(dc, createdTimeRect(), L"\uE823",
+            tr(L"显示创建时间", L"Show creation time"),
             card.todoPreferences.showCreatedTime, SettingsActionKind::ToggleCreatedTime);
-        paintOptionButton(dc, todoHeightLimitRect(), L"\uE74B",
+        paintSettingRow(dc, todoHeightLimitRect(), L"\uE74B",
+            tr(L"限制高度", L"Limit height"),
             card.content.maximumVisibleRows.has_value(), SettingsActionKind::ToggleHeightLimit);
-        paintOptionButton(dc, positionLockRect(), L"\uE72E",
+        paintSettingRow(dc, positionLockRect(), L"\uE72E",
+            tr(L"锁定卡片", L"Lock card"),
             card.positionLocked, SettingsActionKind::TogglePositionLock);
         if (card.content.maximumVisibleRows.has_value()) {
             const auto rect = todoMaximumVisibleRowsRect();
@@ -4367,12 +4457,6 @@ struct WindowsSettingsHost::Impl {
                 RGB(232, 234, 238), 10, FW_SEMIBOLD,
                 DT_CENTER | DT_VCENTER);
         }
-        const auto contentPanel = todoContentPreviewRect(card);
-        paintCardContentPreview(dc, card, contentPanel);
-        DrawLabel(dc, tr(L"已归档项目请在左侧“归档”中管理。",
-            L"Manage archived items from Archive in the sidebar."),
-            Rect(left, contentPanel.bottom + 8, clientRight() - 26,
-                contentPanel.bottom + 38), RGB(137, 140, 148), 11);
     }
 
     void paintCardContentPreview(
@@ -4383,16 +4467,20 @@ struct WindowsSettingsHost::Impl {
             panel = contentPreviewRect(card);
         }
         paintSection(dc, panel);
+        DrawRoundedOutline(dc, panel, RGB(72, 75, 82), 10);
         const auto indices = contentItemIndices(card);
         const auto total = indices.size();
-        DrawGlyph(dc, CardTypeGlyph(card.type),
-            Rect(panel.left + 12, panel.top + 7, panel.left + 34, panel.top + 31),
-            RGB(104, 153, 224), 13);
         DrawLabel(dc, DefaultCardTitle(card, usesEnglish()),
-            Rect(panel.left + 40, panel.top + 8, panel.right - 80, panel.top + 32),
-            RGB(221, 223, 227), 11, FW_SEMIBOLD);
+            Rect(panel.left + 16, panel.top + 8, panel.right - 48, panel.top + 36),
+            RGB(236, 238, 242), 12, FW_SEMIBOLD,
+            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        if (card.showCollapseControl) {
+            DrawGlyph(dc, L"\uE70E",
+                Rect(panel.right - 40, panel.top + 6, panel.right - 10, panel.top + 36),
+                RGB(176, 180, 188), 12);
+        }
         DrawLabel(dc, std::to_wstring(total),
-            Rect(panel.right - 64, panel.top + 8, panel.right - 14, panel.top + 32),
+            Rect(panel.right - 86, panel.top + 8, panel.right - 44, panel.top + 36),
             RGB(143, 147, 156), 10, FW_NORMAL, DT_RIGHT | DT_VCENTER);
         if (total == 0) {
             DrawLabel(dc, tr(L"暂无内容", L"No contents"),
@@ -4409,9 +4497,10 @@ struct WindowsSettingsHost::Impl {
                 const auto column = static_cast<LONG>(index % columns);
                 const auto row = static_cast<LONG>(index / columns);
                 const auto cellLeft = panel.left + 12 + column * cellWidth;
-                const auto cellTop = panel.top + 40 + row * 58;
+                const auto cellTop = panel.top + 40 + row * 52;
+                if (cellTop + 40 > panel.bottom - 8) break;
                 const auto iconRect = Rect(cellLeft + 8, cellTop + 2,
-                    cellLeft + cellWidth - 8, cellTop + 50);
+                    cellLeft + cellWidth - 8, cellTop + 44);
                 if (!DrawCardItemIcon(dc, card.items[sourceIndex].icon, iconRect)) {
                     DrawGlyph(dc, L"\uE8A5", iconRect, RGB(145, 165, 196), 18);
                 }
@@ -4427,6 +4516,7 @@ struct WindowsSettingsHost::Impl {
                 label = card.items[sourceIndex].displayName;
             }
             const auto row = contentPreviewRowRect(panel, index);
+            if (row.bottom > panel.bottom - 6) break;
             const auto iconRect = Rect(row.left, row.top + 4, row.left + 20, row.bottom - 4);
             const auto drewIcon = card.type != domain::CardType::Todo
                 && DrawCardItemIcon(dc, card.items[sourceIndex].icon, iconRect);
@@ -4443,7 +4533,52 @@ struct WindowsSettingsHost::Impl {
         }
     }
 
-    void paintOptionButton(
+    void paintTypeBadge(HDC dc, int left, int top, const std::wstring& label) noexcept {
+        const auto font = CreateFontW(
+            -11, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+            DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Variable Text");
+        const auto previous = font == nullptr ? nullptr : SelectObject(dc, font);
+        SIZE extent{};
+        GetTextExtentPoint32W(dc, label.c_str(), static_cast<int>(label.size()), &extent);
+        if (previous != nullptr) SelectObject(dc, previous);
+        if (font != nullptr) DeleteObject(font);
+        const auto badge = Rect(left, top, left + extent.cx + 14, top + 20);
+        FillRounded(dc, badge, RGB(47, 113, 220), 5);
+        DrawLabelRaw(dc, label, badge, RGB(255, 255, 255), 10, FW_SEMIBOLD,
+            DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    }
+
+    void paintAccentCommand(
+        HDC dc,
+        RECT rect,
+        const SettingsAction& action,
+        std::wstring_view glyph,
+        const std::wstring& label) noexcept {
+        FillRounded(dc, rect,
+            pressed == action ? kAccentPressed
+                : hovered == action ? kAccentHover : kAccent, 7);
+        const auto font = CreateFontW(
+            -12, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+            DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Variable Text");
+        const auto previous = font == nullptr ? nullptr : SelectObject(dc, font);
+        SIZE extent{};
+        GetTextExtentPoint32W(dc, label.c_str(), static_cast<int>(label.size()), &extent);
+        if (previous != nullptr) SelectObject(dc, previous);
+        if (font != nullptr) DeleteObject(font);
+        constexpr int icon = 16;
+        constexpr int gap = 6;
+        const auto group = icon + gap + extent.cx;
+        const auto left = (rect.left + rect.right - group) / 2;
+        DrawGlyphRaw(dc, glyph, Rect(left, rect.top, left + icon, rect.bottom),
+            RGB(255, 255, 255), 13);
+        DrawLabelRaw(dc, label, Rect(left + icon + gap, rect.top, left + group, rect.bottom),
+            RGB(255, 255, 255), 12, FW_SEMIBOLD,
+            DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    }
+
+    void paintChromeIconButton(
         HDC dc,
         RECT rect,
         std::wstring_view glyph,
@@ -4455,15 +4590,70 @@ struct WindowsSettingsHost::Impl {
         FillRounded(dc, rect,
             down ? kAccentPressed
                 : enabled ? kAccent
-                : hot ? RGB(46, 48, 54) : RGB(34, 36, 41), 7);
+                : hot ? RGB(54, 56, 62) : RGB(43, 45, 50), 8);
         DrawRoundedOutline(dc, rect,
-            enabled ? RGB(105, 169, 255)
-                : hot ? RGB(91, 95, 104) : RGB(62, 65, 72), 7);
+            enabled ? kAccentOutline : RGB(61, 64, 70), 8);
         if (enabled) {
-            DrawGlyphRaw(dc, glyph, rect, RGB(255, 255, 255), 15);
+            DrawGlyphRaw(dc, glyph, rect, RGB(255, 255, 255), 14);
         } else {
-            DrawGlyph(dc, glyph, rect, RGB(194, 198, 206), 15);
+            DrawGlyph(dc, glyph, rect, RGB(214, 217, 223), 14);
         }
+    }
+
+    void paintToggleSwitch(
+        HDC dc,
+        RECT toggle,
+        bool on,
+        const SettingsAction& action) noexcept {
+        const auto hot = hovered == action;
+        const auto down = pressed == action;
+        FillRounded(dc, toggle,
+            down ? kAccentPressed
+                : on ? kAccent
+                : hot ? RGB(64, 67, 74) : RGB(55, 57, 63), 10);
+        DrawRoundedOutline(dc, toggle, on ? kAccentOutline : RGB(88, 91, 99), 10);
+        const auto knob = on
+            ? Rect(toggle.right - 16, toggle.top + 3, toggle.right - 3, toggle.bottom - 3)
+            : Rect(toggle.left + 3, toggle.top + 3, toggle.left + 16, toggle.bottom - 3);
+        FillRoundedRaw(dc, knob, RGB(241, 243, 246), 6);
+    }
+
+    void paintSettingRow(
+        HDC dc,
+        RECT row,
+        std::wstring_view glyph,
+        const std::wstring& label,
+        bool enabled,
+        const SettingsAction& action) noexcept {
+        const auto hot = hovered == action;
+        const auto down = pressed == action;
+        if (hot || down) {
+            FillRounded(dc, row, down ? RGB(48, 50, 56) : RGB(42, 44, 49), 8);
+        }
+        auto labelLeft = row.left + 14;
+        if (!glyph.empty()) {
+            const auto icon = Rect(row.left + 4, row.top + 4, row.left + 36, row.bottom - 4);
+            DrawGlyph(dc, glyph, icon,
+                enabled ? RGB(220, 224, 232) : RGB(154, 158, 166), 13);
+            labelLeft = icon.right + 8;
+        }
+        DrawLabel(dc, label,
+            Rect(labelLeft, row.top, row.right - 56, row.bottom),
+            RGB(234, 235, 238), 12, FW_NORMAL,
+            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        paintToggleSwitch(dc,
+            Rect(row.right - 46, row.top + 10, row.right - 4, row.bottom - 10),
+            enabled, action);
+    }
+
+    void paintSettingRow(
+        HDC dc,
+        RECT row,
+        std::wstring_view glyph,
+        const std::wstring& label,
+        bool enabled,
+        SettingsActionKind kind) noexcept {
+        paintSettingRow(dc, row, glyph, label, enabled, SettingsAction{kind, selectedCard});
     }
 
     void paintArchiveCalendar(HDC dc) noexcept {
@@ -4526,23 +4716,28 @@ struct WindowsSettingsHost::Impl {
                 && date.month == archiveCalendarMonth.month;
             const auto future = domain::CompareTodoDates(date, today) > 0;
             const auto action = SettingsAction{SettingsActionKind::SelectArchiveDate, index};
+            const auto heat = future ? 0 : archivedCountOn(date);
+            const auto cell = Rect(rect.left + 7, rect.top + 2, rect.right - 7, rect.bottom - 2);
             if (selectedCell) {
-                FillRounded(dc, Rect(rect.left + 7, rect.top + 2, rect.right - 7, rect.bottom - 2),
-                    kAccent, 6);
+                FillRounded(dc, cell, kAccent, 6);
+            } else if (heat > 0) {
+                const auto fill = heat >= 5 ? RGB(88, 156, 255)
+                    : heat >= 3 ? RGB(47, 113, 220)
+                    : heat == 2 ? RGB(36, 78, 138) : RGB(28, 52, 86);
+                FillRounded(dc, cell, fill, 6);
             } else if (!future && (hovered == action || pressed == action)) {
-                FillRounded(dc, Rect(rect.left + 7, rect.top + 2, rect.right - 7, rect.bottom - 2),
+                FillRounded(dc, cell,
                     pressed == action ? RGB(48, 67, 94) : RGB(43, 47, 54), 6);
             }
             if (todayCell && !selectedCell) {
-                DrawRoundedOutline(dc,
-                    Rect(rect.left + 7, rect.top + 2, rect.right - 7, rect.bottom - 2),
-                    RGB(76, 139, 227), 6);
+                DrawRoundedOutline(dc, cell, RGB(76, 139, 227), 6);
             }
             wchar_t day[4]{};
             swprintf_s(day, L"%u", static_cast<unsigned>(date.day));
             DrawLabel(dc, day, rect,
-                selectedCell ? RGB(255, 255, 255)
+                selectedCell || heat >= 3 ? RGB(255, 255, 255)
                     : future ? RGB(76, 79, 86)
+                    : heat > 0 ? RGB(210, 222, 240)
                     : currentMonth ? RGB(222, 224, 229) : RGB(105, 108, 116),
                 11, selectedCell ? FW_SEMIBOLD : FW_NORMAL,
                 DT_CENTER | DT_VCENTER | DT_SINGLELINE);
@@ -4551,17 +4746,10 @@ struct WindowsSettingsHost::Impl {
 
     void paintArchive(HDC dc) noexcept {
         paintPageTitle(dc, tr(L"归档", L"Archive"),
-            tr(L"查看详细信息并逐条恢复已归档待办",
-                L"Review details and restore archived tasks individually"));
-        const auto addAction = SettingsAction{SettingsActionKind::AddHistoricalArchive};
-        const auto add = archiveAddButtonRect();
-        FillRounded(dc, add,
-            pressed == addAction ? kAccentPressed
-                : hovered == addAction ? kAccentHover : kAccent, 7);
-        DrawGlyph(dc, L"\uE710", Rect(add.left + 8, add.top, add.left + 34, add.bottom),
-            RGB(255, 255, 255), 12);
-        DrawLabel(dc, tr(L"添加", L"Add"), Rect(add.left + 30, add.top, add.right - 8, add.bottom),
-            RGB(255, 255, 255), 11, FW_SEMIBOLD, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            tr(L"查找并恢复已归档的待办", L"Find and restore archived tasks"));
+        paintAccentCommand(dc, archiveAddButtonRect(),
+            {SettingsActionKind::AddHistoricalArchive},
+            L"\uE710", tr(L"添加", L"Add"));
         const auto exportAction = SettingsAction{SettingsActionKind::ExportArchive};
         const auto exportButton = archiveExportButtonRect();
         FillRounded(dc, exportButton,
@@ -4676,17 +4864,8 @@ struct WindowsSettingsHost::Impl {
             Rect(panel.left + 20, panel.top + 14, panel.right - 20, panel.top + 48),
             RGB(242, 244, 247), 16, FW_SEMIBOLD);
         if (archiveOverlay == ArchiveOverlay::Add) {
-            const auto card = archiveOverlayCardRect();
-            FillRounded(dc, card, RGB(39, 42, 48), 7);
-            DrawRoundedOutline(dc, card, RGB(65, 69, 78), 7);
-            const auto cardTitle = historicalArchiveCard < cards.size()
-                ? DefaultCardTitle(cards[historicalArchiveCard], usesEnglish()) : L"";
-            DrawLabel(dc, cardTitle, Rect(card.left + 12, card.top, card.right - 38, card.bottom),
-                RGB(229, 231, 236), 12, FW_NORMAL, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-            DrawGlyph(dc, L"\uE70D", Rect(card.right - 34, card.top, card.right - 8, card.bottom),
-                RGB(153, 157, 166), 10);
             DrawLabel(dc, tr(L"归档日期：", L"Archive date: ") + archiveDateText(),
-                Rect(panel.left + 20, panel.top + 166, panel.right - 20, panel.top + 200),
+                Rect(panel.left + 20, panel.top + 118, panel.right - 20, panel.top + 148),
                 RGB(165, 169, 178), 11);
         } else {
             const std::array values{archiveExportBegin, archiveExportEnd};
@@ -4771,7 +4950,8 @@ struct WindowsSettingsHost::Impl {
     }
 
     void paintAbout(HDC dc) noexcept {
-        paintPageTitle(dc, tr(L"关于", L"About"), L"");
+        paintPageTitle(dc, tr(L"关于", L"About"),
+            tr(L"版本与更新", L"Version and updates"));
         const auto center = (kContentLeft + clientRight() - 26) / 2;
         const auto icon = static_cast<HICON>(LoadImageW(
             module, MAKEINTRESOURCEW(kDestoIconResourceId), IMAGE_ICON,
@@ -4793,34 +4973,79 @@ struct WindowsSettingsHost::Impl {
         DrawLabel(dc, versionText,
             Rect(kContentLeft, 250, clientRight() - 26, 282),
             RGB(165, 169, 177), 12, FW_NORMAL, DT_CENTER | DT_VCENTER);
-        const auto paintCommand = [&](RECT rect, const SettingsAction& action,
-                                      std::wstring_view label, std::wstring_view glyph) {
-            const auto available = action.kind == SettingsActionKind::CheckForUpdates
-                && updateState == UpdateCheckState::Available;
-            const auto base = available ? RGB(226, 132, 42) : kAccent;
-            const auto hover = available ? RGB(239, 151, 56) : kAccentHover;
-            const auto press = available ? RGB(194, 105, 25) : kAccentPressed;
-            FillRounded(dc, rect, pressed == action ? press
-                : hovered == action ? hover : base, 7);
-            DrawGlyphRaw(dc, glyph, Rect(rect.left + 12, rect.top,
-                rect.left + 36, rect.bottom), RGB(255, 255, 255), 13);
-            DrawLabelRaw(dc, label, Rect(rect.left + 40, rect.top,
-                rect.right - 10, rect.bottom), RGB(255, 255, 255), 11,
-                FW_SEMIBOLD, DT_CENTER | DT_VCENTER);
-        };
-        paintCommand(openProjectRect(), {SettingsActionKind::OpenProject},
-            tr(L"查看项目", L"View project"), L"\uE8A7");
-        const auto updateLabel = updateState == UpdateCheckState::Latest
+        const auto development = updateChannel == "development";
+        const auto updateAction = SettingsAction{SettingsActionKind::CheckForUpdates};
+        const auto available = updateState == UpdateCheckState::Available;
+        const auto updateBase = available ? RGB(226, 132, 42)
+            : development ? RGB(184, 112, 32) : kAccent;
+        const auto updateHover = available ? RGB(239, 151, 56)
+            : development ? RGB(196, 122, 42) : kAccentHover;
+        const auto updatePress = available ? RGB(194, 105, 25)
+            : development ? RGB(168, 96, 28) : kAccentPressed;
+        FillRounded(dc, checkForUpdatesRect(),
+            pressed == updateAction ? updatePress
+                : hovered == updateAction ? updateHover : updateBase, 8);
+        const auto updateLabel = updateState == UpdateCheckState::Checking
+            ? tr(L"正在检查…", L"Checking…")
+            : updateState == UpdateCheckState::Latest
             ? tr(L"已经是最新版本", L"Already up to date")
-            : updateState == UpdateCheckState::Available
-            ? (tr(L"更新到 ", L"Update to ") + latestVersion)
+            : available ? (tr(L"更新到 ", L"Update to ") + latestVersion)
             : tr(L"检查更新", L"Check for updates");
-        paintCommand(checkForUpdatesRect(), {SettingsActionKind::CheckForUpdates},
-            updateLabel, L"\uE895");
-        paintCommand(updateChannelRect(), {SettingsActionKind::ToggleUpdateChannel},
-            updateChannel == "development"
-                ? tr(L"开发版通道", L"Development channel")
-                : tr(L"稳定版通道", L"Stable channel"), L"\uE7BA");
+        DrawGlyphRaw(dc, L"\uE895",
+            Rect(checkForUpdatesRect().left + 16, checkForUpdatesRect().top,
+                checkForUpdatesRect().left + 40, checkForUpdatesRect().bottom),
+            RGB(255, 255, 255), 14);
+        DrawLabelRaw(dc, updateLabel,
+            Rect(checkForUpdatesRect().left + 44, checkForUpdatesRect().top,
+                checkForUpdatesRect().right - 16, checkForUpdatesRect().bottom),
+            RGB(255, 255, 255), 12, FW_SEMIBOLD, DT_CENTER | DT_VCENTER);
+        const auto projectAction = SettingsAction{SettingsActionKind::OpenProject};
+        FillRounded(dc, openProjectRect(),
+            pressed == projectAction ? RGB(48, 50, 56)
+                : hovered == projectAction ? RGB(49, 52, 58) : RGB(38, 40, 45), 8);
+        DrawRoundedOutline(dc, openProjectRect(),
+            hovered == projectAction ? RGB(83, 101, 128) : RGB(62, 65, 71), 8);
+        DrawGlyph(dc, L"\uE8A7",
+            Rect(openProjectRect().left + 16, openProjectRect().top,
+                openProjectRect().left + 40, openProjectRect().bottom),
+            RGB(214, 217, 223), 13);
+        DrawLabel(dc, tr(L"查看项目", L"View project"),
+            Rect(openProjectRect().left + 44, openProjectRect().top,
+                openProjectRect().right - 16, openProjectRect().bottom),
+            RGB(214, 217, 223), 12, FW_NORMAL, DT_CENTER | DT_VCENTER);
+        const auto channelAction = SettingsAction{SettingsActionKind::ToggleUpdateChannel};
+        const auto channelHot = hovered == channelAction || pressed == channelAction;
+        DrawLabel(dc,
+            development
+                ? tr(L"开发版 · 点击切换", L"Dev channel · Click to switch")
+                : tr(L"稳定版 · 点击切换", L"Stable channel · Click to switch"),
+            updateChannelToggleRect(),
+            development
+                ? (channelHot ? RGB(244, 196, 118) : RGB(232, 176, 92))
+                : (channelHot ? RGB(186, 190, 198) : RGB(136, 140, 148)),
+            11, FW_NORMAL, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    }
+
+    void finishUpdateCheck(const UpdateCheckFinished& payload) noexcept {
+        if (!payload.ok) {
+            updateState = UpdateCheckState::Idle;
+            InvalidateRect(window, nullptr, FALSE);
+            (void)ShowWindowsAlert(window, tr(L"检查更新失败", L"Update check failed"),
+                tr(L"暂时无法连接更新服务器，请稍后重试。",
+                    L"Unable to reach the update servers. Please try again later."));
+            return;
+        }
+        if (!payload.hasUpdate) {
+            updateState = UpdateCheckState::Latest;
+            latestVersion.clear();
+            installerUrl.clear();
+            InvalidateRect(window, nullptr, FALSE);
+            return;
+        }
+        updateState = UpdateCheckState::Available;
+        latestVersion = payload.tag;
+        installerUrl = payload.url;
+        InvalidateRect(window, nullptr, FALSE);
     }
 
     std::wstring title;
@@ -4836,7 +5061,7 @@ struct WindowsSettingsHost::Impl {
     SettingsPage page = SettingsPage::System;
     std::size_t selectedCard = 0;
     std::size_t archiveOffset = 0;
-    std::int32_t archiveDateOffset = -1;
+    std::int32_t archiveDateOffset = 0;
     bool archiveCalendarOpen = false;
     ArchiveOverlay archiveOverlay = ArchiveOverlay::None;
     std::size_t historicalArchiveCard = 0;

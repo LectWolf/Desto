@@ -127,16 +127,24 @@ begin
   if LifecycleWindow = 0 then Exit;
 
   SendMessage(LifecycleWindow, $0010 { WM_CLOSE }, 0, 0);
-  for Attempt := 1 to 100 do
+  for Attempt := 1 to 50 do
   begin
     Sleep(100);
     if FindWindow('DestoShellLifecycleHost', 'DestoShellLifecycleHost') = 0 then Exit;
   end;
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM Desto.exe /F',
+    '', SW_HIDE, ewWaitUntilTerminated, Attempt);
+  Sleep(300);
+  Result := FindWindow('DestoShellLifecycleHost', 'DestoShellLifecycleHost') = 0;
+  if not Result then
+    MsgBox(
+      'Desto 仍在运行，无法安全关闭。请手动退出 Desto 后重试。',
+      mbError, MB_OK);
+end;
 
-  MsgBox(
-    'Desto 仍在运行，无法安全关闭。请手动退出 Desto 后重试安装。',
-    mbError, MB_OK);
-  Result := False;
+function InitializeUninstall(): Boolean;
+begin
+  Result := CloseRunningDesto();
 end;
 
 function InitializeSetup(): Boolean;

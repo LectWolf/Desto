@@ -52,6 +52,25 @@ void RunTests() {
     auto explicitlyArchived = completedToday;
     explicitlyArchived.archived = true;
     DESTO_CHECK(IsTodoItemArchived(explicitlyArchived, {1970, 1, 1}, 0));
+    const std::vector<TodoItem> datedTodos{
+        {.id = "active-today", .title = "Today", .scheduledDate = TodoDate{1970, 1, 2}},
+        {.id = "overdue", .title = "Overdue", .scheduledDate = TodoDate{1970, 1, 1}},
+        {.id = "archived-yesterday", .title = "Old",
+         .completed = true, .completedAtUnixMilliseconds = 0,
+         .scheduledDate = TodoDate{1970, 1, 1}, .archived = true},
+        {.id = "tomorrow", .title = "Tomorrow", .scheduledDate = TodoDate{1970, 1, 3}},
+    };
+    const auto todayView = ResolveTodoDateView(datedTodos, {1970, 1, 2}, 0, 0);
+    DESTO_CHECK(todayView.size() == 2);
+    DESTO_CHECK(todayView[0].index == 1 && todayView[0].overdue);
+    DESTO_CHECK(todayView[1].index == 0 && !todayView[1].archived);
+    const auto tomorrowView = ResolveTodoDateView(datedTodos, {1970, 1, 2}, 1, 0);
+    DESTO_CHECK(tomorrowView.size() == 1);
+    DESTO_CHECK(tomorrowView[0].index == 3);
+    const auto historyView = ResolveTodoDateView(datedTodos, {1970, 1, 2}, -1, 0);
+    DESTO_CHECK(historyView.size() == 2);
+    DESTO_CHECK(historyView[0].index == 1 && !historyView[0].archived);
+    DESTO_CHECK(historyView[1].index == 2 && historyView[1].archived);
 
     todos.setItems({
         {.id = "todo-1", .title = "First", .completed = false,

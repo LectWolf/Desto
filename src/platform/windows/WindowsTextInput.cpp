@@ -485,6 +485,12 @@ public:
         redraw();
     }
 
+    void setPlaceholder(std::wstring value) noexcept {
+        createInfo.placeholder = std::move(value);
+        invalidateAllLayouts();
+        redraw();
+    }
+
     bool handleKeyMessage(UINT message, WPARAM key, LPARAM lParam) noexcept {
         auto& tsf = ThreadTsf();
         if (tsf.keystrokes != nullptr) {
@@ -1456,6 +1462,12 @@ void SetWindowsTextInputBounds(HWND window, RECT bounds) noexcept {
 
 void SetWindowsTextInputStyle(HWND window, WindowsTextInputStyle style) noexcept {
     if (auto* state = State(window); state != nullptr) state->setStyle(std::move(style));
+}
+
+void SetWindowsTextInputPlaceholder(HWND window, std::wstring placeholder) noexcept {
+    if (auto* state = State(window); state != nullptr) {
+        state->setPlaceholder(std::move(placeholder));
+    }
 }
 
 void FocusWindowsTextInput(HWND window) noexcept {

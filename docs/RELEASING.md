@@ -13,7 +13,7 @@ Desto releases are built on `windows-2022` from an exact Git commit. CI builds a
 - `BUILDINFO.json`: source commit, source time, tool version and dirty-tree state;
 - `THIRD-PARTY-NOTICES.md`: runtime and build-time attribution inventory.
 
-The release workflow creates a draft GitHub Release only after the Release test suite and `VerifyRelease.ps1` pass. A failed build therefore does not replace an installed application or publish a partial release. Inno Setup also retains its transactional rollback behavior during file replacement. Older installers are rejected before mutation by the installed-version check.
+The release workflow publishes a GitHub Release only after the Release test suite and `VerifyRelease.ps1` pass. Four-part development tags are marked as prereleases so they do not replace `/releases/latest`. A failed build therefore does not replace an installed application or publish a partial release. Inno Setup also retains its transactional rollback behavior during file replacement. Older installers are rejected before mutation by the installed-version check.
 
 ## External Requirements
 
@@ -27,7 +27,7 @@ The following are intentionally not guessed or embedded in the repository:
 ## Local Verification
 
 ```powershell
-cmake -S . -B build -DDESTO_BUILD_PROTOTYPES=OFF -DDESTO_BUILD_BENCHMARKS=ON
+cmake -S . -B build -DDESTO_BUILD_BENCHMARKS=ON
 cmake --build build --config Release --parallel 4 -- /nodeReuse:false
 ctest --test-dir build -C Release --output-on-failure
 ./release/BuildRelease.ps1 -Version 0.1.0

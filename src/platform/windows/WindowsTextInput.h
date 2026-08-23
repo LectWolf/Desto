@@ -70,6 +70,7 @@ WindowsTextInputSelection(HWND window) noexcept;
 WindowsTextInputRenderStats(HWND window) noexcept;
 void SetWindowsTextInputBounds(HWND window, RECT bounds) noexcept;
 void SetWindowsTextInputStyle(HWND window, WindowsTextInputStyle style) noexcept;
+void SetWindowsTextInputPlaceholder(HWND window, std::wstring placeholder) noexcept;
 void FocusWindowsTextInput(HWND window) noexcept;
 
 } // namespace desto::platform::windows

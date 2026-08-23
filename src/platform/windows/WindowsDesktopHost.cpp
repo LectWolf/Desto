@@ -107,7 +107,6 @@ std::uint32_t ResolveLayeredSurfaceTextQuality() noexcept {
 // Small type on a translucent layered card needs more ink than the same size
 // on an opaque ClearType surface. Keep the size ladder; raise weight instead.
 constexpr int kCardTitleWeight = FW_SEMIBOLD;
-constexpr double kCardMetadataDip = 11.0;
 
 std::uint32_t CompositeCrystalLayerPixel(
     std::uint32_t materialRgb,
@@ -331,6 +330,7 @@ struct Surface {
 
 struct TodoDisplayEntry {
     bool showDateLabel = false;
+    bool archived = false;
     std::size_t itemIndex = 0;
     domain::TodoDate date{};
 };
@@ -1461,35 +1461,40 @@ struct WindowsDesktopHost::Impl {
 
     static std::vector<TodoDisplayEntry> todoDisplayEntries(const Surface& surface) {
         const auto today = CurrentTodoDate(surface.timeZoneOffsetMinutes);
-        const auto selectedDate = domain::AddTodoDays(today, surface.todoAddDateOffset);
-        std::vector<std::size_t> overdue;
-        std::vector<std::size_t> selected;
-        for (std::size_t index = 0; index < surface.card.todoItems.size(); ++index) {
-            const auto& item = surface.card.todoItems[index];
-            if (domain::IsTodoItemArchived(
-                    item, today, surface.timeZoneOffsetMinutes)) continue;
-            const auto date = item.scheduledDate.value_or(today);
-            if (surface.todoAddDateOffset == 0
-                && domain::CompareTodoDates(date, today) < 0) {
-                overdue.push_back(index);
-            } else if (date == selectedDate) {
-                selected.push_back(index);
-            }
-        }
-        std::ranges::stable_sort(overdue, [&](std::size_t left, std::size_t right) {
-            const auto leftDate = surface.card.todoItems[left].scheduledDate.value_or(today);
-            const auto rightDate = surface.card.todoItems[right].scheduledDate.value_or(today);
-            return leftDate == rightDate ? left < right : leftDate < rightDate;
-        });
         std::vector<TodoDisplayEntry> result;
-        for (const auto itemIndex : overdue) {
-            const auto date = surface.card.todoItems[itemIndex].scheduledDate.value_or(today);
-            result.push_back({true, itemIndex, date});
-        }
-        for (const auto itemIndex : selected) {
-            result.push_back({false, itemIndex, selectedDate});
+        for (const auto& item : domain::ResolveTodoDateView(
+                surface.card.todoItems, today, surface.todoAddDateOffset,
+                surface.timeZoneOffsetMinutes)) {
+            result.push_back({
+                .showDateLabel = item.overdue || item.archived,
+                .archived = item.archived,
+                .itemIndex = item.index,
+                .date = item.date,
+            });
         }
         return result;
+    }
+
+    static std::size_t todoDateActivity(
+        const Surface& surface, domain::TodoDate date) noexcept {
+        const auto today = CurrentTodoDate(surface.timeZoneOffsetMinutes);
+        std::size_t count = 0;
+        for (const auto& item : surface.card.todoItems) {
+            const auto scheduled = item.scheduledDate.value_or(today);
+            if (!domain::IsTodoItemArchived(
+                    item, today, surface.timeZoneOffsetMinutes)) {
+                if (scheduled == date) ++count;
+                continue;
+            }
+            const auto timestamp = item.completedAtUnixMilliseconds > 0
+                ? item.completedAtUnixMilliseconds : item.createdAtUnixMilliseconds;
+            const auto archiveDate = timestamp > 0
+                ? domain::TodoDateAtUnixMilliseconds(
+                    timestamp, surface.timeZoneOffsetMinutes)
+                : scheduled;
+            if (archiveDate == date || scheduled == date) ++count;
+        }
+        return count;
     }
 
     static double todoRowHeightDip(const Surface& surface, std::size_t itemIndex) noexcept {
@@ -1515,8 +1520,12 @@ struct WindowsDesktopHost::Impl {
             ReleaseDC(nullptr, dc);
             const auto today = CurrentTodoDate(surface.timeZoneOffsetMinutes);
             const auto& item = surface.card.todoItems[itemIndex];
-            const auto showDateLabel = surface.todoAddDateOffset == 0
-                && domain::CompareTodoDates(item.scheduledDate.value_or(today), today) < 0;
+            const auto historical = surface.todoAddDateOffset != 0
+                && surface.todoAddDateOffset != 1;
+            const auto showDateLabel = (surface.todoAddDateOffset == 0
+                    && domain::CompareTodoDates(item.scheduledDate.value_or(today), today) < 0)
+                || (historical && domain::IsTodoItemArchived(
+                    item, today, surface.timeZoneOffsetMinutes));
             const auto showMetadata = showDateLabel
                 || surface.card.todoPreferences.showCreatedTime;
             return std::max(42.0, measured.bottom / scale + 12.0
@@ -2063,12 +2072,19 @@ struct WindowsDesktopHost::Impl {
         return result;
     }
 
-    static RECT itemLabelRect(
+    struct ItemNameLayout {
+        int iconLeft = 0;
+        int iconTop = 0;
+        RECT label{};
+    };
+
+    static ItemNameLayout resolveItemNameLayout(
         const Surface& surface,
         std::size_t column,
         std::size_t row,
         std::size_t slotCount,
-        int visibleBottom) {
+        int visibleBottom,
+        bool iconFrame) {
         const auto slot = itemRect(surface, column, row, slotCount);
         const auto settings = itemLayoutSettings(surface);
         const auto scale = surface.display.effectiveDpi / 96.0;
@@ -2081,17 +2097,54 @@ struct WindowsDesktopHost::Impl {
         const auto iconRegionSize = std::max(
             1, static_cast<int>(std::lround(
                 (listPresentation ? settings.itemHeight : settings.itemWidth) * scale)));
-        const auto labelGap = dipToPixels(listPresentation ? 10.0 : 3.0, surface);
-        const auto iconTop = slot.top + (iconRegionSize - iconSize) / 2;
+        const auto framedNames = iconFrame && !listPresentation
+            && surface.card.content.showItemNames;
+        const auto framePad = dipToPixels(framedNames ? 6.0 : 0.0, surface);
+        const auto labelGap = dipToPixels(
+            listPresentation ? 10.0 : framedNames ? 4.0 : 3.0, surface);
         const auto iconLeft = listPresentation
             ? slot.left + dipToPixels(8.0, surface)
             : slot.left + ((slot.right - slot.left) - iconSize) / 2;
-        return listPresentation
-            ? RECT{iconLeft + iconSize + labelGap, slot.top,
-                slot.right - dipToPixels(8.0, surface),
-                std::min<LONG>(slot.bottom, visibleBottom)}
-            : RECT{slot.left, iconTop + iconSize + labelGap, slot.right,
-                std::min<LONG>(slot.bottom, visibleBottom)};
+        int iconTop = slot.top + (iconRegionSize - iconSize) / 2;
+        if (framedNames) {
+            const auto line = dipToPixels(settings.itemFontSize + 4.0, surface);
+            const auto block = iconSize + labelGap + line;
+            const auto innerTop = slot.top + framePad;
+            const auto innerBottom = slot.bottom - framePad;
+            iconTop = innerTop + std::max(0,
+                static_cast<int>(innerBottom - innerTop - block) / 2);
+            return {
+                .iconLeft = iconLeft,
+                .iconTop = iconTop,
+                .label = RECT{
+                    slot.left + framePad,
+                    iconTop + iconSize + labelGap,
+                    slot.right - framePad,
+                    std::min<LONG>(iconTop + iconSize + labelGap + line, visibleBottom),
+                },
+            };
+        }
+        return {
+            .iconLeft = iconLeft,
+            .iconTop = iconTop,
+            .label = listPresentation
+                ? RECT{iconLeft + iconSize + labelGap, slot.top,
+                    slot.right - dipToPixels(8.0, surface),
+                    std::min<LONG>(slot.bottom, visibleBottom)}
+                : RECT{slot.left, iconTop + iconSize + labelGap, slot.right,
+                    std::min<LONG>(slot.bottom, visibleBottom)},
+        };
+    }
+
+    static RECT itemLabelRect(
+        const Surface& surface,
+        std::size_t column,
+        std::size_t row,
+        std::size_t slotCount,
+        int visibleBottom,
+        bool iconFrame) {
+        return resolveItemNameLayout(
+            surface, column, row, slotCount, visibleBottom, iconFrame).label;
     }
 
     static std::optional<std::size_t> itemAt(const Surface& surface, int x, int y) {
@@ -2703,6 +2756,7 @@ struct WindowsDesktopHost::Impl {
     bool openTodoCalendar(HWND window, int x, int y) noexcept {
         auto* surface = findSurface(window);
         if (surface == nullptr || !isTodoViewControlHit(*surface, x, y)) return false;
+        if (todoEditor != nullptr) finishTodoEdit(todoEditor, false);
         surface->todoCalendarOpen = true;
         const auto selected = domain::AddTodoDays(
             CurrentTodoDate(surface->timeZoneOffsetMinutes), surface->todoAddDateOffset);
@@ -4568,11 +4622,13 @@ struct WindowsDesktopHost::Impl {
             drawTodoAction(archiveRect, archiveText,
                 crystalSurface && hasCompleted ? RGB(42, 52, 65) : archiveColor);
             auto remainingRect = todoRemainingRect(surface);
-            drawRoundedFill(
-                remainingRect,
-                dipToPixels(9.0, surface),
-                darkSurface ? 0x00FFFFFFu : 0x0018212Fu,
-                darkSurface ? 0.07 : 0.045);
+            if (!surface.todoCalendarOpen) {
+                drawRoundedFill(
+                    remainingRect,
+                    dipToPixels(9.0, surface),
+                    darkSurface ? 0x00FFFFFFu : 0x0018212Fu,
+                    darkSurface ? 0.07 : 0.045);
+            }
             const auto remainingColor = darkSurface ? RGB(182, 188, 199)
                 : crystalSurface ? RGB(34, 43, 56) : RGB(55, 60, 68);
             const auto remainingText = tr(L"剩余 ", L"Left ") + std::to_wstring(remaining);
@@ -4589,12 +4645,12 @@ struct WindowsDesktopHost::Impl {
             const auto previousTodoFont = todoFont == nullptr
                 ? nullptr : SelectObject(surface.memoryDc, todoFont);
             const auto metadataFont = CreateFontW(
-                -dipToPixels(kCardMetadataDip, surface), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+                -dipToPixels(9.0, surface), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
                 DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                 ResolveLayeredSurfaceTextQuality(),
                 DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Variable Text");
             const auto entryRects = todoEntryRects(surface, entries);
-            for (std::size_t entryIndex = 0; entryIndex < entries.size(); ++entryIndex) {
+            if (!surface.todoCalendarOpen) for (std::size_t entryIndex = 0; entryIndex < entries.size(); ++entryIndex) {
                 const auto& entry = entries[entryIndex];
                 auto row = entryRects[entryIndex];
                 if (row.right <= row.left || row.bottom <= row.top
@@ -4709,26 +4765,30 @@ struct WindowsDesktopHost::Impl {
                         : DT_WORDBREAK | DT_EDITCONTROL));
                 auto metadataLeft = label.left;
                 if (entry.showDateLabel) {
-                    const auto dateText = TodoDateLabel(
-                        entry.date, surface.timeZoneOffsetMinutes, usesEnglish());
+                    const auto dateText = entry.archived
+                        ? tr(L"归档", L"Archived")
+                        : TodoDateLabel(
+                            entry.date, surface.timeZoneOffsetMinutes, usesEnglish());
                     const auto previousMetadataFont = metadataFont == nullptr
                         ? nullptr : SelectObject(surface.memoryDc, metadataFont);
                     SIZE dateExtent{};
                     GetTextExtentPoint32W(surface.memoryDc, dateText.c_str(),
                         static_cast<int>(dateText.size()), &dateExtent);
+                    const auto badgePadX = dipToPixels(8.0, surface);
+                    const auto badgePadY = dipToPixels(3.0, surface);
+                    const auto badgeTop = label.bottom + dipToPixels(2.0, surface);
                     const auto badge = RECT{
                         metadataLeft,
-                        label.bottom + dipToPixels(1.0, surface),
-                        metadataLeft + dateExtent.cx + dipToPixels(10.0, surface),
-                        row.bottom - dipToPixels(2.0, surface),
+                        badgeTop,
+                        metadataLeft + dateExtent.cx + badgePadX,
+                        badgeTop + dateExtent.cy + badgePadY,
                     };
                     drawRoundedFill(
                         badge,
-                        dipToPixels(6.0, surface),
-                        darkSurface ? 0x007FB7FFu : 0x003774DCu,
-                        darkSurface ? 0.20 : 0.12);
-                    SetTextColor(surface.memoryDc,
-                        darkSurface ? RGB(155, 199, 255) : RGB(47, 101, 185));
+                        dipToPixels(5.0, surface),
+                        0x002F71DCu,
+                        darkSurface ? 0.92 : 0.96);
+                    SetTextColor(surface.memoryDc, RGB(255, 255, 255));
                     auto dateTextRect = badge;
                     drawSurfaceText(dateText.c_str(), -1, &dateTextRect,
                         DT_CENTER | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
@@ -4761,7 +4821,7 @@ struct WindowsDesktopHost::Impl {
                         SelectObject(surface.memoryDc, previousMetadataFont);
                     }
                 }
-                if (item.completed && singleLine) {
+                if (item.completed && singleLine && !entry.archived) {
                     SIZE textExtent{};
                     GetTextExtentPoint32W(
                         surface.memoryDc,
@@ -4789,7 +4849,7 @@ struct WindowsDesktopHost::Impl {
             const auto addRect = todoAddControlRect(surface);
             const auto editingTodo = todoEditor != nullptr
                 && todoEditorSurface == surface.window;
-            if (!editingTodo) {
+            if (!editingTodo && !surface.todoCalendarOpen) {
                 drawRoundedFill(
                     addRect,
                     dipToPixels(11.0, surface),
@@ -4836,7 +4896,7 @@ struct WindowsDesktopHost::Impl {
                 }
                 if (addFont != nullptr) DeleteObject(addFont);
             }
-            if (entries.empty()) {
+            if (entries.empty() && !surface.todoCalendarOpen) {
                 RECT emptyRect{dipToPixels(16.0, surface), dipToPixels(138.0, surface),
                     surface.width - dipToPixels(16.0, surface), visibleBottom - dipToPixels(12.0, surface)};
                 const auto emptyFont = CreateFontW(
@@ -4876,17 +4936,17 @@ struct WindowsDesktopHost::Impl {
                         const auto coverage = presentation::SampleRoundedRectCoverage(
                             panelSpec, x - panel.left + 0.5, y - panel.top + 0.5);
                         const auto panelColor = crystalSurface
-                            ? 0x00546678u
+                            ? 0x00F4FAFFu
                             : darkSurface ? 0x0021242Au : 0x00F4F6F9u;
                         blendVisibleContent(x, y, panelColor,
-                            coverage * (crystalSurface ? 0.94 : 1.0));
+                            coverage * (crystalSurface ? crystalStyle.itemFillOpacity + 0.08 : 1.0));
                     }
                 }
                 drawContentRoundedOutline(panel, dipToPixels(12.0, surface),
                     std::max(1.0, static_cast<double>(dipToPixels(1.0, surface))),
                     crystalSurface ? 0x00FFFFFFu
                         : darkSurface ? 0x00666C78u : 0x00AEB8C6u,
-                    crystalSurface ? 0.46 : 0.72);
+                    crystalSurface ? crystalStyle.surfaceOutlineOpacity : 0.72);
                 const auto previousRect = todoCalendarPreviousRect(surface);
                 const auto nextRect = todoCalendarNextRect(surface);
                 if (surface.todoCalendarPressed == -2) {
@@ -4909,7 +4969,7 @@ struct WindowsDesktopHost::Impl {
                     DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Variable Text");
                 const auto previousCalendarFont = calendarFont == nullptr
                     ? nullptr : SelectObject(surface.memoryDc, calendarFont);
-                const auto calendarColor = crystalSurface ? RGB(248, 250, 253)
+                const auto calendarColor = crystalSurface ? RGB(25, 34, 46)
                     : darkSurface ? RGB(225, 228, 234) : RGB(42, 47, 56);
                 SetTextColor(surface.memoryDc, calendarColor);
                 wchar_t monthTitle[32]{};
@@ -4968,28 +5028,38 @@ struct WindowsDesktopHost::Impl {
                     const auto currentMonth = date.year == surface.todoCalendarMonth.year
                         && date.month == surface.todoCalendarMonth.month;
                     const auto todayDay = date == today;
+                    const auto heat = todoDateActivity(surface, date);
+                    auto fill = dayRect;
+                    InflateRect(&fill, -dipToPixels(3.0, surface), -dipToPixels(2.0, surface));
                     if (selectedDay || surface.todoCalendarPressed == static_cast<int>(index)) {
-                        auto fill = dayRect;
-                        InflateRect(&fill, -dipToPixels(3.0, surface), -dipToPixels(2.0, surface));
                         drawContentRoundedFill(fill, dipToPixels(7.0, surface),
                             selectedDay ? 0x002B76D6u
                                 : darkSurface || crystalSurface ? 0x00FFFFFFu : 0x0018212Fu,
                             selectedDay ? 0.96 : 0.12);
-                    } else if (todayDay) {
-                        auto outline = dayRect;
-                        InflateRect(&outline, -dipToPixels(3.0, surface), -dipToPixels(2.0, surface));
-                        drawContentRoundedOutline(outline, dipToPixels(7.0, surface),
+                    } else if (heat > 0) {
+                        const auto heatColor = heat >= 5 ? 0x00589CFFu
+                            : heat >= 3 ? 0x002F71DCu
+                            : heat == 2 ? 0x00244E8Au : 0x001C3456u;
+                        const auto heatOpacity = crystalSurface
+                            ? (heat >= 5 ? 0.62 : heat >= 3 ? 0.48 : heat == 2 ? 0.36 : 0.24)
+                            : (heat >= 5 ? 0.92 : heat >= 3 ? 0.78 : heat == 2 ? 0.58 : 0.38);
+                        drawContentRoundedFill(fill, dipToPixels(7.0, surface),
+                            heatColor, heatOpacity);
+                    }
+                    if (todayDay && !selectedDay) {
+                        drawContentRoundedOutline(fill, dipToPixels(7.0, surface),
                             std::max(1.0, static_cast<double>(dipToPixels(1.0, surface))),
                             crystalSurface ? 0x00D8EBFFu : 0x003388FFu, 0.95);
                     }
                     wchar_t dayText[4]{};
                     swprintf_s(dayText, L"%u", static_cast<unsigned>(date.day));
                     SetTextColor(surface.memoryDc,
-                        selectedDay ? RGB(255, 255, 255)
-                            : todayDay && crystalSurface ? RGB(221, 239, 255)
+                        selectedDay || heat >= 3 ? RGB(255, 255, 255)
+                            : todayDay && crystalSurface ? RGB(29, 94, 184)
+                            : heat > 0 && crystalSurface ? RGB(236, 242, 250)
                             : currentMonth ? calendarColor
-                            : darkSurface || crystalSurface
-                                ? RGB(174, 187, 202) : RGB(147, 153, 163));
+                            : crystalSurface ? RGB(92, 104, 118)
+                            : darkSurface ? RGB(174, 187, 202) : RGB(147, 153, 163));
                     drawSurfaceText(dayText, -1, &dayRect,
                         DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
                 }
@@ -5261,7 +5331,8 @@ struct WindowsDesktopHost::Impl {
                         projected.column,
                         projected.row,
                         visualSlotCount,
-                        visibleBottom);
+                        visibleBottom,
+                        showIconBackgroundFrame);
                     drawSurfaceText(
                         item.displayName.c_str(),
                         -1,
@@ -5517,13 +5588,6 @@ struct WindowsDesktopHost::Impl {
             const auto settings = itemLayoutSettings(surface);
             const auto iconSize = std::max(
                 1, static_cast<int>(std::lround(settings.iconSize * scale)));
-            const auto iconRegionSize = std::max(
-                1, static_cast<int>(std::lround(
-                    ((card.type == domain::CardType::Application
-                            || card.type == domain::CardType::Mapping)
-                        && card.mappingPresentationMode
-                            == domain::MappingPresentationMode::List
-                        ? settings.itemHeight : settings.itemWidth) * scale)));
             const auto listPresentation = (card.type == domain::CardType::Application
                     || card.type == domain::CardType::Mapping)
                 && card.mappingPresentationMode == domain::MappingPresentationMode::List;
@@ -5561,10 +5625,11 @@ struct WindowsDesktopHost::Impl {
                     surface, projected.column, projected.row, visualSlotCount);
                 if (slot.bottom <= slot.top || slot.right <= slot.left
                     || slot.top >= visibleBottom) continue;
-                const auto iconLeft = listPresentation
-                    ? slot.left + dipToPixels(8.0, surface)
-                    : slot.left + ((slot.right - slot.left) - iconSize) / 2;
-                const auto iconTop = slot.top + (iconRegionSize - iconSize) / 2;
+                const auto chrome = resolveItemNameLayout(
+                    surface, projected.column, projected.row, visualSlotCount,
+                    visibleBottom, showIconBackgroundFrame);
+                const auto iconLeft = chrome.iconLeft;
+                const auto iconTop = chrome.iconTop;
                 for (int targetY = 0; targetY < iconSize; ++targetY) {
                     for (int targetX = 0; targetX < iconSize; ++targetX) {
                         const auto sourcePixel = iconSize == item.icon.width

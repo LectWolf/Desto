@@ -1109,20 +1109,15 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         settingsHost.setArchiveExportCallback(
             [&](TodoDate begin, TodoDate end, const std::filesystem::path& destination) {
                 try {
-                    std::string text = "\xEF\xBB\xBF";
-                    text += uiLanguage == "en-US"
-                        ? "Desto archived tasks\r\n"
-                        : "Desto 待办归档\r\n";
-                    text += ToString(begin) + " - " + ToString(end) + "\r\n\r\n";
+                    std::vector<TodoArchiveExportEntry> entries;
+                    const auto today = CurrentTodoDate(
+                        applicationPreferences.timeZoneOffsetMinutes);
                     for (const auto* card : orderedRuntimeCards()) {
                         if (card->type() != CardType::Todo) continue;
                         const auto* todo = static_cast<const TodoCard*>(card);
-                        bool wroteCard = false;
                         for (const auto& item : todo->items()) {
                             if (!IsTodoItemArchived(
-                                    item,
-                                    CurrentTodoDate(
-                                        applicationPreferences.timeZoneOffsetMinutes),
+                                    item, today,
                                     applicationPreferences.timeZoneOffsetMinutes)) {
                                 continue;
                             }
@@ -1133,19 +1128,14 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
                                 timestamp, applicationPreferences.timeZoneOffsetMinutes);
                             if (CompareTodoDates(date, begin) < 0
                                 || CompareTodoDates(date, end) > 0) continue;
-                            if (!wroteCard) {
-                                auto cardTitle = card->name();
-                                if (cardTitle.empty()) {
-                                    cardTitle = uiLanguage == "en-US"
-                                        ? "Task card" : "待办卡片";
-                                }
-                                text += "[" + cardTitle + "]\r\n";
-                                wroteCard = true;
-                            }
-                            text += ToString(date) + "  " + item.title + "\r\n";
+                            entries.push_back({
+                                .date = date,
+                                .orderTimestamp = timestamp,
+                                .title = item.title,
+                            });
                         }
-                        if (wroteCard) text += "\r\n";
                     }
+                    const auto text = FormatTodoArchiveExport(entries);
                     std::ofstream output(destination, std::ios::binary | std::ios::trunc);
                     if (!output) throw std::runtime_error("Unable to open archive export file.");
                     output.write(text.data(), static_cast<std::streamsize>(text.size()));

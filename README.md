@@ -1,41 +1,54 @@
 # Desto
 
-Desto 是一个面向 Windows 的轻量桌面整理工具，目前处于架构与技术验证阶段。
+面向 Windows 的轻量桌面整理工具。用卡片把文件、映射目录和待办放在桌面上，按显示器记住位置，尽量少占内存和空闲 CPU。
 
-项目目标：
+![Desto](logo.png)
 
-- 低常驻内存和接近零的空闲 CPU 占用。
-- 快速启动、同步显隐和稳定的多屏体验。
-- 简约但精致的界面。
-- 每个 Card 拥有独立的功能入口、外观和交互配置。
-- 稳定的核心结构，以及可独立开发和验证的功能模块。
+## 能做什么
 
-## Documents
+- **应用卡片**：把常用文件收进桌面卡片，网格或列表打开。
+- **映射卡片**：投影真实文件夹，或只保存引用而不移动源文件。
+- **待办卡片**：今天、明天和历史日期，完成项可归档、搜索和导出。
+- **桌面交互**：双击桌面或任务栏空白返回桌面；卡片可置顶、折叠、锁定。
+- **按卡片配置**：圆角、外观、操作按钮和内容密度都是实例设置。
 
-- [产品边界](docs/PRODUCT.md)
-- [领域模型](docs/DOMAIN.md)
-- [存储与迁移](docs/STORAGE.md)
-- [架构原则](docs/ARCHITECTURE.md)
-- [性能策略](docs/PERFORMANCE.md)
-- [稳定性验证](docs/STABILITY.md)
-- [发布流程](docs/RELEASING.md)
-- [0.1.0 发布说明](docs/RELEASE_NOTES_0.1.0.md)
-- [0.2.0 发布说明](docs/RELEASE_NOTES_0.2.0.md)
-- [0.2.1 发布说明](docs/RELEASE_NOTES_0.2.1.md)
-- [0.2.2 发布说明](docs/RELEASE_NOTES_0.2.2.md)
-- [0.2.3 发布说明](docs/RELEASE_NOTES_0.2.3.md)
-- [RC 验收清单](docs/RC_CHECKLIST.md)
-- [交付路线](docs/ROADMAP.md)
-- [配置模型](docs/CONFIGURATION.md)
-- [架构决策记录](docs/adr/README.md)
+## 要求
 
-## License
+- Windows 10 1809 或更高版本（含 Windows 11）
+- 64 位
 
-Desto is licensed under [GPL-3.0-or-later](LICENSE). Redistributions and
-modified versions must preserve attribution and provide corresponding source
-under the same license. Third-party components remain under their own licenses;
-see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+## 安装
 
-## Status
+从 [Releases](https://github.com/LectWolf/Desto/releases) 下载安装包。
 
-当前回到 `（48/49）Crystal transparency preset` 进行真实桌面视觉复验。事项 1-39、41-47 已完成，事项 40 的扩展原型已撤销；Desto 使用 Win32 原生宿主与原生系统菜单，首次启动保持空 Workspace，Card 支持多显示器、桌面层级、事务拖放、映射、文件原位重命名、自绘归档日期、彩色 Emoji、水晶透明外观、登录启动和桌面/任务栏触发。水晶材质与分层窗口字体通过目测后再恢复事项 49 的发布候选验收。
+- **稳定版**：`Desto-x.y.z-win-x64-setup.exe`
+- **开发版**：`Desto-x.y.z.n-win-x64-setup.exe`，在设置 → 关于里切换通道后检查更新
+
+安装是当前用户范围。覆盖安装前会先尝试关闭正在运行的 Desto。
+
+## 构建
+
+```powershell
+cmake -S . -B build -DDESTO_BUILD_BENCHMARKS=ON
+cmake --build build --config Release --parallel
+ctest --test-dir build -C Release --output-on-failure
+```
+
+正式可执行文件在 `build/apps/Release/Desto.exe`。打安装包见 [发布流程](docs/RELEASING.md)。
+
+## 文档
+
+| 文档 | 内容 |
+| --- | --- |
+| [产品](docs/PRODUCT.md) | 边界和核心概念 |
+| [架构](docs/ARCHITECTURE.md) | 模块和依赖方向 |
+| [配置](docs/CONFIGURATION.md) | 设置层级与迁移 |
+| [性能](docs/PERFORMANCE.md) | 预算和测量 |
+| [发布](docs/RELEASING.md) | 安装包与更新通道 |
+| [路线](docs/ROADMAP.md) | 当前验收事项 |
+
+卡片行为见 [待办](docs/TODO_CARD.md)、[应用](docs/APPLICATION_CARD.md)、[映射](docs/MAPPING_CARD.md)。架构决策在 [ADR](docs/adr/README.md)。
+
+## 许可
+
+[GPL-3.0-or-later](LICENSE)。第三方组件见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。

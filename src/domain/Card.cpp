@@ -212,6 +212,55 @@ bool IsTodoItemArchived(
         != currentDate;
 }
 
+TodoDate TodoItemArchiveDate(
+    const TodoItem& item,
+    TodoDate today,
+    std::optional<std::int32_t> offsetMinutes) noexcept {
+    const auto timestamp = item.completedAtUnixMilliseconds > 0
+        ? item.completedAtUnixMilliseconds : item.createdAtUnixMilliseconds;
+    if (timestamp > 0) return TodoDateAtUnixMilliseconds(timestamp, offsetMinutes);
+    return item.scheduledDate.value_or(today);
+}
+
+std::vector<TodoDateViewItem> ResolveTodoDateView(
+    std::span<const TodoItem> items,
+    TodoDate today,
+    std::int32_t dateOffset,
+    std::optional<std::int32_t> timeZoneOffsetMinutes) {
+    const auto selected = AddTodoDays(today, dateOffset);
+    const auto historical = dateOffset != 0 && dateOffset != 1;
+    std::vector<TodoDateViewItem> overdue;
+    std::vector<TodoDateViewItem> selectedItems;
+    std::vector<TodoDateViewItem> archived;
+    for (std::size_t index = 0; index < items.size(); ++index) {
+        const auto& item = items[index];
+        const auto scheduled = item.scheduledDate.value_or(today);
+        if (!IsTodoItemArchived(item, today, timeZoneOffsetMinutes)) {
+            if (dateOffset == 0 && CompareTodoDates(scheduled, today) < 0) {
+                overdue.push_back({index, true, false, scheduled});
+            } else if (scheduled == selected) {
+                selectedItems.push_back({index, false, false, selected});
+            }
+            continue;
+        }
+        if (!historical) continue;
+        const auto archiveDate = TodoItemArchiveDate(item, today, timeZoneOffsetMinutes);
+        if (archiveDate == selected || scheduled == selected) {
+            archived.push_back({index, false, true, selected});
+        }
+    }
+    std::ranges::stable_sort(overdue, [&](const TodoDateViewItem& left,
+                                          const TodoDateViewItem& right) {
+        return left.date == right.date ? left.index < right.index : left.date < right.date;
+    });
+    std::vector<TodoDateViewItem> result;
+    result.reserve(overdue.size() + selectedItems.size() + archived.size());
+    result.insert(result.end(), overdue.begin(), overdue.end());
+    result.insert(result.end(), selectedItems.begin(), selectedItems.end());
+    result.insert(result.end(), archived.begin(), archived.end());
+    return result;
+}
+
 Card::Card(CardId id, CardType type)
     : id_(std::move(id)), type_(type) {
     if (id_.empty()) {

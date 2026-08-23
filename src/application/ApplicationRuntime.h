@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <variant>
@@ -14,6 +15,15 @@
 #include "WorkspaceLayout.h"
 
 namespace desto::application {
+
+struct TodoArchiveExportEntry {
+    domain::TodoDate date;
+    std::int64_t orderTimestamp = 0;
+    std::string title;
+};
+
+[[nodiscard]] std::string FormatTodoArchiveExport(
+    std::span<const TodoArchiveExportEntry> entries);
 
 struct CreateApplicationCard {
     domain::CardId cardId;

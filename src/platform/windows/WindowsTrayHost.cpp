@@ -135,8 +135,8 @@ struct WindowsTrayHost::Impl {
             WindowsPopupMenuItem{
                 ToggleDesktopCommand,
                 english
-                    ? (desktopVisible ? L"Hide desktop items" : L"Show desktop items")
-                    : (desktopVisible ? L"隐藏桌面项目" : L"显示桌面项目"),
+                    ? (desktopVisible ? L"Hide desktop cards" : L"Show desktop cards")
+                    : (desktopVisible ? L"隐藏桌面卡片" : L"显示桌面卡片"),
                 desktopVisible ? L"\uE8EE" : L"\uE8F4"},
             WindowsPopupMenuItem{
                 OpenSettingsCommand,
@@ -144,7 +144,7 @@ struct WindowsTrayHost::Impl {
                 L"\uE713"},
             WindowsPopupMenuItem{
                 ExitCommand,
-                english ? L"Exit Desto" : L"退出 Desto",
+                english ? L"Exit" : L"退出",
                 L"\uE8BB",
                 true,
                 false},

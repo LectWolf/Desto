@@ -24,7 +24,6 @@ jobs:
       - name: Configure
         run: >-
           cmake -S . -B build
-          -DDESTO_BUILD_PROTOTYPES=OFF
           -DDESTO_BUILD_BENCHMARKS=ON
 
       - name: Build

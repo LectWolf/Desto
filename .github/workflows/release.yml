@@ -67,7 +67,6 @@ jobs:
       - name: Configure
         run: >-
           cmake -S . -B build
-          -DDESTO_BUILD_PROTOTYPES=OFF
           -DDESTO_BUILD_BENCHMARKS=ON
 
       - name: Build Release
@@ -134,6 +133,7 @@ jobs:
           tag_name: ${{ steps.version.outputs.tag }}
           target_commitish: ${{ github.sha }}
           draft: false
+          prerelease: ${{ steps.version.outputs.development == 'true' }}
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |

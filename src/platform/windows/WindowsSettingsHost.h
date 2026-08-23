@@ -19,22 +19,45 @@ namespace desto::platform::windows {
     bool darkMode) noexcept;
 
 struct FileCardSettingsLayout {
-    int appearanceTop = 166;
-    int appearanceBottom = 204;
-    int toolbarLabelTop = 220;
-    int toolbarTop = 250;
-    int toolbarBottom = 292;
+    int previewTop = 148;
+    int previewBottom = 276;
+    int appearanceLabelTop = 292;
+    int appearanceTop = 318;
+    int appearanceBottom = 356;
+    int densityLabelTop = 372;
+    int densityTop = 398;
+    int densityBottom = 436;
+    int toolbarLabelTop = 452;
+    int toolbarTop = 478;
+    int toolbarBottom = 514;
     int sourceLabelTop = 0;
     int sourceTop = 0;
     int sourceBottom = 0;
-    int optionsLabelTop = 308;
-    int optionsTop = 338;
-    int optionsBottom = 380;
-    int extraTop = 396;
+    int optionsLabelTop = 614;
+    int optionsTop = 640;
+    int optionsBottom = 800;
+    int extraTop = 812;
+};
+
+struct SystemSettingsLayout {
+    int generalLabelTop = 84;
+    int startupTop = 106;
+    int languageTop = 154;
+    int storageTop = 206;
+    int radiusTop = 270;
+    int desktopLabelTop = 334;
+    int desktopClickTop = 356;
+    int taskbarTop = 396;
+    int pinTop = 436;
+    int iconFrameTop = 476;
+    int deleteConfirmTop = 516;
+    int rowHeight = 40;
+    int storageHeight = 52;
 };
 
 [[nodiscard]] FileCardSettingsLayout ResolveFileCardSettingsLayout(
     bool mappingCard) noexcept;
+[[nodiscard]] SystemSettingsLayout ResolveSystemSettingsLayout() noexcept;
 
 struct WindowsSystemSettings {
     std::optional<std::int32_t> timeZoneOffsetMinutes;

@@ -1081,24 +1081,34 @@ void RunTests() {
             == todoWindowRect.right - todoWindowRect.left - 20);
         DESTO_CHECK(editorRect.bottom - editorRect.top == 44);
         DESTO_CHECK(GetFocus() == addEditor);
+        SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(30, 60));
+        SendMessageW(todoWindow, WM_TIMER, 5, 0);
+        DESTO_CHECK(FindTodoEditor(todoWindow) == nullptr);
+        SendMessageW(todoWindow, WM_LBUTTONUP, 0, MAKELPARAM(30, 60));
+        SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(240, 200));
+        SendMessageW(todoWindow, WM_LBUTTONUP, 0, MAKELPARAM(240, 200));
+        SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(40, 100));
+        SendMessageW(todoWindow, WM_LBUTTONUP, 0, MAKELPARAM(40, 100));
+        const auto resumedEditor = FindTodoEditor(todoWindow);
+        DESTO_CHECK(resumedEditor != nullptr);
         DESTO_CHECK(IsWindowAbove(todoOverlay, todoWindow));
-        DESTO_CHECK(IsWindowAbove(todoOverlay, addEditor));
-        SendMessageW(addEditor, WM_CHAR, L'A', 0);
+        DESTO_CHECK(IsWindowAbove(todoOverlay, resumedEditor));
+        SendMessageW(resumedEditor, WM_CHAR, L'A', 0);
         wchar_t editorText[8]{};
-        GetWindowTextW(addEditor, editorText, static_cast<int>(std::size(editorText)));
+        GetWindowTextW(resumedEditor, editorText, static_cast<int>(std::size(editorText)));
         DESTO_CHECK(std::wstring_view(editorText) == L"A");
-        SetWindowTextW(addEditor, L"");
-        SendMessageW(addEditor, WM_CHAR, L'你', 0);
-        SendMessageW(addEditor, WM_CHAR, L'好', 0);
+        SetWindowTextW(resumedEditor, L"");
+        SendMessageW(resumedEditor, WM_CHAR, L'你', 0);
+        SendMessageW(resumedEditor, WM_CHAR, L'好', 0);
         DWORD todoCaretStart = 0;
         DWORD todoCaretEnd = 0;
-        SendMessageW(addEditor, EM_GETSEL,
+        SendMessageW(resumedEditor, EM_GETSEL,
             reinterpret_cast<WPARAM>(&todoCaretStart),
             reinterpret_cast<LPARAM>(&todoCaretEnd));
         DESTO_CHECK(todoCaretStart == 2 && todoCaretEnd == 2);
-        SetWindowTextW(addEditor, L"Plan \U0001F680");
-        DESTO_CHECK(WindowsTextInputText(addEditor) == L"Plan \U0001F680");
-        SendMessageW(addEditor, WM_KEYDOWN, VK_RETURN, 0);
+        SetWindowTextW(resumedEditor, L"Plan \U0001F680");
+        DESTO_CHECK(WindowsTextInputText(resumedEditor) == L"Plan \U0001F680");
+        SendMessageW(resumedEditor, WM_KEYDOWN, VK_RETURN, 0);
         DESTO_CHECK(addedDate == AddTodoDays(CurrentSystemTodoDate(), 1));
         SendMessageW(todoWindow, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(40, 100));
         SendMessageW(todoWindow, WM_LBUTTONUP, 0, MAKELPARAM(40, 100));

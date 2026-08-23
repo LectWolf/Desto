@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <span>
 #include <stdexcept>
 #include <utility>
 
@@ -981,6 +982,31 @@ bool ApplicationRuntime::refreshProjections() {
     }
     projections_ = next;
     return true;
+}
+
+std::string FormatTodoArchiveExport(
+    std::span<const TodoArchiveExportEntry> entries) {
+    std::vector<TodoArchiveExportEntry> ordered(entries.begin(), entries.end());
+    std::ranges::sort(ordered, [](const TodoArchiveExportEntry& left,
+                                  const TodoArchiveExportEntry& right) {
+        const auto date = domain::CompareTodoDates(left.date, right.date);
+        if (date != 0) return date < 0;
+        if (left.orderTimestamp != right.orderTimestamp) {
+            return left.orderTimestamp < right.orderTimestamp;
+        }
+        return left.title < right.title;
+    });
+    std::string text = "\xEF\xBB\xBF";
+    std::optional<domain::TodoDate> current;
+    for (const auto& entry : ordered) {
+        if (!current.has_value() || domain::CompareTodoDates(*current, entry.date) != 0) {
+            if (current.has_value()) text += "\r\n";
+            text += domain::ToString(entry.date) + "\r\n";
+            current = entry.date;
+        }
+        text += entry.title + "\r\n";
+    }
+    return text;
 }
 
 } // namespace desto::application
