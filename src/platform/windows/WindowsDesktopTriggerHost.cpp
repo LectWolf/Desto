@@ -5,6 +5,7 @@
 #include <dwmapi.h>
 #include <oleacc.h>
 #include <shlobj.h>
+#include <UIAutomation.h>
 #include <windowsx.h>
 
 #include <algorithm>
@@ -14,6 +15,7 @@
 #include <condition_variable>
 #include <mutex>
 #include <stdexcept>
+#include <string>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -35,6 +37,27 @@ bool IsBlankTaskbarAccessibilityTarget(
     // overflow surface. Only the taskbar root itself is considered blank.
     return role == ROLE_SYSTEM_PANE
         || (directTaskbarHit && role == ROLE_SYSTEM_CLIENT);
+}
+
+bool IsBlankTaskbarAutomationTarget(
+    bool querySucceeded,
+    long controlType,
+    bool hasMeaningfulIdentity) noexcept {
+    if (!querySucceeded) return false;
+
+    // Pane/toolbar/window/custom are neutral taskbar containers. Buttons,
+    // list items, menu items and edits represent an actual taskbar control.
+    const auto neutralContainer = controlType == UIA_PaneControlTypeId
+        || controlType == UIA_ToolBarControlTypeId
+        || controlType == UIA_WindowControlTypeId
+        || controlType == UIA_CustomControlTypeId;
+    const auto interactiveType = controlType == UIA_ButtonControlTypeId
+        || controlType == UIA_SplitButtonControlTypeId
+        || controlType == UIA_EditControlTypeId
+        || controlType == UIA_ListItemControlTypeId
+        || controlType == UIA_MenuItemControlTypeId
+        || controlType == UIA_TabItemControlTypeId;
+    return !interactiveType && (!hasMeaningfulIdentity || neutralContainer);
 }
 
 namespace {
@@ -115,6 +138,47 @@ bool IsTaskbarWindow(HWND window) noexcept {
         || wcscmp(className, L"Shell_SecondaryTrayWnd") == 0;
 }
 
+bool TryClassifyTaskbarAutomationPoint(
+    POINT point,
+    bool& isInteractive) noexcept {
+    isInteractive = true;
+    HRESULT initResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    const bool shouldUninitialize = SUCCEEDED(initResult);
+    if (FAILED(initResult) && initResult != RPC_E_CHANGED_MODE) return false;
+
+    IUIAutomation* automation = nullptr;
+    IUIAutomationElement* element = nullptr;
+    BSTR name = nullptr;
+    BSTR className = nullptr;
+    BSTR automationId = nullptr;
+    bool result = false;
+    do {
+        if (FAILED(CoCreateInstance(
+                CLSID_CUIAutomation, nullptr, CLSCTX_INPROC_SERVER,
+                IID_PPV_ARGS(&automation))) || automation == nullptr) break;
+        if (FAILED(automation->ElementFromPoint(point, &element)) || element == nullptr) break;
+
+        int controlType = 0;
+        if (FAILED(element->get_CurrentControlType(&controlType))) break;
+        (void)element->get_CurrentName(&name);
+        (void)element->get_CurrentClassName(&className);
+        (void)element->get_CurrentAutomationId(&automationId);
+        const bool hasMeaningfulIdentity = (name != nullptr && name[0] != L'\0')
+            || (className != nullptr && className[0] != L'\0')
+            || (automationId != nullptr && automationId[0] != L'\0');
+        isInteractive = !IsBlankTaskbarAutomationTarget(
+            true, controlType, hasMeaningfulIdentity);
+        result = true;
+    } while (false);
+    if (name != nullptr) SysFreeString(name);
+    if (className != nullptr) SysFreeString(className);
+    if (automationId != nullptr) SysFreeString(automationId);
+    if (element != nullptr) element->Release();
+    if (automation != nullptr) automation->Release();
+    if (shouldUninitialize) CoUninitialize();
+    return result;
+}
+
 bool IsTransientShellOrSwitcherWindow(HWND window) noexcept {
     if (window == nullptr) return true;
     wchar_t className[128]{};
@@ -145,38 +209,30 @@ bool IsBlankTaskbarPoint(POINT point) noexcept {
     const auto clicked = WindowFromPoint(point);
     const auto taskbar = clicked == nullptr ? nullptr : GetAncestor(clicked, GA_ROOT);
     if (!IsTaskbarWindow(taskbar)) return false;
-    // A taskbar button, tray icon, Start/search control, or XAML island may
-    // expose Shell_TrayWnd as its root. The root check alone is therefore not
-    // enough: only a direct hit on the taskbar surface can be blank.
-    if (clicked != taskbar) return false;
+    POINT clientPoint = point;
+    if (!ScreenToClient(taskbar, &clientPoint)) return false;
+    auto childWindow = ChildWindowFromPointEx(
+        taskbar, clientPoint,
+        CWP_SKIPINVISIBLE | CWP_SKIPDISABLED | CWP_SKIPTRANSPARENT);
+    if (childWindow == nullptr || childWindow == taskbar) {
+        childWindow = RealChildWindowFromPoint(taskbar, clientPoint);
+    }
+    // Descendant taskbar windows are not automatically controls: Win11 uses
+    // ReBar/MSTaskSwWClass and composition bridges for both empty space and
+    // task buttons. The UI Automation point probe below is the authoritative
+    // distinction; only an actual interactive element is rejected.
+    (void)childWindow;
 
-    IAccessible* accessible = nullptr;
-    VARIANT child{};
-    VariantInit(&child);
-    if (AccessibleObjectFromPoint(point, &accessible, &child) != S_OK
-        || accessible == nullptr) {
-        return false;
+    bool interactive = true;
+    if (TryClassifyTaskbarAutomationPoint(point, interactive)) {
+        // Classify only the actual pointer location. A nearby task button is
+        // unrelated to a genuinely empty taskbar point and must not suppress
+        // the empty-area double-click.
+        return !interactive;
     }
-    // MSAA reports many taskbar controls as ROLE_SYSTEM_PANE. CHILDID_SELF
-    // distinguishes the taskbar surface from one of those child elements.
-    if (child.vt != VT_I4 || child.lVal != CHILDID_SELF) {
-        accessible->Release();
-        VariantClear(&child);
-        return false;
-    }
-    VARIANT role{};
-    VariantInit(&role);
-    const auto roleResult = accessible->get_accRole(child, &role);
-    accessible->Release();
-    if (roleResult != S_OK || role.vt != VT_I4) {
-        VariantClear(&role);
-        VariantClear(&child);
-        return false;
-    }
-    const auto value = role.lVal;
-    VariantClear(&role);
-    VariantClear(&child);
-    return IsBlankTaskbarAccessibilityTarget(true, value, clicked == taskbar);
+    // UIA is deliberately fail-closed: treating an unknown taskbar surface as
+    // blank would reintroduce the exact false positive this gate prevents.
+    return false;
 }
 
 bool TryToggleDesktopWithExplorer() noexcept {

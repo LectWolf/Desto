@@ -608,6 +608,15 @@ struct WindowsDesktopHost::Impl {
                 return 0;
             }
             break;
+        case WM_CLOSE:
+            // Inno Setup/Restart Manager sends WM_CLOSE to applications that
+            // hold files being replaced. Request the normal host shutdown so
+            // configuration is persisted before the installer continues.
+            instance->closeRequested = true;
+            PostQuitMessage(0);
+            return 0;
+        case WM_QUERYENDSESSION:
+            return TRUE;
         default:
             break;
         }

@@ -31,6 +31,10 @@ enum class DesktopSessionToggleAction {
     bool querySucceeded,
     long role,
     bool directTaskbarHit) noexcept;
+[[nodiscard]] bool IsBlankTaskbarAutomationTarget(
+    bool querySucceeded,
+    long controlType,
+    bool hasMeaningfulIdentity) noexcept;
 
 // Restores the captured visible state while retaining maximized windows.
 [[nodiscard]] bool RestoreCapturedWindowPlacement(

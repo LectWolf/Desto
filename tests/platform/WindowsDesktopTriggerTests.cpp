@@ -3,6 +3,7 @@
 
 #include <Windows.h>
 #include <Oleacc.h>
+#include <UIAutomation.h>
 
 #include <algorithm>
 #include <array>
@@ -170,6 +171,17 @@ void RunTests() {
         true, ROLE_SYSTEM_TOOLBAR, true));
     DESTO_CHECK(!IsBlankTaskbarAccessibilityTarget(
         false, 0, true));
+
+    DESTO_CHECK(!IsBlankTaskbarAutomationTarget(
+        true, UIA_ButtonControlTypeId, true));
+    DESTO_CHECK(!IsBlankTaskbarAutomationTarget(
+        true, UIA_ListItemControlTypeId, true));
+    DESTO_CHECK(IsBlankTaskbarAutomationTarget(
+        true, UIA_PaneControlTypeId, true));
+    DESTO_CHECK(IsBlankTaskbarAutomationTarget(
+        true, UIA_CustomControlTypeId, false));
+    DESTO_CHECK(!IsBlankTaskbarAutomationTarget(
+        false, UIA_PaneControlTypeId, false));
 }
 
 } // namespace

@@ -66,6 +66,7 @@ target_link_libraries(desto_platform_windows
         OleAut32
         Taskschd
         Oleacc
+        UiautomationCore
         Propsys
         Shell32
         WindowsCodecs

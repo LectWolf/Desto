@@ -69,6 +69,11 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,Desto}"; Flag
 var
   DeleteUserDataCheckBox: TNewCheckBox;
 
+function FindWindow(lpClassName, lpWindowName: String): Integer;
+  external 'FindWindowW@user32.dll stdcall';
+function SendMessage(hWnd, Msg, wParam, lParam: Integer): Integer;
+  external 'SendMessageW@user32.dll stdcall';
+
 function NextVersionPart(var Version: String): Integer;
 var
   DotPosition: Integer;
@@ -112,6 +117,28 @@ begin
   end;
 end;
 
+function CloseRunningDesto(): Boolean;
+var
+  LifecycleWindow: Integer;
+  Attempt: Integer;
+begin
+  Result := True;
+  LifecycleWindow := FindWindow('DestoShellLifecycleHost', 'DestoShellLifecycleHost');
+  if LifecycleWindow = 0 then Exit;
+
+  SendMessage(LifecycleWindow, $0010 { WM_CLOSE }, 0, 0);
+  for Attempt := 1 to 100 do
+  begin
+    Sleep(100);
+    if FindWindow('DestoShellLifecycleHost', 'DestoShellLifecycleHost') = 0 then Exit;
+  end;
+
+  MsgBox(
+    'Desto 仍在运行，无法安全关闭。请手动退出 Desto 后重试安装。',
+    mbError, MB_OK);
+  Result := False;
+end;
+
 function InitializeSetup(): Boolean;
 var
   InstalledVersion: String;
@@ -129,6 +156,7 @@ begin
       mbError, MB_OK);
     Result := False;
   end;
+  if Result then Result := CloseRunningDesto();
 end;
 
 procedure InitializeUninstallProgressForm();
