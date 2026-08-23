@@ -145,13 +145,24 @@ bool IsBlankTaskbarPoint(POINT point) noexcept {
     const auto clicked = WindowFromPoint(point);
     const auto taskbar = clicked == nullptr ? nullptr : GetAncestor(clicked, GA_ROOT);
     if (!IsTaskbarWindow(taskbar)) return false;
+    // A taskbar button, tray icon, Start/search control, or XAML island may
+    // expose Shell_TrayWnd as its root. The root check alone is therefore not
+    // enough: only a direct hit on the taskbar surface can be blank.
+    if (clicked != taskbar) return false;
 
     IAccessible* accessible = nullptr;
     VARIANT child{};
     VariantInit(&child);
     if (AccessibleObjectFromPoint(point, &accessible, &child) != S_OK
         || accessible == nullptr) {
-        return IsBlankTaskbarAccessibilityTarget(false, 0, clicked == taskbar);
+        return false;
+    }
+    // MSAA reports many taskbar controls as ROLE_SYSTEM_PANE. CHILDID_SELF
+    // distinguishes the taskbar surface from one of those child elements.
+    if (child.vt != VT_I4 || child.lVal != CHILDID_SELF) {
+        accessible->Release();
+        VariantClear(&child);
+        return false;
     }
     VARIANT role{};
     VariantInit(&role);
@@ -160,7 +171,7 @@ bool IsBlankTaskbarPoint(POINT point) noexcept {
     if (roleResult != S_OK || role.vt != VT_I4) {
         VariantClear(&role);
         VariantClear(&child);
-        return IsBlankTaskbarAccessibilityTarget(false, 0, clicked == taskbar);
+        return false;
     }
     const auto value = role.lVal;
     VariantClear(&role);
