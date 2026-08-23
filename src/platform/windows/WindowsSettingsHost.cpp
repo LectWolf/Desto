@@ -188,6 +188,10 @@ std::wstring JsonInstallerName(const std::string& json) {
     return std::wstring(text.begin(), text.end());
 }
 
+std::wstring MirrorUrl(std::wstring_view url) {
+    return L"https://github.chenc.dev/" + std::wstring(url);
+}
+
 std::optional<std::wstring> DownloadInstaller(const std::wstring& url) {
     wchar_t tempPath[MAX_PATH]{};
     const auto length = GetTempPathW(static_cast<DWORD>(std::size(tempPath)), tempPath);
@@ -196,8 +200,11 @@ std::optional<std::wstring> DownloadInstaller(const std::wstring& url) {
     if (GetTempFileNameW(tempPath, L"Desto", 0, tempFile) == 0) return std::nullopt;
     const std::wstring installerPath = std::wstring(tempFile) + L".exe";
     DeleteFileW(tempFile);
-    if (FAILED(URLDownloadToFileW(nullptr, url.c_str(), installerPath.c_str(),
-            0, nullptr))) {
+    const auto download = [&](const std::wstring& source) {
+        return SUCCEEDED(URLDownloadToFileW(nullptr, source.c_str(),
+            installerPath.c_str(), 0, nullptr));
+    };
+    if (!download(url) && !download(MirrorUrl(url))) {
         DeleteFileW(installerPath.c_str());
         return std::nullopt;
     }
@@ -2562,7 +2569,7 @@ struct WindowsSettingsHost::Impl {
                         L"/LectWolf/Desto/releases/latest/download/release-manifest.json");
                 }
                 if (!metadata) {
-                    metadata = DownloadUpdateMetadata(L"ghproxy.net",
+                    metadata = DownloadUpdateMetadata(L"github.chenc.dev",
                         developmentChannel
                             ? L"/https://api.github.com/repos/LectWolf/Desto/releases?per_page=1"
                             : L"/https://github.com/LectWolf/Desto/releases/latest/download/release-manifest.json");

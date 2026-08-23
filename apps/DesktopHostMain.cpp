@@ -634,6 +634,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         };
         WindowsSettingsHost settingsHost;
         host.setOverlayWindow(settingsHost.nativeHandle());
+        settingsHost.setUpdateRequestedCallback([&] {
+            settingsHost.hide();
+            host.requestClose();
+        });
         WindowsTrayHost tray;
         tray.setLanguage(uiLanguage);
         tray.setOpenSettingsCallback([&] { settingsHost.show(); });

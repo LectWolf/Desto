@@ -98,6 +98,7 @@ public:
     using IconBackgroundFrameChangedCallback = std::function<bool(bool)>;
     using FileDeletionConfirmationChangedCallback = std::function<bool(bool)>;
     using UpdateChannelChangedCallback = std::function<bool(const std::string&)>;
+    using UpdateRequestedCallback = std::function<void()>;
 
     explicit WindowsSettingsHost(std::wstring title = L"Desto");
     ~WindowsSettingsHost();
@@ -151,6 +152,7 @@ public:
     void setFileDeletionConfirmationChangedCallback(
         FileDeletionConfirmationChangedCallback callback);
     void setUpdateChannelChangedCallback(UpdateChannelChangedCallback callback);
+    void setUpdateRequestedCallback(UpdateRequestedCallback callback);
 
 private:
     struct Impl;
