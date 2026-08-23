@@ -2,7 +2,7 @@
 
 面向 Windows 的轻量桌面整理工具。用卡片把文件、映射目录和待办放在桌面上，按显示器记住位置，尽量少占内存和空闲 CPU。
 
-![Desto](logo.png)
+<img src="logo.png" alt="Desto" width="128">
 
 ## 能做什么
 
