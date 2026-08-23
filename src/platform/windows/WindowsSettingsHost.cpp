@@ -207,6 +207,46 @@ std::wstring JsonInstallerName(const std::string& json) {
     return std::wstring(text.begin(), text.end());
 }
 
+struct GithubReleaseCandidate {
+    std::wstring tag;
+    std::wstring installerUrl;
+};
+
+GithubReleaseCandidate BestGithubRelease(const std::string& json) {
+    const std::regex tagPattern(
+        R"(\"tag_name\"\s*:\s*\"([^\"]+)\")");
+    const std::regex urlPattern(
+        R"(\"browser_download_url\"\s*:\s*\"([^\"]*setup\.exe)\")",
+        std::regex_constants::icase);
+    std::vector<std::pair<std::size_t, std::wstring>> tags;
+    for (std::sregex_iterator it(json.begin(), json.end(), tagPattern),
+        end; it != end; ++it) {
+        const auto text = (*it)[1].str();
+        tags.emplace_back(static_cast<std::size_t>(it->position(0)),
+            std::wstring(text.begin(), text.end()));
+    }
+    GithubReleaseCandidate best;
+    for (std::size_t index = 0; index < tags.size(); ++index) {
+        auto tag = tags[index].second;
+        if (!tag.empty() && tag.front() == L'v') tag.erase(tag.begin());
+        const auto start = tags[index].first;
+        const auto stop = index + 1 < tags.size() ? tags[index + 1].first : json.size();
+        const auto slice = json.substr(start, stop - start);
+        std::smatch urlMatch;
+        if (!std::regex_search(slice, urlMatch, urlPattern) || urlMatch.size() < 2) {
+            continue;
+        }
+        const auto urlText = urlMatch[1].str();
+        std::wstring url(urlText.begin(), urlText.end());
+        if (tag.empty() || url.empty()) continue;
+        if (best.tag.empty() || CompareDestoVersions(tag, best.tag) > 0) {
+            best.tag = std::move(tag);
+            best.installerUrl = std::move(url);
+        }
+    }
+    return best;
+}
+
 std::wstring MirrorUrl(std::wstring_view url) {
     return L"https://github.chenc.dev/" + std::wstring(url);
 }
@@ -2629,7 +2669,7 @@ struct WindowsSettingsHost::Impl {
                     std::optional<std::string> metadata;
                     if (developmentChannel) {
                         metadata = DownloadUpdateMetadata(L"api.github.com",
-                            L"/repos/LectWolf/Desto/releases?per_page=1");
+                            L"/repos/LectWolf/Desto/releases?per_page=20");
                     } else {
                         metadata = DownloadUpdateMetadata(L"github.com",
                             L"/LectWolf/Desto/releases/latest/download/release-manifest.json");
@@ -2637,7 +2677,7 @@ struct WindowsSettingsHost::Impl {
                     if (!metadata) {
                         metadata = DownloadUpdateMetadata(L"github.chenc.dev",
                             developmentChannel
-                                ? L"/https://api.github.com/repos/LectWolf/Desto/releases?per_page=1"
+                                ? L"/https://api.github.com/repos/LectWolf/Desto/releases?per_page=20"
                                 : L"/https://github.com/LectWolf/Desto/releases/latest/download/release-manifest.json");
                     }
                     if (!metadata) {
@@ -2646,11 +2686,14 @@ struct WindowsSettingsHost::Impl {
                         return;
                     }
                     payload->ok = true;
-                    auto tag = JsonStringField(*metadata,
-                        developmentChannel ? "tag_name" : "version");
-                    std::wstring download = developmentChannel
-                        ? JsonInstallerUrl(*metadata) : std::wstring{};
-                    if (!developmentChannel) {
+                    auto tag = std::wstring{};
+                    std::wstring download;
+                    if (developmentChannel) {
+                        const auto release = BestGithubRelease(*metadata);
+                        tag = release.tag;
+                        download = release.installerUrl;
+                    } else {
+                        tag = JsonStringField(*metadata, "version");
                         const auto installerName = JsonInstallerName(*metadata);
                         if (!installerName.empty()) {
                             download = L"https://github.com/LectWolf/Desto/releases/latest/download/"

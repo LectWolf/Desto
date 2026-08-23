@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(Desto VERSION 0.2.3 LANGUAGES CXX)
+project(Desto VERSION 0.2.4 LANGUAGES CXX)
 
-set(DESTO_BUILD_NUMBER "1" CACHE STRING
+set(DESTO_BUILD_NUMBER "0" CACHE STRING
     "Monotonically increasing internal build number")
 if(NOT DESTO_BUILD_NUMBER MATCHES "^[0-9]+$")
     message(FATAL_ERROR "DESTO_BUILD_NUMBER must be a non-negative integer")
